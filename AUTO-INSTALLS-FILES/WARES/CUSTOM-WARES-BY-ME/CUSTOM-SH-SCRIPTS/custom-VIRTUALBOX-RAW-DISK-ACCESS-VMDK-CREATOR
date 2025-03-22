@@ -1,0 +1,257 @@
+#!/bin/bash
+
+#check dependencies and install dependencies if not already installed
+if ! apt list --installed "virtualbox-7*" 2>/dev/null | grep -w "virtualbox-7.." >/dev/null; then # the precursor condition to begin checking and installing dependencies .for a single package/dependeny
+    #if virtualbox-7XX isn't installed, check if older version of virtualbox is available, if not, install virtualbox-7XX
+    if ! apt list --installed "virtualbox" 2>/dev/null | grep -w "virtualbox" >/dev/null; then
+
+        sudo apt update
+        sleep 1
+        sudo mkdir -p /etc/apt/keyrings
+        wget -q -O- https://www.virtualbox.org/download/oracle_vbox_2016.asc | sudo gpg --dearmor --yes --output /etc/apt/keyrings/oracle-virtualbox-2016.gpg
+
+        cat <<EOF | sudo tee /etc/apt/sources.list.d/virtualbox.sources
+Types: deb
+URIs: https://download.virtualbox.org/virtualbox/debian
+Suites: $(cat /etc/os-release | grep UBUNTU_CODENAME= | cut -d = -f2 | tr -d '[:space:]')
+Components: contrib
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/oracle-virtualbox-2016.gpg
+
+EOF
+        sudo apt update
+        sudo apt install -y virtualbox-7.1
+
+        # packages and options to unattended install virtualbox-ext-pack
+        sudo apt install -y debconf-utils
+        echo virtualbox-ext-pack virtualbox-ext-pack/license select true | sudo debconf-set-selections
+        _TEMP_WORKER_DIR=$(mktemp -d -t CUSTOM_TMP_INSTALL_VIRTUALBOX_WORKER_DIR_XXXXX)
+        #wget -qO- :q quiet:  -O- Output the content directly to the terminal (stdout)
+        LATEST_VERSION_EXT_PACK=$(wget -qO- https://www.virtualbox.org/wiki/Downloads | grep -o 'Oracle_VirtualBox_Extension_Pack-[0-9]\+\.[0-9]\+\.[0-9]\+' | sed 's/Oracle_VirtualBox_Extension_Pack-\(.*\)/\1/' | tr -d '[:space:]')
+        wget https://download.virtualbox.org/virtualbox/${LATEST_VERSION_EXT_PACK}/Oracle_VirtualBox_Extension_Pack-${LATEST_VERSION_EXT_PACK}.vbox-extpack -P "$_TEMP_WORKER_DIR"
+        #echo virtualbox-ext-pack/license	select	true | sudo debconf-set-selections
+        yes | sudo VBoxManage extpack install ${_TEMP_WORKER_DIR}/*.vbox-extpack
+        sudo rm -rf $_TEMP_WORKER_DIR
+
+        sudo usermod -aG vboxusers $USER
+        # enable VIRTUALBOX raw disk access without root
+        sudo usermod -aG disk $USER
+
+    fi
+
+fi
+
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+
+FUN_VIRTUALBOX_RAW_DISK_PARTITIONS() {
+    whiptail --title " VIRTUALBOX RAW DISK ACCESS .VMDK FILE CREATOR [PARTITIONS] " --msgbox " VIRTUALBOX RAW DISK ACCESS .VMDK FILE CREATOR [PARTITIONS]" 0 0
+
+    FILENAME=$(whiptail --title "INPUT Filename Of .VMDK file to Create: (No spaces)" --inputbox "INPUT Filename Of .VMDK file to Create: " 0 0 3>&1 1>&2 2>&3)
+
+    if [ -z $FILENAME ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    FILENAME_FINAL=$(echo $FILENAME | tr -d '[:space:]')
+
+    #OBTAIN ROOT BLOCK DEVICE (AKA THE ENTIRE STORAE DRIVE)
+    ROOT_BLOCK_DEVICES_LIST_NUMBERED=$(lsblk | grep -o -w "nvme[0-9]n[0-9]\|nvme[0-9]n[0-9][0-9]\|sd[a-z]" | sed s+^+/dev/+g | cat -n)
+    ROOT_BLOCK_DEVICES_LIST_COUNT=$(lsblk | grep -o -w "nvme[0-9]n[0-9]\|nvme[0-9]n[0-9][0-9]\|sd[a-z]" | wc -l)
+
+    ROOT_BLOCK_DEVICE_CHOICE=$(whiptail --scrolltext --title "Select [ROOT BLOCK DEVICE] (aka.the entire storage drive)" --menu "Select [ROOT BLOCK DEVICE] (aka.the entire storage drive)" 0 0 $ROOT_BLOCK_DEVICES_LIST_COUNT $ROOT_BLOCK_DEVICES_LIST_NUMBERED 3>&1 1>&2 2>&3)
+
+    if [ -z $ROOT_BLOCK_DEVICE_CHOICE ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    ROOT_BLOCK_DEVICE_DEV=$(lsblk -n | grep -o -w "nvme[0-9]n[0-9]\|nvme[0-9]n[0-9][0-9]\|sd[a-z]" | sed s+^+/dev/+g | cat -n | grep -w $ROOT_BLOCK_DEVICE_CHOICE | sed s/$ROOT_BLOCK_DEVICE_CHOICE//1 | tr -d '[:space:]')
+
+    #OBTAIN PARTITIONS TO USE FOR THE RAW DISK ACCESS .VMDK FILE
+    PARTITIONS=$(whiptail --scrolltext --checklist "SELECT PARTITONS" 0 0 $(lsblk $ROOT_BLOCK_DEVICE_DEV | wc -l) $(lsblk -f -o NAME,FSTYPE,LABEL,FSVER $ROOT_BLOCK_DEVICE_DEV | grep "nvme[0-9]n[0-9][a-z][0-9]\|nvme[0-9]n[0-9][a-z][0-9][0-9]\|sd[a-z][0-9]\||sd[a-z][0-9][0-9]" | sed s/├─//g | sed s/└─//g | sed 's/^/"/g' | sed 's/$/"/g' | sed 's/ /⬞/g' | sed 's/$/ off/g' | cat -n) 3>&1 1>&2 2>&3)
+
+    if [ -z "$PARTITIONS" ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+    SELECTED_PARTITIONS_RESULT_FINAL=$(echo $PARTITIONS | sed 's/"//g' | sed 's/ /,/g' | tr -d '[:space:]')
+
+    #CHECK VERSION OF VIRTUALBOX IN USE
+    VBOX_VERSION=$(vboxmanage --version | grep -o "^." | tr -d '[:space:]')
+
+    # sanity check & execute code based on which virtualbox version is in use
+
+    if [ "$VBOX_VERSION" -eq "6" ]; then
+        FUN_VBOXMANAGE_COMMAND_FOR_VERSION_6XX_PARTITIONS
+    fi
+
+    if [ "$VBOX_VERSION" -ge "7" ]; then
+        FUN_VBOXMANAGE_COMMAND_FOR_VERSION_7XPLUS_PARTITIONS
+    fi
+
+} #END OF FUNCTION - RAW DISK PARTITIONS - END OF FUNCTION
+
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+
+FUN_VBOXMANAGE_COMMAND_FOR_VERSION_6XX_PARTITIONS() {
+    if whiptail --title "Will Now Run :: " --yesno "VBoxManage internalcommands createrawvmdk -filename ${FILENAME_FINAL}.vmdk -rawdisk ${ROOT_BLOCK_DEVICE_DEV} -partitions ${SELECTED_PARTITIONS_RESULT_FINAL}" 0 0 3>&1 1>&2 2>&3; then
+
+        VBoxManage internalcommands createrawvmdk -filename $FILENAME_FINAL.vmdk -rawdisk $ROOT_BLOCK_DEVICE_DEV -partitions $SELECTED_PARTITIONS_RESULT_FINAL
+        sudo chmod 777 $FILENAME_FINAL.vmdk
+        sudo chmod 777 $FILENAME_FINAL-pt.vmdk
+
+    else
+        echo "USER ABORTED. Exiting"
+    fi
+}
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+FUN_VBOXMANAGE_COMMAND_FOR_VERSION_7XPLUS_PARTITIONS() {
+
+    if whiptail --title "Will Now Run :: " --yesno "VBoxManage createmedium disk --filename $FILENAME_FINAL.vmdk --format=VMDK --variant RawDisk --property RawDrive=$ROOT_BLOCK_DEVICE_DEV --property Partitions=$SELECTED_PARTITIONS_RESULT_FINAL" 0 0 3>&1 1>&2 2>&3; then
+
+        VBoxManage createmedium disk --filename $FILENAME_FINAL.vmdk --format=VMDK --variant RawDisk --property RawDrive=$ROOT_BLOCK_DEVICE_DEV --property Partitions=$SELECTED_PARTITIONS_RESULT_FINAL
+        sudo chmod 777 $FILENAME_FINAL.vmdk
+        sudo chmod 777 $FILENAME_FINAL-pt.vmdk
+
+    else
+        echo "USER ABORTED. Exiting"
+
+    fi
+
+}
+
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+
+FUN_VIRTUALBOX_RAW_DISK_ENTIRE_DRIVE() {
+
+    whiptail --title " VIRTUALBOX RAW DISK ACCESS .VMDK CREATOR [ENTIRE ROOT DEVICE] aka Whole Disk" --msgbox " VIRTUALBOX RAW DISK ACCESS .VMDK CREATOR [ENTIRE ROOT DEVICE] aka Whole Disk" 0 0
+
+    FILENAME=$(whiptail --title "INPUT Filename Of .VMDK file to Create: (No spaces)" --inputbox "INPUT Filename Of .VMDK file to Create: " 0 0 3>&1 1>&2 2>&3)
+
+    if [ -z $FILENAME ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    FILENAME_FINAL=$(echo $FILENAME | tr -d '[:space:]')
+
+    #OBTAIN ROOT BLOCK DEVICE (AKA THE ENTIRE STORAE DRIVE)
+    ROOT_BLOCK_DEVICES_LIST_NUMBERED=$(lsblk | grep -o -w "nvme[0-9]n[0-9]\|nvme[0-9]n[0-9][0-9]\|sd[a-z]" | sed s+^+/dev/+g | cat -n)
+    ROOT_BLOCK_DEVICES_LIST_COUNT=$(lsblk | grep -o -w "nvme[0-9]n[0-9]\|nvme[0-9]n[0-9][0-9]\|sd[a-z]" | wc -l)
+
+    ROOT_BLOCK_DEVICE_CHOICE=$(whiptail --scrolltext --title "Select [ROOT BLOCK DEVICE] (aka.the entire storage drive)" --menu "Select [ROOT BLOCK DEVICE] (aka.the entire storage drive)" 0 0 $ROOT_BLOCK_DEVICES_LIST_COUNT $ROOT_BLOCK_DEVICES_LIST_NUMBERED 3>&1 1>&2 2>&3)
+
+    if [ -z $ROOT_BLOCK_DEVICE_CHOICE ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    ROOT_BLOCK_DEVICE_DEV=$(lsblk | grep -o -w "nvme[0-9]n[0-9]\|nvme[0-9]n[0-9][0-9]\|sd[a-z]" | sed s+^+/dev/+g | cat -n | grep -w $ROOT_BLOCK_DEVICE_CHOICE | sed s/$ROOT_BLOCK_DEVICE_CHOICE//g | tr -d '[:space:]')
+
+    #CHECK VERSION OF VIRTUALBOX IN USE
+    VBOX_VERSION=$(vboxmanage --version | grep -o "^." | tr -d '[:space:]')
+
+    # sanity check & execute code based on which virtualbox version is in use
+
+    if [ "$VBOX_VERSION" -eq "6" ]; then
+        FUN_VBOXMANAGE_COMMAND_FOR_VERSION_6XX_WHOLE_DISK
+    fi
+
+    if [ "$VBOX_VERSION" -ge "7" ]; then
+        FUN_VBOXMANAGE_COMMAND_FOR_VERSION_7XPLUS_WHOLE_DISK
+    fi
+
+} #END of function - FUN_VIRTUALBOX_RAW_DISK_ENTIRE_DRIVE - END
+
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+FUN_VBOXMANAGE_COMMAND_FOR_VERSION_6XX_WHOLE_DISK() {
+    if whiptail --title "Will Now Run :: " --yesno "VBoxManage internalcommands createrawvmdk -filename ${FILENAME_FINAL}.vmdk -rawdisk ${ROOT_BLOCK_DEVICE_DEV}" 0 0 3>&1 1>&2 2>&3; then
+
+        VBoxManage internalcommands createrawvmdk -filename "${FILENAME_FINAL}".vmdk -rawdisk "${ROOT_BLOCK_DEVICE_DEV}"
+        sudo chmod 777 $FILENAME_FINAL.vmdk
+        # sudo chmod 777 $FILENAME_FINAL-pt.vmdk
+
+    else
+        echo "USER ABORTED. Exiting"
+    fi
+}
+
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+FUN_VBOXMANAGE_COMMAND_FOR_VERSION_7XPLUS_WHOLE_DISK() {
+
+    if whiptail --title "Will Now Run :: " --yesno "VBoxManage createmedium disk --filename $FILENAME_FINAL.vmdk --format=VMDK --variant RawDisk --property RawDrive=$ROOT_BLOCK_DEVICE_DEV" 0 0 3>&1 1>&2 2>&3; then
+
+        VBoxManage createmedium disk --filename $FILENAME_FINAL.vmdk --format=VMDK --variant RawDisk --property RawDrive=$ROOT_BLOCK_DEVICE_DEV
+        sudo chmod 777 $FILENAME_FINAL.vmdk
+        # sudo chmod 777 $FILENAME_FINAL-pt.vmdk
+
+    else
+        echo "USER ABORTED. Exiting"
+
+    fi
+
+}
+
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...#####$$$$$$$$$$$@$@$@$@$@$@$...@##@##$#$%^&*()*$...
+
+MAIN_CHOICE=$(whiptail --title "VIRTUALBOX RAW DISK ACCESS VMDK CREATOR" --menu "Select Option:" 0 0 2 1 "Raw [PARTITIONS]" 2 "Raw [ENTIRE ROOT DISK]" 3>&1 1>&2 2>&3)
+
+if [ "$MAIN_CHOICE" == 1 ]; then
+
+    FUN_VIRTUALBOX_RAW_DISK_PARTITIONS
+
+elif [ "$MAIN_CHOICE" == 2 ]; then
+
+    FUN_VIRTUALBOX_RAW_DISK_ENTIRE_DRIVE
+
+fi

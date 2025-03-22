@@ -1,0 +1,442 @@
+#!/bin/bash
+
+# Checks for package/dependencies installed status and installs them if not already installed
+for PACKAGE in samba qrencode fim zbar-tools; do # the dependencies needed
+  if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
+    echo "dependency $PACKAGE is NOT installed .. installing"
+    sudo apt update
+    sudo apt install -y $PACKAGE
+
+    if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then #exits if package is not installed even after installation code was executed...something went wrong
+      echo "Posibly didn't install dependency $PACKAGE .. exiting"
+      exit
+    fi
+  fi
+done
+
+#NOTE !!! IMPORTANT!!! use head -c when reading from /dev/random or /dev/urandom since cat will cause an out of memory error !!!!!!! .... diagnosing this issue took me an entire day to figure out
+
+# following code generates random string
+# date +%s | sha256sum | base64 | head -c 32 ; echo
+
+export NEWT_COLORS='
+  textbox=white,red
+  button=yellow,black
+  shadow=,green
+'
+
+: <<COMMENT
+
+[Private-Share-Example]
+comment = private share
+path = /data/private/
+browseable = yes
+guest ok = no
+writable = yes
+valid users = @samba 
+create mask = 0664
+force create mode = 0664
+directory mask = 0775
+force directory mode = 0775
+public = yes
+read only = no
+
+COMMENT
+
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+
+function CREATE_SECURE_SAMBA_SHARE_INSTANCE {
+
+  ### OPERATIONS DEFINITIONS CODE BLOCK .......START
+  RANDOM_NUMBA_FINAL=$(date +%s%N | sha256sum | base64 | tr -dc '[:upper:]' | head -c 12)
+
+  ### OPERATIONS DEFINITIONS CODE BLOCK .......END
+
+  INPUT_DIR_PATH=$(whiptail --backtitle "INPUT [DIRECTORY_TO_SHARE] PATH  :: ! Uses Current Directory By Default !" \
+    --title "NETWORKING SAMBA SHARE FILES" --inputbox "INPUT [DIRECTORY_TO_SHARE] PATH  " 0 0 $PWD 3>&1 1>&2 2>&3)
+
+  INPUT_PASSWORD=$(whiptail --backtitle "INPUT [Password To Use For SMB]  :: !  !" \
+    --title "INPUT [Password To Use For SMB]" --inputbox "INPUT [Password For SMB]  " 0 0 3>&1 1>&2 2>&3)
+  if [ -z $INPUT_PASSWORD ]; then
+    COUNT=0
+    while [ -z $INPUT_PASSWORD ] && [ $COUNT -le 4 ]; do
+      COUNT=$(($COUNT + 1))
+      if [ $COUNT -eq 4 ]; then
+        echo "User Exited ... nothing done"
+        exit
+      fi
+      INPUT_PASSWORD=$(whiptail --backtitle "ERROR !! EMPTY !! INPUT [Password For SMB]  :: ! !" \
+        --title "!! EMPTY !! try: $COUNT/3 " --inputbox "INPUT [ Password For SMB ] " 0 0 3>&1 1>&2 2>&3)
+    done
+  fi
+
+  RETYPE_PASSWORD=$(whiptail --backtitle "(RE)TYPE [Password To Use For SMB]  :: !  !" \
+    --title "(RE)TYPE [Password For SMB]" --inputbox "(RE)TYPE [Password For SMB]  " 0 0 3>&1 1>&2 2>&3)
+  if [ -z $RETYPE_PASSWORD ]; then
+    COUNT=0
+    while [ -z $RETYPE_PASSWORD ] && [ $COUNT -le 4 ]; do
+      COUNT=$(($COUNT + 1))
+      if [ $COUNT -eq 4 ]; then
+        echo "User Exited ... nothing done"
+        exit
+      fi
+      RETYPE_PASSWORD=$(whiptail --backtitle "ERROR !! EMPTY !! (RE)TYPE [ Password For SMB ]  ::try: $COUNT/3 ! !" \
+        --title "!! EMPTY !! (RE)TYPE [ Password For SMB ] :: try: $COUNT/3" --inputbox "(RE)TYPE [ Password For SMB ]  try: $COUNT/3" 0 0 3>&1 1>&2 2>&3)
+    done
+  fi
+
+  # emptyness sanity check
+  if [ -z $INPUT_DIR_PATH ]; then
+    echo "User Exited ... nothing done"
+    exit
+  elif [ -z $INPUT_PASSWORD ]; then
+    echo "User Exited ... nothing done"
+    exit
+  elif [ -z $RETYPE_PASSWORD ]; then
+    echo "User Exited ... nothing done"
+    exit
+  fi
+
+  if [ $INPUT_PASSWORD != $RETYPE_PASSWORD ]; then
+    COUNT=0
+    while [ $INPUT_PASSWORD != $RETYPE_PASSWORD ] && [ $COUNT -le 4 ]; do
+      COUNT=$(($COUNT + 1))
+      if [ $COUNT -eq 4 ]; then
+        echo "User Exited ... nothing done"
+        exit
+      fi
+      INPUT_PASSWORD=$(whiptail --backtitle "!!@@!!ERRORR passwords are different [Input Password] :: try: $COUNT/3 ! !" \
+        --title "!!!!!{Passwords are different} [Input Password]  !!!!! try: $COUNT/3 " --inputbox " INPUT [ Password For SMB ] " 0 0 3>&1 1>&2 2>&3)
+      RETYPE_PASSWORD=$(whiptail --backtitle "(RE)TYPE [Password To Use For SMB] " \
+        --title "(RE)TYPE [Password]" --inputbox " (RE)TYPE [Password] " 0 0 3>&1 1>&2 2>&3)
+
+    done
+
+  fi
+
+  BASENAME_INPUT_DIR_PATH=$(basename $INPUT_DIR_PATH)
+
+  cat <<EOF | sudo tee -a /etc/samba/smb.conf
+
+[sambashare-$RANDOM_NUMBA_FINAL~~~~~$BASENAME_INPUT_DIR_PATH]
+comment = $INPUT_DIR_PATH
+path = $INPUT_DIR_PATH
+browseable = yes
+guest ok = no
+writable = yes
+public = yes
+read only = no
+valid users = @$USER
+
+EOF
+
+  sudo smbpasswd -a $USER <<EOF
+$INPUT_PASSWORD
+$INPUT_PASSWORD
+EOF
+
+  sudo ufw allow samba
+  sudo systemctl restart smbd
+
+  # CREATE INFO FILES FOR THE SAMBA SHARE INSTANCE
+  sudo mkdir -p /etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL~~~~~$BASENAME_INPUT_DIR_PATH
+
+  cat <<EOF | sudo qrencode -o "/etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL~~~~~$BASENAME_INPUT_DIR_PATH/qrcode.png" -s 40
+
+SHARE NAME:
+sambashare-$RANDOM_NUMBA_FINAL~~~~~$BASENAME_INPUT_DIR_PATH
+
+PATH:
+$INPUT_DIR_PATH
+
+USERNAME:
+$USER
+
+PASSWORD:
+$INPUT_PASSWORD
+
+EOF
+
+  fim /etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL~~~~~$BASENAME_INPUT_DIR_PATH/qrcode.png &
+  disown || exit
+  zbarimg /etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL~~~~~$BASENAME_INPUT_DIR_PATH/qrcode.png
+
+  whiptail --title "New Created Samba Share INFO" --msgbox "$(zbarimg /etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL~~~~~$BASENAME_INPUT_DIR_PATH/qrcode.png)" 0 0
+
+}
+
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+function CREATE_CUSTOM_SECURE_SAMBA_SHARE_INSTANCE {
+
+  ### OPERATIONS DEFINITIONS CODE BLOCK .......START
+  RANDOM_NUMBA_FINAL=$(date +%s%N | sha256sum | base64 | tr -dc '[:upper:]' | head -c 12)
+  RAONDOMIZED_UPPER_STRING_BY_DATE_NANOSECS=$(date +%s%N | sha256sum | base64 | tr -dc '[:upper:]' | head -c 6)
+  RAONDOMIZED_ALNUM_PASSWD_BY_DATE_NANOSECS=$(date +%s%N | sha256sum | base64 | tr -dc '[:alnum:]' | head -c 8)
+
+  ### OPERATIONS DEFINITIONS CODE BLOCK .......END
+
+  INPUT_DIR_PATH=$(whiptail --backtitle "INPUT [DIRECTORY_TO_SHARE] PATH  :: ! Uses Current Directory By Default !" \
+    --title "NETWORKING SAMBA SHARE FILES" --inputbox "INPUT [DIRECTORY_TO_SHARE] PATH  " 0 0 $PWD 3>&1 1>&2 2>&3)
+
+  INPUT_USERNAME=$(whiptail --backtitle "INPUT [Custom Username] :: ! If Empty Will Use/Generate Random Username !" \
+    --title "NETWORKING SAMBA SHARE FILES" --inputbox "INPUT [Custom Username] " 0 0 $RAONDOMIZED_UPPER_STRING_BY_DATE_NANOSECS 3>&1 1>&2 2>&3)
+
+  INPUT_PASSWORD=$(whiptail --backtitle "INPUT [Password To Use For SMB]  :: !  !" \
+    --title "INPUT [Password To Use For SMB]" --inputbox "INPUT [Password For SMB]" 0 0 $RAONDOMIZED_ALNUM_PASSWD_BY_DATE_NANOSECS 3>&1 1>&2 2>&3)
+  if [ -z $INPUT_PASSWORD ]; then
+    COUNT=0
+    while [ -z $INPUT_PASSWORD ] && [ $COUNT -le 4 ]; do
+      COUNT=$(($COUNT + 1))
+      if [ $COUNT -eq 4 ]; then
+        echo "User Exited ... nothing done"
+        exit
+      fi
+      INPUT_PASSWORD=$(whiptail --backtitle "ERROR !! EMPTY !! INPUT [Password For SMB]  :: ! !" \
+        --title "!! EMPTY !! try: $COUNT/3 " --inputbox "INPUT [ Password For SMB ] " 0 0 3>&1 1>&2 2>&3)
+    done
+  fi
+
+  RETYPE_PASSWORD=$(whiptail --backtitle "(RE)TYPE [Password To Use For SMB]  :: !  !" \
+    --title "(RE)TYPE [Password For SMB]" --inputbox "(RE)TYPE [Password For SMB]" 0 0 $INPUT_PASSWORD 3>&1 1>&2 2>&3)
+  if [ -z $RETYPE_PASSWORD ]; then
+    COUNT=0
+    while [ -z $RETYPE_PASSWORD ] && [ $COUNT -le 4 ]; do
+      COUNT=$(($COUNT + 1))
+      if [ $COUNT -eq 4 ]; then
+        echo "User Exited ... nothing done"
+        exit
+      fi
+      RETYPE_PASSWORD=$(whiptail --backtitle "ERROR !! EMPTY !! (RE)TYPE [ Password For SMB ]  ::try: $COUNT/3 ! !" \
+        --title "!! EMPTY !! (RE)TYPE [ Password For SMB ] :: try: $COUNT/3" --inputbox "(RE)TYPE [ Password For SMB ]  try: $COUNT/3" 0 0 3>&1 1>&2 2>&3)
+    done
+  fi
+
+  # emptyness sanity check
+  if [ -z $INPUT_DIR_PATH ]; then
+    echo "User Exited ... nothing done"
+    exit
+  elif [ -z $INPUT_PASSWORD ]; then
+    echo "User Exited ... nothing done"
+    exit
+  elif [ -z $RETYPE_PASSWORD ]; then
+    echo "User Exited ... nothing done"
+    exit
+  fi
+
+  if [ $INPUT_PASSWORD != $RETYPE_PASSWORD ]; then
+    COUNT=0
+    while [ $INPUT_PASSWORD != $RETYPE_PASSWORD ] && [ $COUNT -le 4 ]; do
+      COUNT=$(($COUNT + 1))
+      if [ $COUNT -eq 4 ]; then
+        echo "User Exited ... nothing done"
+        exit
+      fi
+      INPUT_PASSWORD=$(whiptail --backtitle "!!@@!!ERRORR passwords are different [Input Password] :: try: $COUNT/3 ! !" \
+        --title "!!!!!{Passwords are different} [Input Password]  !!!!! try: $COUNT/3 " --inputbox " INPUT [ Password For SMB ] " 0 0 3>&1 1>&2 2>&3)
+      RETYPE_PASSWORD=$(whiptail --backtitle "(RE)TYPE [Password To Use For SMB] " \
+        --title "(RE)TYPE [Password]" --inputbox " (RE)TYPE [Password] " 0 0 3>&1 1>&2 2>&3)
+
+    done
+
+  fi
+
+  BASENAME_INPUT_DIR_PATH=$(basename $INPUT_DIR_PATH)
+
+  cat <<EOF | sudo tee -a /etc/samba/smb.conf
+
+[sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH]
+comment = $INPUT_DIR_PATH
+path = $INPUT_DIR_PATH
+browseable = yes
+guest ok = no
+writable = yes
+public = yes
+read only = no
+valid users = @$INPUT_USERNAME
+
+EOF
+
+  sudo useradd $INPUT_USERNAME
+  sudo setfacl -R -m "u:$INPUT_USERNAME:rwx" $INPUT_DIR_PATH
+
+  sudo smbpasswd -a $INPUT_USERNAME <<EOF
+$INPUT_PASSWORD
+$INPUT_PASSWORD
+EOF
+  sudo ufw allow samba
+  sudo systemctl restart smbd
+
+  # CREATE INFO FILES FOR THE SAMBA SHARE INSTANCE
+  sudo mkdir -p /etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH
+
+  cat <<EOF | sudo qrencode -o "/etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH/qrcode.png" -s 40
+
+SHARE NAME:
+sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH
+
+PATH:
+$INPUT_DIR_PATH
+
+USERNAME:
+$INPUT_USERNAME
+
+PASSWORD:
+$INPUT_PASSWORD
+
+EOF
+
+  fim /etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH/qrcode.png &
+  disown || exit
+  zbarimg /etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH/qrcode.png
+
+  whiptail --title "New Created Samba Share INFO" --msgbox "$(zbarimg /etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH/qrcode.png)" 0 0
+
+}
+
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+
+function SHOW_SAMBA_SHARE_INSTANCES {
+
+  #count the number of items or lines : wc -l command used to find line, word, and character counts
+  SAMBA_SHARE_INSTANCES_COUNT=$(cat /etc/samba/smb.conf | grep sambashare-* | wc -l)
+
+  # numbers the lines in a file , -s option designate a seperator between the line number and the begining of line text
+  SAMBA_SHARED_INSTANCES_NUMBERED=$(cat /etc/samba/smb.conf | grep sambashare-* | cat -n)
+
+  if ! cat /etc/samba/smb.conf | grep sambashare-*; then
+    tput setab 28
+    tput setaf 15
+    tput bold
+    echo -e "No Available (Custom) Samba Share Instances \n Nothing To Do here..... Exiting \n Exiting  :-}"
+    exit
+  fi
+
+  SHOW_SAMBA_SHARE_INSTANCE_SELECTION=$(whiptail --title "Available SambaShare Instances" --menu "Available SambaShare Instances" 0 0 $SAMBA_SHARE_INSTANCES_COUNT $SAMBA_SHARED_INSTANCES_NUMBERED 3>&1 1>&2 2>&3)
+
+  if [ -z $SHOW_SAMBA_SHARE_INSTANCE_SELECTION ]; then
+    exit
+  fi
+
+  #cat -n option enumerates lines in file or its output, grep -w will look for only an exact match
+  NO_WHITESPACES_RESULT=$(cat /etc/samba/smb.conf | grep -w sambashare-* | cat -n | grep -w $SHOW_SAMBA_SHARE_INSTANCE_SELECTION | sed s/$SHOW_SAMBA_SHARE_INSTANCE_SELECTION//1 | tr -d '[:space:]')
+
+  #remove special caracters "["  and "]"
+  NO_SPECIAL_CHAR_CAT=$(echo $NO_WHITESPACES_RESULT | sed 's/\[//g' | sed 's/\]//g' | head -c 256)
+
+  fim /etc/samba/SHARE-INSTANCES-INFO-FILES/$NO_SPECIAL_CHAR_CAT/qrcode.png &
+  disown || exit
+  zbarimg /etc/samba/SHARE-INSTANCES-INFO-FILES/$NO_SPECIAL_CHAR_CAT/qrcode.png
+
+  whiptail --title "New Created Samba Share INFO" --msgbox "$(zbarimg /etc/samba/SHARE-INSTANCES-INFO-FILES/$NO_SPECIAL_CHAR_CAT/qrcode.png)" 0 0
+
+}
+
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+
+function DELETE_SAMBA_SHARE_INSTANCE {
+
+  #count the number of items or lines : wc -l command used to find line, word, and character counts
+  SAMBA_SHARE_INSTANCES_COUNT=$(cat /etc/samba/smb.conf | grep sambashare-* | wc -l)
+
+  # numbers the lines in a file , -s option designate a seperator between the line number and the begining of line text
+  SAMBA_SHARED_INSTANCES_NUMBERED=$(cat /etc/samba/smb.conf | grep sambashare-* | cat -n)
+
+  if ! cat /etc/samba/smb.conf | grep sambashare-*; then
+    tput setab 28
+    tput setaf 15
+    tput bold
+    echo -e "No Available (Custom) Samba Share Instances \n Nothing To Do here..... Exiting \n Exiting  :-}"
+    exit
+  fi
+
+  SHOW_SAMBA_SHARE_INSTANCE_SELECTION=$(whiptail --title "Available SambaShare Instances" --menu "Available SambaShare Instances" 0 0 $SAMBA_SHARE_INSTANCES_COUNT $SAMBA_SHARED_INSTANCES_NUMBERED 3>&1 1>&2 2>&3)
+
+  if [ -z $SHOW_SAMBA_SHARE_INSTANCE_SELECTION ]; then
+    echo "USER ABORTED"
+    exit
+  fi
+
+  #cat -n option enumerates lines in file or its output, grep -w will look for only an exact match
+  NO_WHITESPACES_RESULT=$(cat /etc/samba/smb.conf | grep -w sambashare-* | cat -n | grep -w $SHOW_SAMBA_SHARE_INSTANCE_SELECTION | sed s/$SHOW_SAMBA_SHARE_INSTANCE_SELECTION//1 | tr -d '[:space:]')
+
+  #remove special caracters "["  and "]"
+  NO_SPECIAL_CHAR_CAT=$(echo $NO_WHITESPACES_RESULT | sed 's/\[//g' | sed 's/\]//g' | head -c 256)
+
+  sudo chmod 777 /etc/samba/smb.conf
+
+  #confirmation ! # #remove the sambashare entry instance from the smb.conf file, to+8 lines after match & check/delete custom random username if the share was created with random user
+  if (whiptail --title "CONFIRMATION [Remove $NO_SPECIAL_CHAR_CAT ] ?? samba share instance " --yesno "Remove? ::   [  $NO_SPECIAL_CHAR_CAT  ]" 0 0 3>&1 1>&2 2>&3); then
+    echo removing $NO_SPECIAL_CHAR_CAT samba share instance
+
+    # DELETE RANDOM-USER FROM SYSTEM - checking for randomusername samba instance & delete random-user from system
+    if echo $NO_SPECIAL_CHAR_CAT | grep -w "CUSTOMUSERNAMEIS"; then
+      # sed {N;N;p} print number of lines after match (N; times...for 3x..N;N;N;p...for 6x {N;N;N;N;N;N;p} etc) (including match pattern)
+      CUSTOM_USERNAME_TO_DEL=$(sed -n "/${NO_SPECIAL_CHAR_CAT}/{N;N;N;N;N;N;N;N;p}" /etc/samba/smb.conf | grep "valid users" | cut -d@ -f2 | tr -d '[:space:]')
+
+      #deletes the random username
+      sudo killall -u "$CUSTOM_USERNAME_TO_DEL"
+      sudo userdel -r "$CUSTOM_USERNAME_TO_DEL"
+      sudo userdel "$CUSTOM_USERNAME_TO_DEL" || sudo userdel -f "$CUSTOM_USERNAME_TO_DEL"
+    fi
+    #remove the sambashare entry instance from the smb.conf file, to+8 lines after match
+    sudo sed -i /"${NO_SPECIAL_CHAR_CAT}"/,+8d /etc/samba/smb.conf
+  else
+    exit # exit program if --yesno selection is no
+  fi
+
+  # #remove the sambashare entry instance from the smb.conf file, to+8 lines after match
+  sudo sed -i /"${NO_SPECIAL_CHAR_CAT}"/,+8d /etc/samba/smb.conf
+
+  # remove the sambashare info files
+  sudo rm -r /etc/samba/SHARE-INSTANCES-INFO-FILES/$NO_SPECIAL_CHAR_CAT
+
+}
+
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+
+MAIN_CHOICE=$(whiptail --backtitle "! Uses Current Directory By Default ! :: INPUT [DIRECTORY_TO_SHARE] PATH" \
+  --title "NETWORKING SAMBA SHARE FILES" --menu "NETWORKING SAMBA SHARE FILES" 0 0 4 \
+  1 "[Create] Secure Samba Share Instance [Password Protected/Default System User]" \
+  2 "[Create] Custom Secure Samba Share Instance [Password Protected/Custom System User]" \
+  3 "[Show] Samba Share Instances" \
+  4 "[! Delete Samba Share Instance !]" 3>&1 1>&2 2>&3)
+
+if [ -z $MAIN_CHOICE ]; then
+  exit
+elif [ $MAIN_CHOICE -eq 1 ]; then
+  CREATE_SECURE_SAMBA_SHARE_INSTANCE
+elif [ $MAIN_CHOICE -eq 2 ]; then
+  CREATE_CUSTOM_SECURE_SAMBA_SHARE_INSTANCE
+elif [ $MAIN_CHOICE -eq 3 ]; then
+  SHOW_SAMBA_SHARE_INSTANCES
+elif [ $MAIN_CHOICE -eq 4 ]; then
+  DELETE_SAMBA_SHARE_INSTANCE
+fi
+
+unset NEWT_COLORS
+### todooo  list available shared instances...... for option 2 since no guest is easily avaiulable,,, just add custom user  creator / deleter

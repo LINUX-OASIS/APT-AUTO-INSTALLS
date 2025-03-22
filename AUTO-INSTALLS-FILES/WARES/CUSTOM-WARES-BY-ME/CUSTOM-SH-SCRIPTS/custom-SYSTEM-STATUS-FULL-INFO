@@ -1,0 +1,48 @@
+#!/bin/bash
+echo -e "\n\n"
+echo "		SYSTEM STATUS FULL INFO "
+
+DOTTED_SEPERATOR() {
+    echo -e "\n ............................................................................."
+}
+
+echo -e "\n ==============================================================================="
+DOTTED_SEPERATOR #################################################################################
+
+echo " IO-SCHEDULER INFO ::"
+echo ' Running :: grep "" /sys/block/*/queue/scheduler '
+echo ""
+grep "" /sys/block/*/queue/scheduler
+
+DOTTED_SEPERATOR #################################################################################
+
+echo " powerprofilesctl get "
+echo -e "RUNNING :: powerprofilesctl get  \n"
+
+powerprofilesctl get
+
+DOTTED_SEPERATOR #################################################################################
+
+echo " CPU SCALING GOVERNOR INFO ::"
+echo -e " Running :: cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor  \n"
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
+DOTTED_SEPERATOR #################################################################################
+
+echo " CSTATE INFO ::"
+echo "Running :: cat /sys/module/intel_idle/parameters/max_cstate"
+cat /sys/module/intel_idle/parameters/max_cstate
+
+echo "MAX CSTATE :: $(cat /sys/module/intel_idle/parameters/max_cstate)"
+
+DOTTED_SEPERATOR #################################################################################
+
+echo " KERNEL PARAMETERS INFO - VIA /proc/cmdline ::"
+echo "Running :: cat /proc/cmdline"
+cat /proc/cmdline
+
+echo -e "\n ==============================================================================="
+
+
+read -p "Press ENTER to continue..."
+clear

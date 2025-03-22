@@ -1,0 +1,389 @@
+#!/bin/bash
+# BASH program to automate the creation of a VLAN/ Virtual Wifi interface or Virtual Ethernet network interface on Linux
+# Allows simultaneous use of a Wi-Fi adapter in different modes
+
+# Check and install dependencies if not already installed
+for PACKAGE in lshw; do
+    if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+        echo "Dependency $PACKAGE is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y $PACKAGE
+
+        if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+            echo "Possibly didn't install dependency $PACKAGE .. exiting"
+            exit
+        fi
+    fi
+done
+
+# Define custom colors for whiptail dialogs
+NEWT_COLORS='
+root=magenta,lightgray
+border=black,white
+window=white,blue
+shadow=brown,brightblue
+title=white,gray
+button=lightgray,black
+actbutton=black,brightblue
+checkbox=brightblue,green
+actcheckbox=blue,white
+entry=black,brightblue
+label=black,brightmagenta
+listbox=black,white
+actlistbox=white,brightmagenta
+textbox=black,yellow
+acttextbox=magenta,brightmagenta
+helpline=red,lightgray
+roottext=blue,white
+emptyscale=blue,yellow
+fullscale=brightgreen,green
+disentry=magenta,brightmagenta
+compactbutton=lightgray,red
+actsellistbox=white,gray
+sellistbox=lightgray,brown'
+export NEWT_COLORS
+
+# window = is the color of the menu box
+# title = is the color of the title
+# backtitle = is the color of the title bar
+# root = is the color of the text and background in the root menu
+# border = is the color of the border around the menu
+# actlistbox = is the color of the actively selected item ... after selecting and in the ok/cancel option
+# actsellistbox = is the color of the menu items window
+
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+
+# Function to create a virtual network interface
+function FUN_CREATE_VIRTUAL_NIC {
+    sudo lshw -C network 2>/dev/null | grep "logical name:" | sed 's/logical name://g' | sed 's/ //g' | cat -n | sed 's/^[[:space:]]*//g' >/tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp
+    sudo chmod 777 /tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp
+    if [ -f /tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp ] && [ -n "$(cat /tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp)" ]; then
+        echo -e "\033[0;33m ✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮ [VIRTUAL NIC] ✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮ \033[0m"
+        echo -e "\033[1;42m :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: \033[0m"
+    else
+        echo "ERROR: File /tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp does not exist"
+        echo "EITHER SUDO/ADMIN PASSWORD NEVER GIVEN OR ANOTHER ISSUE HAS OCCURRED ... EXITING"
+        echo "::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::"
+        exit
+    fi
+
+    # List all network interfaces available on the system
+    _NIC_MAIN_CHOICE_MENU_COUNT=$(lshw -C network 2>/dev/null | grep -c "logical name:")
+    _NIC_MAIN_CHOICE_MENU_BODY=$(lshw -C network 2>/dev/null | grep "logical name:" | sed 's/logical name://g' | sed 's/ //g' | cat -n | sed 's/^[[:space:]]*//g')
+
+    # Select a network interface to create a VLAN/Virtual Wifi/Ethernet interface
+    _NIC_MAIN_CHOICE_SELECTION1=$(whiptail --fullbuttons --backtitle "Select [PHYSICAL NIC] To Create a Virtual Interface For:" \
+        --title "Select [PHYSICAL NIC] To Create a Virtual Interface UNDER:" \
+        --menu "SELECT [PHY NIC] TO CREATE VIRTUAL INTERFACE UNDER:" 0 0 "$_NIC_MAIN_CHOICE_MENU_COUNT" $_NIC_MAIN_CHOICE_MENU_BODY 3>&1 1>&2 2>&3)
+
+    # Get the logical name of the selected NIC
+    _NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME=$(lshw -C network 2>/dev/null | grep "logical name:" | sed 's/logical name://g' | sed 's/ //g' | cat -n | sed 's/^[[:space:]]*//g' | grep -w "^$_NIC_MAIN_CHOICE_SELECTION1" | sed "s/$_NIC_MAIN_CHOICE_SELECTION1//1" | tr -d '[:space:]')
+
+    # Determine if the selected NIC is a wireless or wired NIC
+    _NIC_MAIN_CHOICE_SELECTION_DEVICE_TYPE_WIRED_OR_WIRELESS_=$(lshw -class network -short 2>/dev/null | grep -w "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" | sed 's/ /@/g' | tr -s @ | cut -d@ -f4 | grep -w "Wireless\|Ethernet" | tr -d '[:space:]')
+
+    # Check if the selected NIC is a wireless NIC
+    if [[ $_NIC_MAIN_CHOICE_SELECTION_DEVICE_TYPE_WIRED_OR_WIRELESS_ == "Wireless" ]] && [[ $(find /sys/class/net/"${_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME}"/ -type d -name wireless) ]]; then
+        # Input new name for Virtual Wireless Interface
+        _NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_=$(whiptail --backtitle "Virtual Wireless Interface" --title "Virtual Wireless Interface" --inputbox "Enter the name of the new Virtual Wireless Interface" 0 0 3>&1 1>&2 2>&3)
+
+        if [ -z "$_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_" ]; then
+            echo "ERROR: The Virtual Wireless Interface Name cannot be empty!!!!"
+            echo "USER HAS ABORTED.... EXITING"
+            exit
+        fi
+
+        _NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_SANITIZED=$(echo "$_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_" | tr -d '[:space:]')
+
+        # Ensure that the Virtual Wireless Interface Name is not already in use
+        if [[ -L "/sys/class/net/$_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_SANITIZED" ]]; then
+            echo "ERROR: The Virtual Wireless Interface Name is already in use!!!!"
+            echo "$_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_SANITIZED"
+            echo "OR POSSIBLY ANOTHER ISSUE HAS OCCURRED.... EXITING"
+            exit
+        fi
+
+        # Create a Virtual Wireless Interface
+
+        # chose a mode for the new interface, managed, monitor, __ap, etc
+        _NEW_VIRTUAL_WIRELESS_INTERFACE_MODE=$(whiptail --backtitle "Virtual Wireless Interface" --title "Virtual Wireless Interface" --menu "Select the mode for the new Virtual Wireless Interface" 0 0 3 \
+            "1" "managed" \
+            "2" "monitor" \
+            "3" "__ap" 3>&1 1>&2 2>&3)
+
+        if [ -z "$_NEW_VIRTUAL_WIRELESS_INTERFACE_MODE" ]; then
+            echo "ERROR: The Virtual Wireless Interface Mode cannot be empty!!!!"
+            echo "USER HAS ABORTED....
+            EXITING"
+            exit
+        fi
+
+        case $_NEW_VIRTUAL_WIRELESS_INTERFACE_MODE in
+        1)
+            _NEW_VIRTUAL_WIRELESS_INTERFACE_MODE="managed"
+            ;;
+        2)
+            _NEW_VIRTUAL_WIRELESS_INTERFACE_MODE="monitor"
+            ;;
+        3)
+            _NEW_VIRTUAL_WIRELESS_INTERFACE_MODE="__ap"
+            ;;
+        *)
+            echo "ERROR: Invalid Choice"
+            echo "USER [ABORTED] OR POSSIBLY ANOTHER ISSUE HAS OCCURRED....EXITING"
+            exit
+            ;;
+        esac
+
+        sudo ip link set "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" down
+        sudo systemctl stop NetworkManager
+        if ! sudo iw dev "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" interface add "$_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_SANITIZED" type $_NEW_VIRTUAL_WIRELESS_INTERFACE_MODE; then
+            echo "ERROR: Failed to add the virtual wireless interface. Please check your permissions."
+            exit
+        fi
+        sleep 0.05
+        sudo ip link set "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" up 2>/dev/null
+        sudo systemctl restart NetworkManager
+
+    # Check if the selected NIC is a wired NIC
+    elif [[ $_NIC_MAIN_CHOICE_SELECTION_DEVICE_TYPE_WIRED_OR_WIRELESS_ == "Ethernet" ]] && [[ ! $(find /sys/class/net/"${_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME}"/ -type d -name wireless) ]]; then
+        # Placeholder for wired NIC
+
+        echo "Feature not yet implemented"
+        echo exiting
+        exit
+
+        # Create a virtual MACVLAN/virtual ethernet network interface under a physical ethernet/wired NIC that behaves like a physical ethernet NIC
+        # _NEW_VIRTUAL_WIRED_INTERFACE_NAME_=$(whiptail --backtitle "Virtual MACVLAN Wired Interface" --title "Virtual MACVLAN Wired Interface" --inputbox "Enter the name of the new Virtual MACVLAN Wired Interface" 0 0 3>&1 1>&2 2>&3)
+
+        # if [ -z "$_NEW_VIRTUAL_WIRED_INTERFACE_NAME_" ]; then
+        #     echo "ERROR: The Virtual Wired Interface Name cannot be empty!!!!"
+        #     echo "USER HAS ABORTED.... EXITING"
+        #     exit
+        # fi
+
+        # _NEW_VIRTUAL_WIRED_INTERFACE_NAME_SANITIZED=$(echo "$_NEW_VIRTUAL_WIRED_INTERFACE_NAME_" | tr -d '[:space:]')
+
+        # # Ensure that the Virtual Wired Interface Name is not already in use
+        # if [[ -L "/sys/class/net/$_NEW_VIRTUAL_WIRED_INTERFACE_NAME_SANITIZED" ]]; then
+        #     echo "ERROR: The Virtual Wired Interface Name is already in use!!!!"
+        #     echo "$_NEW_VIRTUAL_WIRED_INTERFACE_NAME_SANITIZED"
+        #     echo "OR POSSIBLY ANOTHER ISSUE HAS OCCURRED.... EXITING"
+        #     exit
+        # fi
+
+        # Create a Virtual Wired Interface MACVTAP
+        # sudo ip link add "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" link "$_NEW_VIRTUAL_WIRED_INTERFACE_NAME_SANITIZED" type macvlan mode bridge
+        # sudo ip link set "$_NEW_VIRTUAL_WIRED_INTERFACE_NAME_SANITIZED" up
+
+    # If the selected NIC is neither wireless nor wired
+    else
+        echo "ERROR: The Selected NIC is neither a Wireless NIC nor a Wired NIC"
+        echo "OR POSSIBLY ANOTHER ISSUE HAS OCCURRED.... EXITING"
+        exit
+    fi
+}
+
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+
+function FUN_DELETE_VIRTUAL_NIC {
+    lshw -C network 2>/dev/null | grep "logical name:" | sed 's/logical name://g' | sed 's/ //g' | cat -n | sed 's/^[[:space:]]*//g' >/tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp
+
+    if [ -f /tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp ] && [ -n "$(cat /tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp)" ]; then
+        echo -e "\033[0;33m ✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮ [VIRTUAL NIC] ✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮ \033[0m"
+        echo -e "\033[1;42m :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: \033[0m"
+    else
+        echo "ERROR: File /tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp does not exist"
+        echo "EITHER SUDO/ADMIN PASSWORD NEVER GIVEN OR ANOTHER ISSUE HAS OCCURRED ... EXITING"
+        echo "::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::"
+        exit
+    fi
+
+    # List all network interfaces available on the system
+    _NIC_MAIN_CHOICE_MENU_COUNT=$(lshw -C network 2>/dev/null | grep -c "logical name:")
+    _NIC_MAIN_CHOICE_MENU_BODY=$(lshw -C network 2>/dev/null | grep "logical name:" | sed 's/logical name://g' | sed 's/ //g' | cat -n | sed 's/^[[:space:]]*//g')
+
+    # Select a network interface to DELETE a VLAN/Virtual Wifi/Ethernet interface
+    _NIC_MAIN_CHOICE_SELECTION1=$(
+        whiptail --fullbuttons --backtitle "Select [PHYSICAL/VIRTUAL NIC] To Delete:" \
+            --title "Select [PHYSICAL NIC] To Delete a Virtual Interface UNDER:" \
+            --menu "SELECT [PHY NIC] TO DELETE VIRTUAL INTERFACE UNDER:" 0 0 "$_NIC_MAIN_CHOICE_MENU_COUNT" $_NIC_MAIN_CHOICE_MENU_BODY 3>&1 1>&2 2>&3
+    )
+
+    if [ -z "$_NIC_MAIN_CHOICE_SELECTION1" ]; then
+        echo "USER HAS ABORTED.... EXITING"
+        exit
+    fi
+
+    # Get the logical name of the selected NIC
+    _NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME=$(lshw -C network 2>/dev/null | grep "logical name:" | sed 's/logical name://g' | sed 's/ //g' | cat -n | sed 's/^[[:space:]]*//g' | grep -w "^$_NIC_MAIN_CHOICE_SELECTION1" | sed "s/$_NIC_MAIN_CHOICE_SELECTION1//1" | tr -d '[:space:]')
+
+    # sanity check confirmation to delete NIC interface
+    if (whiptail --title "Confirmation" --yesno "Are you sure you want to delete the Virtual Interface: ${_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME}?" 0 0 3>&1 1>&2 2>&3); then
+
+        #check if NIC is wireless or wired
+        _NIC_MAIN_CHOICE_SELECTION_DEVICE_TYPE_WIRED_OR_WIRELESS_=$(lshw -class network -short 2>/dev/null | grep -w "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" | sed 's/ /@/g' | tr -s @ | cut -d@ -f4 | grep -w "Wireless\|Ethernet" | tr -d '[:space:]')
+
+        # TO RUN if the selected NIC is a wireless NIC
+        if [[ $_NIC_MAIN_CHOICE_SELECTION_DEVICE_TYPE_WIRED_OR_WIRELESS_ == "Wireless" ]] && [[ $(find /sys/class/net/"${_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME}"/ -type d -name wireless) ]]; then
+            sudo iw dev "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" del
+
+        # TO RUN if the selected NIC is a wired NIC
+        elif [[ $_NIC_MAIN_CHOICE_SELECTION_DEVICE_TYPE_WIRED_OR_WIRELESS_ == "Ethernet" ]] && [[ ! $(find /sys/class/net/"${_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME}" -type d -name wireless) ]]; then
+            sudo ip link delete "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME"
+        else
+            echo "USER HAS ABORTED.... EXITING"
+            exit
+        fi
+    fi
+}
+
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+
+function FUN_CHANGE_NAME_NIC {
+
+    # List all network interfaces available on the system
+    lshw -C network 2>/dev/null | grep "logical name:" | sed 's/logical name://g' | sed 's/ //g' | cat -n | sed 's/^[[:space:]]*//g' >/tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp
+
+    if [ -f /tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp ] && [ -n "$(cat /tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp)" ]; then
+        echo -e "\033[0;33m ✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮ [CHANGE NIC NAME] ✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮⋆✮ \033[0m"
+        echo -e "\033[1;42m :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: \033[0m"
+    else
+        echo "ERROR: File /tmp/CUSTOM-NETWORKING-VLANS-NIC-ITEMS.tmp does not exist"
+        echo "EITHER SUDO/ADMIN PASSWORD NEVER GIVEN OR ANOTHER ISSUE HAS OCCURRED ... EXITING"
+        echo "::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::"
+        exit
+    fi
+
+    # Select a network interface to change its name
+    _NIC_MAIN_CHOICE_MENU_COUNT=$(lshw -C network 2>/dev/null | grep -c "logical name:")
+    _NIC_MAIN_CHOICE_MENU_BODY=$(lshw -C network 2>/dev/null | grep "logical name:" | sed 's/logical name://g' | sed 's/ //g' | cat -n | sed 's/^[[:space:]]*//g')
+
+    _NIC_MAIN_CHOICE_SELECTION1=$(whiptail --fullbuttons --backtitle "Select [NIC] To [CHANGE NAME] :" \
+        --title "Select [NIC] To [CHANGE NAME] :" \
+        --menu "SELECT [NIC] TO CHANGE NAME:" 0 0 "$_NIC_MAIN_CHOICE_MENU_COUNT" $_NIC_MAIN_CHOICE_MENU_BODY 3>&1 1>&2 2>&3)
+
+    if [ -z "$_NIC_MAIN_CHOICE_SELECTION1" ]; then
+        echo "USER HAS ABORTED.... EXITING"
+        exit
+    fi
+
+    # Get the logical name of the selected NIC
+    _NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME=$(lshw -C network 2>/dev/null | grep "logical name:" | sed 's/logical name://g' | sed 's/ //g' | cat -n | sed 's/^[[:space:]]*//g' | grep -w "^$_NIC_MAIN_CHOICE_SELECTION1" | sed "s/$_NIC_MAIN_CHOICE_SELECTION1//1" | tr -d '[:space:]')
+
+    # Input new name for the NIC
+    _NEW_NIC_NAME=$(whiptail --backtitle "Change NIC Name" --title "Change NIC Name" --inputbox "Enter the new name for the NIC" 0 0 3>&1 1>&2 2>&3)
+
+    if [ -z "$_NEW_NIC_NAME" ]; then
+        echo "ERROR: The new NIC name cannot be empty!!!!"
+        echo "USER HAS ABORTED.... EXITING"
+        exit
+    fi
+
+    _NEW_NIC_NAME_SANITIZED=$(echo "$_NEW_NIC_NAME" | tr -d '[:space:]')
+
+    # Ensure that the new NIC name is not already in use
+    if [[ -L "/sys/class/net/$_NEW_NIC_NAME_SANITIZED" ]]; then
+        echo "ERROR: The new NIC name is already in use!!!!"
+        echo "$_NEW_NIC_NAME_SANITIZED"
+        echo "OR POSSIBLY ANOTHER ISSUE HAS OCCURRED.... EXITING"
+        exit
+    fi
+
+    # Change the NIC name
+    sudo ip link set "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" down 2>/dev/null
+    sudo ip link set "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" name "$_NEW_NIC_NAME_SANITIZED"
+    sudo ip link set "$_NEW_NIC_NAME_SANITIZED" up 2>/dev/null
+
+    # verify that the nic has changed name successfully
+    if [[ -L "/sys/class/net/$_NEW_NIC_NAME_SANITIZED" ]] && [[ ! $(find /sys/class/net/"${_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME}" 2>/dev/null) ]]; then
+        echo -e "NIC name changed successfully from [[ \033[1;31;37;44m  $_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME  \033[0m ]] to [[ \033[1;31;37;44m  $_NEW_NIC_NAME_SANITIZED \033[0m ]]"
+    else
+        echo "ERROR: INTERFACE [[  $_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME  ]] cOULD NOT BE RENAMED to [[  $_NEW_NIC_NAME_SANITIZED  ]] !!!!"
+        echo ".... EXITING"
+        exit
+    fi
+
+}
+
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+
+# Main menu to select the action
+_MASTER_CHOICE_TODO=$(
+    whiptail --fullbuttons --backtitle "Virtual Network Interface Card (NIC) or a Virtual Local Area Network (VLAN)" --title "NETWORKING [VIRTUAL NIC(s) / VLAN(s)]" \
+        --menu "NETWORKING [VIRTUAL NIC(s) / VLAN(s)]" 0 0 3 \
+        "1" "[CREATE] a Virtual Network Interface Card (NIC) / (VLAN)" \
+        "2" "[DELETE] a Network Interface Card (NIC) / (VLAN)" \
+        "3" "[CHANGE NAME] of NIC/VLAN" 3>&1 1>&2 2>&3
+)
+
+# Check the user's choice and call the appropriate function
+if [ -z $_MASTER_CHOICE_TODO ]; then
+    echo "USER ABORTED.... EXITING"
+    exit
+
+elif [ $_MASTER_CHOICE_TODO -eq 1 ]; then
+    FUN_CREATE_VIRTUAL_NIC
+
+elif [ $_MASTER_CHOICE_TODO -eq 2 ]; then
+    FUN_DELETE_VIRTUAL_NIC
+
+elif [ $_MASTER_CHOICE_TODO -eq 3 ]; then
+    FUN_CHANGE_NAME_NIC
+
+else
+    echo "ERROR: Invalid Choice"
+    echo "USER [ABORTED] OR POSSIBLY ANOTHER ISSUE HAS OCCURRED.... EXITING"
+    exit
+fi

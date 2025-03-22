@@ -1,0 +1,33 @@
+#!/bin/bash
+
+find /dev -name "*nvme[0-9][a-z][0-9]" >/tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp
+find /dev -name "*sd[a-z]" >>/tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp
+find /dev -name "*mmcblk[0-9]" >>/tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp
+
+NL_PARTITION_LIST_MAJOR_NUM=$(cat -n /tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp)
+PART_ITEMS_COUNT=$(cat /tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp | wc -l)
+
+SELECTION=$(whiptail --title "SELECT STORAGE DEVICE [TO FIX PARTITION ORDER - FDISK]" --menu "Select STORAGE DEVICE" 0 0 $PART_ITEMS_COUNT $NL_PARTITION_LIST_MAJOR_NUM 3>&1 1>&2 2>&3)
+
+if [ -z $SELECTION ]; then
+    exit
+fi
+
+CHOICE_DEVICE=$(cat -n /tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp | grep -w "$SELECTION" | head -1 | sed "s/$SELECTION//1" | tr -d '[:space:]')
+
+if whiptail --title ":: Sanity Check ::" --yesno " [fdisk] fix partition order Will run on DEVICE :: [ $CHOICE_DEVICE ] :: Proceed ?" 0 0 3>&1 1>&2 2>&3
+then
+
+    sudo fdisk $CHOICE_DEVICE <<EOF
+x
+f
+r
+w
+q
+EOF
+
+else
+    echo "USER ABORTED"
+    exit
+
+fi

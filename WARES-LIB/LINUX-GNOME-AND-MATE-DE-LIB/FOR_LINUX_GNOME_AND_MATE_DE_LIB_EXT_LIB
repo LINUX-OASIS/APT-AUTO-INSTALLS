@@ -1,0 +1,1503 @@
+#!/bin/bash
+
+function FUN_WARES_FOR_GNOME_AND_MATE_DE {
+
+	echo "now installing wares for UBUNTU VANILLA [GNOME Desktop Environment] specifically OR  MATE if you are using MATE DE"
+
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	# THIS LITTLE SECTION IS TO INSTALL DEPENDENCIES FOR ALL THE CWLS - CUSTOM WARES FIRST
+
+	BANNER_PKG_NAME_MSG="efibootmgr" # -->>> for custom-EFIBOOTMGR-NVRAM-ENTRY-EDITOR
+	PKG_NAME="efibootmgr"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y efibootmgr
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="qemu-utils" # -->>> for custom-NBD-MOUNT-VDI-QCOW
+	PKG_NAME="qemu-utils"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y qemu-utils
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="nmap &&& netdiscover" # -->>> for custom-NETWORKING-IP-ADDRESSES-ASSOCIATED-WITH-INETFACE
+	PKG_NAME="nmap netdiscover"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y nmap netdiscover
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="python3-pip python3-pyftpdlib net-tools" # -->>> for custom-NETWORKING-PYTHON-SIMPLE-HTTP-SERVER
+	PKG_NAME="python3-pip python3-pyftpdlib net-tools"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y python3-pip python3-pyftpdlib net-tools
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="samba qrencode fim zbar-tools" # -->>> for custom-NETWORKING-SAMBA-SHARE-FILES
+	PKG_NAME="samba qrencode fim zbar-tools"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y samba qrencode fim zbar-tools
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="ethtool etherwake netdiscover wakeonlan" # -->>> for custom-NETWORKING-WAKE-ON-LAN
+	PKG_NAME="ethtool etherwake netdiscover wakeonlan"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y ethtool etherwake netdiscover wakeonlan
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="parted dosfstools mtools exfatprogs" # -->>> for custom-SPARSE-IMG-BIN-FILE-MANAGER-CREATOR-PARTITIONER-EDITOR & full FAT32 support
+	PKG_NAME="parted dosfstools mtools exfatprogs"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y parted dosfstools mtools exfatprogs
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="nvme-cli smartmontools" # -->>> for custom-STORAGE-DEVICE-HEALTH-CHECK
+	PKG_NAME="nvme-cli smartmontools"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y nvme-cli smartmontools
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="btrfs-progs" # -->>> for custom-UUID-OR-LABEL-CHANGER-PARTITIONS
+	PKG_NAME="btrfs-progs"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y btrfs-progs
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+	BANNER_PKG_NAME_MSG="debconf-utils"
+	PKG_NAME="debconf-utils"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y debconf-utils
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="gettext"
+	PKG_NAME="gettext"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y gettext
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="btrfs-progs"
+	PKG_NAME="btrfs-progs"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y btrfs-progs
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="util-linux-extra" # for hwclock
+	PKG_NAME="util-linux-extra"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y util-linux-extra
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="smartmontools"
+	PKG_NAME="smartmontools" #smartctl -a /<device>  or smartctl -H /<device>
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y smartmontools
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="nvme-cli"
+	PKG_NAME="nvme-cli" # for checking ssd health and other ssd parameters USAGE:  sudo watch -n 1 nvme smart-log /dev/<ssd device>
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y nvme-cli
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="REFIND    [boot manager]"
+	PKG_NAME="refind"
+	FUN_VERBOSE_INSTALLING
+	cat <<EOF
+It is necessary to install rEFInd to the EFI System Partition (ESP) for it to control the boot process. 
+Not installing the new rEFInd binary on the ESP may leave the system in 
+an unbootable state. Alternatives to automatically installing rEFInd include running /usr/sbin/refind-install by hand or installing the 
+rEFInd binaries manually by copying them from subdirectories of 
+/usr/share/refind-{version} !!!.                    
+
+If you want rEFInd to control the boot process [or change its settings after install], you can do so by runing:
+
+#installs refind to fallback path of target device esp, this is the method to use for dedicated esp partition... installs to /EFI/BOOT/bootx64.efi
+$ refind-install --usedefault /dev/target-esp-partition
+
+#to install to a shared esp partition ... installs to /EFI/vendor/bootx64.efi
+$ refind-install   or    $ refind-install --root <root mount point>
+
+NOTE !!::: see man refind-install for more information
+EOF
+	echo refind refind/install_to_esp boolean false | sudo debconf-set-selections
+	sudo apt install -y refind
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="okular"
+	PKG_NAME="okular"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y okular
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="qrencode"
+	PKG_NAME="qrencode" # usage: qrencode -o qrcode.png "https://www.google.com more information..etc..pipe cat here doc into qrencode for multi line info"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y qrencode
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="zbar-tools"
+	PKG_NAME="zbar-tools" #for reading qr codes text on terminal: zbarimg <image>
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y zbar-tools
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="fim - terminal image viewer"
+	PKG_NAME="fim" # fim terminal image viewer :swiss army knife :for displaying image files
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y fim
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="cpufrequtils"
+	PKG_NAME="cpufrequtils"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y cpufrequtils
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="i7z - # sudo i7z command - reports processor data,C states,Speeds,Temps-Intel Core CPUs"
+	PKG_NAME="i7z"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y i7z #utility that reports processor data,C states,Speeds,Temps but only about Intel Core CPUs #-> sudo i7z command
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="dosfstools & mtools - for full fat32 support"
+	PKG_NAME="dosfstools mtools" #for full fat32 support
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y dosfstools mtools
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="mkisofs"
+	PKG_NAME="mkisofs"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y mkisofs
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="make"
+	PKG_NAME="make"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y make
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="cmake"
+	PKG_NAME="cmake"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y cmake
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="hwinfo"
+	PKG_NAME="hwinfo"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y hwinfo
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="color-picker"
+	PKG_NAME="color-picker"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y color-picker
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="boot-repair"
+	PKG_NAME="boot-repair"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y boot-repair
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="wavemon"
+	PKG_NAME="wavemon"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install wavemon -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="easytag"
+	PKG_NAME="easytag"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install easytag -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="dkms"
+	PKG_NAME="dkms"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install dkms -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="curl"
+	PKG_NAME="curl"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install curl -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="bleachbit"
+	PKG_NAME="bleachbit"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install bleachbit -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="plocate"
+	PKG_NAME="plocate" #to use locate command
+	FUN_VERBOSE_INSTALLING
+	sudo apt install plocate -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="gimp"
+	PKG_NAME="gimp"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install gimp -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="darktable"
+	PKG_NAME="darktable"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install darktable -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="mat2 - metadata anonimyzer"
+	PKG_NAME="mat2"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install mat2 -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="trash-cli  :: to use trash-empty command"
+	PKG_NAME="trash-cli"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install trash-cli -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="mmc-utils"
+	PKG_NAME="mmc-utils"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install mmc-utils -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="gparted"
+	PKG_NAME="gparted"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y gparted
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="screenfetch"
+	PKG_NAME="screenfetch"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install screenfetch -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="inxi - for system hardware info"
+	PKG_NAME="inxi"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install inxi -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="bulky"
+	PKG_NAME="bulky"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install bulky -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="qbittorrent"
+	PKG_NAME="qbittorrent"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y qbittorrent
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="tree"
+	PKG_NAME="tree"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y tree
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="g++"
+	PKG_NAME="g++"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y g++
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="crunch"
+	PKG_NAME="crunch"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y crunch
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="htop"
+	PKG_NAME="htop"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y htop
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="git"
+	PKG_NAME="git"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y git
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="grub-efi-amd64-bin"
+	PKG_NAME="grub-efi-amd64-bin"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install grub-efi-amd64-bin -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="grub-efi-amd64-signed"
+	PKG_NAME="grub-efi-amd64-signed"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install grub-efi-amd64-signed -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="isomaster"
+	PKG_NAME="isomaster"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install isomaster -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="barrier"
+	PKG_NAME="barrier"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install barrier -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="kwrite"
+	PKG_NAME="kwrite"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install kwrite -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="geany"
+	PKG_NAME="geany"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install geany -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="ktouch"
+	PKG_NAME="ktouch"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install ktouch -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="kdialog"
+	PKG_NAME="kdialog"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install kdialog -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="breeze"
+	PKG_NAME="breeze"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install breeze -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="kdenlive"
+	PKG_NAME="kdenlive"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install kdenlive -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="audacity"
+	PKG_NAME="audacity"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install audacity -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="ardour"
+	PKG_NAME="ardour"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install ardour -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="vlc"
+	PKG_NAME="vlc"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install vlc -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="handbrake"
+	PKG_NAME="handbrake"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install handbrake -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="unrar"
+	PKG_NAME="unrar"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install unrar -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="7zip"
+	PKG_NAME="7zip"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y 7zip
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="7zip-rar"
+	PKG_NAME="7zip-rar"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y 7zip-rar
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="p7zip-full"
+	PKG_NAME="p7zip-full"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y p7zip-full
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="ffmpeg"
+	PKG_NAME="ffmpeg"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install ffmpeg -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="timeshift"
+	PKG_NAME="timeshift"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install timeshift -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="diodon"
+	PKG_NAME="diodon"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install diodon -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="v4l2loopback-dkms"
+	PKG_NAME="v4l2loopback-dkms"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install v4l2loopback-dkms -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="obs-studio"
+	PKG_NAME="obs-studio"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install obs-studio -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="vokoscreen-ng"
+	PKG_NAME="vokoscreen-ng"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install vokoscreen-ng -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="lolcat"
+	PKG_NAME="lolcat"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install lolcat -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="snapd"
+	PKG_NAME="snapd"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install snapd -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	# BANNER_PKG_NAME_MSG="install ubuntu-desktop-bootstrap" # Commented out because i suspect it to be causing major issues when installing from custom iso
+	# PKG_NAME="install ubuntu-desktop-bootstrap"
+	# FUN_VERBOSE_INSTALLING
+	# sudo snap install ubuntu-desktop-bootstrap --classic
+	# FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="zstd"
+	PKG_NAME="zstd"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install zstd -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="secure-delete"
+	PKG_NAME="secure-delete"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install secure-delete -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="cool-retro-term"
+	PKG_NAME="cool-retro-term"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install cool-retro-term -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="intel-gpu-tools - gputop command - iGPU info  "
+	PKG_NAME="intel-gpu-tools"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install intel-gpu-tools -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="cpupower-gui"
+	PKG_NAME="cpupower-gui"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install cpupower-gui -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="wine64"
+	PKG_NAME="wine64"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install wine64 -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="q4wine"
+	PKG_NAME="q4wine"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install q4wine -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="uptimed"
+	PKG_NAME="uptimed"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install uptimed -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="software-properties-common"
+	PKG_NAME="software-properties-common"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install software-properties-common -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="spice-vdagent"
+	PKG_NAME="spice-vdagent"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install spice-vdagent -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="jstest-gtk"
+	PKG_NAME="jstest-gtk"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install jstest-gtk -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="xboxdrv"
+	PKG_NAME="xboxdrv"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install xboxdrv -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="ANTIMICROX - GUI for mapping keyboard keys and mouse controls to a gamepad"
+	PKG_NAME="antimicro" # GUI for mapping keyboard keys and mouse controls to a gamepad
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y antimicro
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="shc"
+	PKG_NAME="shc"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install shc -y # Compile Bash sh scripts to Binary
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	## install libqrencode4
+	BANNER_PKG_NAME_MSG="libqrencode4 - QR Code encoding library"
+	PKG_NAME="libqrencode4"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y libqrencode4
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	## install debhelper
+	BANNER_PKG_NAME_MSG="debhelper"
+	PKG_NAME="debhelper "
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y debhelper
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="btop"
+	PKG_NAME="btop"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y btop
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="exfatprogs" # for exFAT filesystem support
+	PKG_NAME="exfatprogs"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y exfatprogs
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="thinkfan"
+	PKG_NAME="thinkfan"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y thinkfan
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="remmina"
+	PKG_NAME="remmina"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y remmina remmina-plugin-rdp remmina-plugin-secret remmina-plugin-vnc
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG=""
+	PKG_NAME=" ethtool "
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y ethtool
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="etherwake"
+	PKG_NAME="etherwake"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y etherwake
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="netdiscover"
+	PKG_NAME="netdiscover"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y netdiscover
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="wakeonlan"
+	PKG_NAME="wakeonlan"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y wakeonlan
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	###······································································································
+	# installing google chrome via flatpak
+	###······································································································
+	#sudo flatpak install flathub com.google.Chrome -y
+	###······································································································
+	###······································································································
+
+	###······································································································
+	# install VSCODE - VIA .DEB Package
+	###······································································································
+	BANNER_PKG_NAME_MSG="INSTALLING VSCODE --- via .DEB Package"
+	PKG_NAME="code"
+	FUN_VERBOSE_INSTALLING
+
+	echo "code code/add-microsoft-repo boolean true" | sudo debconf-set-selections
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+	wget -O ./AUTO-INSTALLS-FILES/WORKER-TEMP/VSCODE_DEB_FILE.deb 'https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64' -P ./AUTO-INSTALLS-FILES/WORKER-TEMP/
+	sudo apt install -y ./AUTO-INSTALLS-FILES/WORKER-TEMP/VSCODE_DEB_FILE.deb
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+
+	#to list installed vscode extensions use: code --list-extensions
+	# $HOME/.config/Code is the default --user-data-dir. can also leave empty to use default dir. & extensions located in $HOME/.vscode/extensions
+	code --install-extension foxundermoon.shell-format --no-sandbox --user-data-dir "$HOME"/.config/Code      #install shell-format extension: from cmdline
+	code --install-extension rogalmic.bash-debug --no-sandbox --user-data-dir "$HOME"/.config/Code            #install bash debug extension: from cmdline
+	code --install-extension mads-hartmann.bash-ide-vscode --no-sandbox --user-data-dir "$HOME"/.config/Code  #install Bash IDE extension: from cmdline
+	code --install-extension timonwong.shellcheck --no-sandbox --user-data-dir "$HOME"/.config/Code           #install Bash shell check linter extension: from cmdline
+	code --install-extension Remisa.shellman --no-sandbox --user-data-dir "$HOME"/.config/Code                #install Bash shell man extension: from cmdline
+	code --install-extension TabNine.tabnine-vscode --no-sandbox --user-data-dir "$HOME"/.config/Code         #install Bash tabnine vscode extension: from cmdline
+	code --install-extension oderwat.indent-rainbow --no-sandbox --user-data-dir "$HOME"/.config/Code         #install vscode indent rainbow extension: from cmdline
+	code --install-extension vscode-icons-team.vscode-icons --no-sandbox --user-data-dir "$HOME"/.config/Code #install vscode icons: from cmdline
+	code --install-extension lkrms.inifmt --no-sandbox --user-data-dir "$HOME"/.config/Code                   #install formatter for .ini files, plain text and more: from cmdline
+	code --install-extension github.copilot --no-sandbox --user-data-dir "$HOME"/.config/Code                 #install github copilot extension: from cmdline
+	code --install-extension github.copilot-chat --no-sandbox --user-data-dir "$HOME"/.config/Code            #install github copilot-chat extension: from cmdline
+
+	# move/copy vscode extensions from /root to /etc/skel/.vscode/extensions.. so all users have all the extensions <<this is if run from within CUBIC>>
+	sudo mkdir -p /etc/skel/.vscode/
+	sudo cp -r $HOME/.vscode/extensions /etc/skel/.vscode/ #copies vscode extensions folder
+	sudo rm /etc/skel/.vscode/extensions/*.json            #deletes .json file
+
+	# edit the vscode launcher (necessary for it to work if installed as root - such as from cubic)
+	sudo sed -i 's+Exec=/usr/share/code/code %F+Exec=code --no-sandbox --user-data-dir $HOME/.vscode+g' /usr/share/applications/code.desktop
+
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	###······································································································
+	# install VSCODE - VIA .DEB Package -END END END
+	###······································································································
+
+	### change fan speed ####
+	#sudo apt install -y lm-sensors
+	#detect sensors (run sudo sensors-detect)
+	#install fancontrol (can control with sudo pwmconfig command afterwards)
+	#sudo apt install -y fancontrol
+
+	###······································································································
+	###······································································································
+	#PKG_NAME=" FANSPEED_ALWAYS_X "
+	#FUN_VERBOSE_INSTALLING_NO_APT_UPDATE
+	### Install fanspeed_always_x (My Own Home-Brew Software :D)
+	#sudo apt update
+	#sudo apt install -y i8kutils
+	#sudo chmod 777 /usr/bin/i8kmon
+	#sudo chown $USER:$USER /etc/i8kmon.conf
+
+	#sudo cp auto-installs-files/CUSTOM_FANSPEED_FILES/* /usr/bin/
+	#sudo chown $USER:$USER /usr/bin/fanspeed_status_config.file
+	#sudo chmod 777 /usr/bin/fanspeed_always*
+	#sudo chmod 777 /etc/i8kmon.conf
+
+	#sudo cp /usr/bin/FANSPEED_ALWAYS_MAX.service /etc/systemd/system
+	#sudo cp /usr/bin/FANSPEED_ALWAYS_MAX.timer /etc/systemd/system
+
+	#sudo mkdir -p /etc/systemd/system/CUST-SYSD
+	#sudo cp /usr/bin/FANSPEED_ALWAYS_MAX_TIMER.sh /etc/systemd/system/CUST-SYSD
+	#sudo chmod 777 /etc/systemd/system/CUST-SYSD/FANSPEED_ALWAYS_MAX_TIMER.sh
+	###······································································································
+	###······································································································
+
+	###······································································································
+	###······································································································
+	BANNER_PKG_NAME_MSG="Dependencies for compiling linux kernel"
+	PKG_NAME="git fakeroot build-essential ncurses-dev xz-utils libssl-dev bc bcflex flex libelf-dev bison dwarves libncurses-dev"
+	FUN_VERBOSE_INSTALLING
+	###
+	# Dependencies for compiling linux kernel
+	sudo apt install -y git
+	sudo apt install -y fakeroot
+	sudo apt install -y build-essential
+	sudo apt install -y ncurses-dev
+	sudo apt install -y xz-utils
+	sudo apt install -y libssl-dev
+	sudo apt install -y bc
+	sudo apt install -y bcflex
+	sudo apt install -y flex
+	sudo apt install -y libelf-dev
+	sudo apt install -y bison
+	sudo apt install -y dwarves
+	sudo apt install -y libncurses-dev
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+	#####
+	###······································································································
+	###······································································································
+
+	###······································································································
+	###······································································································
+	###······································································································
+	## install kvm qemu virtmanager, adduser to kvm  & autoload modules for pcie passthrough ##############
+	BANNER_PKG_NAME_MSG="KVM QEMU VIRT-MANAGER"
+	PKG_NAME="qemu-kvm qemu-system-x86 qemu-system libvirt-daemon-system libvirt-clients bridge-utils virtinst virt-manager"
+	FUN_VERBOSE_INSTALLING
+	sudo apt update
+	sleep 1
+	sudo apt install -y qemu-kvm
+	sudo apt install -y qemu-system-x86
+	sudo apt install -y qemu-system
+	sudo apt install -y libvirt-daemon-system
+	sudo apt install -y libvirt-clients
+	sudo apt install -y bridge-utils
+	sudo apt install -y virtinst
+	sudo apt install -y virt-manager
+	sudo usermod -aG libvirt $USER
+	sudo usermod -aG libvirt-qemu $USER
+	sudo usermod -aG kvm $USER
+
+	#auto load modules for proper kvm virtualization ... HERE DOC to file
+	cat <<EOF | sudo tee /etc/modules-load.d/kvm-modules.conf
+#load kernel modules for kvm pcie passthrough (/etc/modprobe.d)
+
+vfio
+vfio_pci
+vfio_iommu_type1
+kvm
+kvm_intel
+pci_stub
+EOF
+
+	#set kernel boot parameter to enable kvm pcie passthrough for intel cpu
+	sudo touch /etc/default/grub.d/custom-KERNEL-BOOT-PARAMETERS.cfg
+	echo 'GRUB_CMDLINE_LINUX_DEFAULT="intel_iommu=on"' | sudo tee /etc/default/grub.d/custom-KERNEL-BOOT-PARAMETERS.cfg
+	sudo update-grub #dont worry if update-grub fails within cubic iso creator
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	### grub-mkconfig -o /boot/grub/grub.cfg <--- this is just here to remind me of an alternate way to generate grub.cfg: i thought it was interesting code
+	#fix audio qemu kvm virtmanager using sed
+	#sudo sed -i 's|user = "root"||g' /etc/libvirt/qemu.conf
+	#sudo sed -i 's|user = "'${USER}'"||g' /etc/libvirt/qemu.conf
+	#echo "user = \"$USER\"" | sudo tee -a /etc/libvirt/qemu.conf
+	###······································································································
+	###······································································································
+	###······································································································
+
+	###······································································································
+	###······································································································
+	### Antimicrox install via flatpak
+	#PKG_NAME="ANTIMICROX  via flatpak"
+	#FUN_VERBOSE_INSTALLING
+	#flatpak install flathub io.github.antimicrox.antimicrox -y
+	###······································································································
+	###······································································································
+
+	###······································································································
+	###······································································································
+	#install mupen64plus-qt [nintendo 64 emulator] & configure gamepad & video flickering fix
+	#config files are the result of jostick fix + flickering fix + running it with the following commands:
+	# mupen64plus --resolution 1024x600 --saveoptions --gfx mupen64plus-video-glide64mk2 <n64 game ROM>
+	#alternatively# mupen64plus --resolution 1024x600 --fullscreen --saveoptions --gfx mupen64plus-video-glide64mk2 <n64 game ROM>
+	#PKG_NAME="mupen64plus-qt"
+	#FUN_VERBOSE_INSTALLING
+	#sudo rm -r $HOME/.config/mupen64plus
+	#sudo apt install mupen64plus-qt -y
+	#mate-terminal --window -e 'mate-terminal -e mupen64plus-qt'
+
+	#sleep 2
+	#killall mupen64plus-qt
+	###······································································································
+	###······································································································
+
+	###······································································································
+	###······································································································
+	#copy mupen64 conf's to /usr/bin
+	#sudo cp auto-installs-files/mupen64plus-qt.conf /usr/bin
+	#sudo cp auto-installs-files/mupen64plus.cfg /usr/bin
+	###······································································································
+	###······································································································
+
+	###······································································································
+	###······································································································
+	####mupen64 config files in CUSTOM-WARES FOLDER
+	#cp auto-installs-files/mupen64plus* $HOME/INTERNAL-WARES
+	###······································································································
+	###······································································································
+
+	##install security tools
+	BANNER_PKG_NAME_MSG="MDK4"
+	PKG_NAME="mdk4"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y mdk4
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="AIRCRACK-NG"
+	PKG_NAME="aircrack-ng"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y aircrack-ng
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="HASHCAT"
+	PKG_NAME="hashcat"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y hashcat
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="HCXTOOLS"
+	PKG_NAME="hcxtools"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y hcxtools
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="maskprocessor - for hashcat mask attacks"
+	PKG_NAME="maskprocessor" #for hashcat mask attacks
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y maskprocessor
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧																		    (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ
+	######(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧  GNOME DESKTOP Environment / gnome shell extensions related CODE BLOCK  (ﾉ◕ヮ◕)*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	## (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧																			(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)✧
+	## gnome Desktop Environment / gnome shell extensions related code sections :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	#::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+
+	#will install wares specific for gnome DE  if current DE is GNOME. base on the main choice at start of script
+	if [[ $MAIN_CHOICE_SANITIZED == *"5"* ]] || [[ $MAIN_CHOICE_SANITIZED == *"6"* ]] || [[ $MAIN_CHOICE_SANITIZED == *"8"* ]]; then
+
+		BANNER_PKG_NAME_MSG="gnome-system-tools"
+		PKG_NAME="gnome-system-tools"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install -y gnome-system-tools
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		BANNER_PKG_NAME_MSG="gnome-shell-extensions"
+		PKG_NAME="gnome-shell-extensions"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install -y gnome-shell-extensions
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		BANNER_PKG_NAME_MSG="gnome-shell-extension-manager"
+		PKG_NAME="gnome-shell-extension-manager"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install -y gnome-shell-extension-manager
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		BANNER_PKG_NAME_MSG="gnome-disk-utility"
+		PKG_NAME="gnome-disk-utility"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install gnome-disk-utility -y
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		BANNER_PKG_NAME_MSG="gnome-clocks"
+		PKG_NAME="gnome-clocks"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install gnome-clocks -y
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		BANNER_PKG_NAME_MSG="easytag-nautilus"
+		PKG_NAME="easytag-nautilus"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install easytag-nautilus -y
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		BANNER_PKG_NAME_MSG="gnome-menus"
+		PKG_NAME="gnome-menus"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install -y gnome-menus
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		BANNER_PKG_NAME_MSG="gnome-session-flashback"
+		PKG_NAME="gnome-session-flashback"
+		FUN_VERBOSE_INSTALLING
+		sudo apt -y install gnome-session-flashback
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		BANNER_PKG_NAME_MSG="gnome-tweaks"
+		PKG_NAME="gnome-tweaks"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install -y gnome-tweaks
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		# install arcmenu gnome extension from source.. for ubuntu 22.04  #not needed for 23.10
+		#if [ $UBUNTU_VERSION -eq 1 ]; then
+		#PKG_NAME="  install arcmenu gnome extension from source"
+		#FUN_VERBOSE_INSTALLING
+		#sudo apt install -y libgettextpo-dev gettext #dependencies
+		#git clone --single-branch --branch gnome-42/43/44 https://gitlab.com/arcmenu/ArcMenu.git #for gnome 42-44
+		#cd ArcMenu
+		#sudo make install
+		#cd $CD_DIRNAME
+		#sudo mkdir -p /etc/skel/.local/share/gnome-shell/extensions/
+		#sudo cp -r ~/.local/share/gnome-shell/extensions/arcmenu@arcmenu.com /etc/skel/.local/share/gnome-shell/extensions/
+		#sudo gnome-extensions enable arcmenu@arcmenu.com
+		#fi
+
+		#install vitals gnome extension
+		#if [ $UBUNTU_VERSION -eq 2 ]; then
+		#	sudo apt install -y gnome-shell-extension-manager gir1.2-gtop-2.0 lm-sensors
+
+		#	sudo mkdir -p ~/.local/share/gnome-shell/extensions
+		#	sudo mkdir -p /etc/skel/.local/share/gnome-shell/extensions/
+
+		#	sudo git clone https://github.com/corecoding/Vitals.git ~/.local/share/gnome-shell/extensions/Vitals@CoreCoding.com -b develop
+		#	sudo git clone https://github.com/corecoding/Vitals.git /etc/skel/.local/share/gnome-shell/extensions/Vitals@CoreCoding.com -b develop
+
+		#	gnome-extensions enable Vitals@CoreCoding.com
+		#fi
+
+		BANNER_PKG_NAME_MSG="gtkhash"
+		PKG_NAME="gtkhash"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install -y gtkhash
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		BANNER_PKG_NAME_MSG="nautilus-gtkhash"
+		PKG_NAME="nautilus-gtkhash"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install nautilus-gtkhash -y
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		BANNER_PKG_NAME_MSG="nautilus-admin"
+		PKG_NAME="nautilus-admin"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install -y nautilus-admin
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+		#if DEBIAN install dash to dock gnome extension apt package (sudo apt install -y gnome-shell-extension-dashtodock)
+		if [[ $MAIN_CHOICE_SANITIZED == *"8"* ]]; then
+			sudo apt install -y gnome-shell-extensions
+			sudo apt install -y gnome-shell-extension-dashtodock
+			gnome-extensions enable dash-to-dock@micxgx.gmail.com
+		fi
+
+		#Check GNOME Version
+		GNOME_VERSION_CHECK_NUM=$(gnome-shell --version | tr -d -c '[:digit:]' | grep -o "^.." | tr -d '[:space:]')
+
+		## install nautilus status bar (for gnome version 44 or below)
+		if [ $GNOME_VERSION_CHECK_NUM -le 44 ]; then
+			BANNER_PKG_NAME_MSG="nautilus status bar" # version for only ubuntu 22.04 and lower
+			FUN_VERBOSE_INSTALLING
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			sudo mkdir -p /etc/skel/.local/share/nautilus-python/extensions/
+			git clone https://github.com/benintech/Nautilus-Status-Bar-Replacement.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nautilus-Status-Bar-Replacement
+			sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nautilus-Status-Bar-Replacement/DiskUsageLocationWidget.py /etc/skel/.local/share/nautilus-python/extensions/
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		fi
+
+		## install tophat gnome extension
+		if [ $GNOME_VERSION_CHECK_NUM -le 44 ]; then
+			BANNER_PKG_NAME_MSG=" manually install TOPHAT gnome extension"
+			sudo apt install -y gnome-shell-extensions
+			FUN_VERBOSE_INSTALLING
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			sudo apt install -y gir1.2-gtop-2.0
+			sudo apt install -y gnome-shell-extensions
+			git clone --branch legacy https://github.com/fflewddur/tophat.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/tophat
+			sudo mkdir -p ~/.local/share/gnome-shell/extensions/tophat@fflewddur.github.io         #to install to $HOME/.local/share/gnome-shell/extensions
+			sudo mkdir -p /etc/skel/.local/share/gnome-shell/extensions/tophat@fflewddur.github.io #to install for all users
+			sudo chmod 777 $HOME/.local/share/gnome-shell/extensions/
+			sudo chmod 777 $HOME/.local/share/gnome-shell/extensions/tophat@fflewddur.github.io
+			sudo cp -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/tophat/tophat@fflewddur.github.io/* ~/.local/share/gnome-shell/extensions/tophat@fflewddur.github.io         #to copy to $HOME
+			sudo cp -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/tophat/tophat@fflewddur.github.io/* /etc/skel/.local/share/gnome-shell/extensions/tophat@fflewddur.github.io #to copy to /etc/skel/
+			gnome-extensions enable tophat@fflewddur.github.io
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		elif [ $GNOME_VERSION_CHECK_NUM -ge 45 ]; then
+			BANNER_PKG_NAME_MSG=" manually install TOPHAT gnome extension"
+			sudo apt install -y gnome-shell-extensions
+			FUN_VERBOSE_INSTALLING
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			sudo apt install -y gir1.2-gtop-2.0
+			sudo apt install -y gnome-shell-extensions
+			wget https://github.com/fflewddur/tophat/releases/download/v19/tophat@fflewddur.github.io.v19.shell-extension.zip -P ./AUTO-INSTALLS-FILES/WORKER-TEMP/tophat
+			sudo mkdir -p $HOME/.local/share/gnome-shell/extensions/tophat@fflewddur.github.io #to install to $HOME/.local/share/gnome-shell/extensions
+			sudo chmod 777 $HOME/.local/share/gnome-shell/extensions/
+			sudo chmod 777 $HOME/.local/share/gnome-shell/extensions/tophat@fflewddur.github.io
+			sudo mkdir -p /etc/skel/.local/share/gnome-shell/extensions/tophat@fflewddur.github.io                                                                                      #to install for all users
+			7z x ./AUTO-INSTALLS-FILES/WORKER-TEMP/tophat/tophat@fflewddur.github.io.v19.shell-extension.zip -o"$HOME"/.local/share/gnome-shell/extensions/tophat@fflewddur.github.io   #to copy to $HOME
+			7z x ./AUTO-INSTALLS-FILES/WORKER-TEMP/tophat/tophat@fflewddur.github.io.v19.shell-extension.zip -o/etc/skel/.local/share/gnome-shell/extensions/tophat@fflewddur.github.io #to copy to /etc/skel/
+			gnome-extensions enable tophat@fflewddur.github.io
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		fi
+
+		## install caffeine gnome extension
+		if [ $GNOME_VERSION_CHECK_NUM -eq 43 ]; then
+
+			BANNER_PKG_NAME_MSG=" manually install CAFFEINE gnome extension"
+			FUN_VERBOSE_INSTALLING
+			#depends on gettext package for the build
+			sudo apt install -y gettext
+			sudo apt install -y gnome-shell-extensions
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			git clone --branch gnome-shell-43-44 https://github.com/eonpatapon/gnome-shell-extension-caffeine.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/gnome-shell-extension-caffeine #auto creates the destination dir and git clones to destination dir
+			cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/gnome-shell-extension-caffeine || exit
+			sudo make build
+			sudo make install
+			cd $CD_DIRNAME || exit
+			sudo cp -ar ./AUTO-INSTALLS-FILES/WORKER-TEMP/gnome-shell-extension-caffeine/caffeine@patapon.info $HOME/.local/share/gnome-shell/extensions/     #to copy to $HOME - install to $HOME/.local/share/gnome-shell/extensions
+			sudo cp -ar ./AUTO-INSTALLS-FILES/WORKER-TEMP/gnome-shell-extension-caffeine/caffeine@patapon.info /etc/skel/.local/share/gnome-shell/extensions/ #to copy to /etc/skel/ - install for all users
+			gnome-extensions enable caffeine@patapon.info
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		elif [ $GNOME_VERSION_CHECK_NUM -ge 45 ]; then
+			#depends on gettext to build from source
+			BANNER_PKG_NAME_MSG=" manually install CAFFEINE gnome extension"
+			FUN_VERBOSE_INSTALLING
+			#depends on gettext package for the build
+			sudo apt install -y gettext
+			sudo apt install -y gnome-shell-extensions
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			git clone https://github.com/eonpatapon/gnome-shell-extension-caffeine.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/gnome-shell-extension-caffeine #auto creates the destination dir and git clones to destination dir
+			cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/gnome-shell-extension-caffeine || exit
+			make build
+			make install
+			mkdir -p $HOME/.local/share/gnome-shell/extensions/caffeine@patapon.info
+			mkdir -p /etc/skel/.local/share/gnome-shell/extensions/caffeine@patapon.info
+			7z x caffeine@patapon.info.zip -o$HOME/.local/share/gnome-shell/extensions/caffeine@patapon.info -aoa     #### 7z -ao (Overwrite mode) switch >>>> -aoa Overwrite All existing files without prompt. 7z x test.zip -aoa
+			7z x caffeine@patapon.info.zip -o/etc/skel/.local/share/gnome-shell/extensions/caffeine@patapon.info -aoa #### 7z -ao (Overwrite mode) switch >>>> -aoa Overwrite All existing files without prompt. 7z x test.zip -aoa
+			sudo chmod -R 777 $HOME/.local/share/gnome-shell/extensions/
+			sudo chmod -R 777 /etc/skel/.local/share/gnome-shell/extensions/
+			cd $CD_DIRNAME || exit
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			gnome-extensions enable caffeine@patapon.info
+		fi
+
+		#install Thinkpad Battery Threshold Extension for GNOME DE
+		if [ $GNOME_VERSION_CHECK_NUM -eq 43 ]; then
+			BANNER_PKG_NAME_MSG=" manually install - Thinkpad Battery Threshold Extension - gnome extension"
+			FUN_VERBOSE_INSTALLING
+			sudo apt install -y gettext
+			sudo apt install -y gnome-shell-extensions
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			git clone --branch v34 https://gitlab.com/marcosdalvarez/thinkpad-battery-threshold-extension.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/thinkpad-battery-threshold-extension
+			sudo chmod -R 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/thinkpad-battery-threshold-extension
+			cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/thinkpad-battery-threshold-extension || exit
+			# the build script will create the installable .zip gnome extension file , always in the root directory of the repo
+			./scripts/build.sh
+			gnome-extensions install --force thinkpad-battery-threshold@marcosdalvarez.org.shell-extension.zip
+			gnome-extensions enable thinkpad-battery-threshold@marcosdalvarez.org
+			cd $CD_DIRNAME || exit # cd back into root dir of APT-AUTO-INSTALLS, exits if cant cd into directory
+			#Skip password prompt
+			sudo wget https://gitlab.com/marcosdalvarez/thinkpad-battery-threshold-extension/-/raw/main/others/99-thinkpad-thresholds-udev.rules -N -P /etc/udev/rules.d/
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		elif [ $GNOME_VERSION_CHECK_NUM -ge 45 ]; then
+			BANNER_PKG_NAME_MSG=" manually install - Thinkpad Battery Threshold Extension - gnome extension"
+			FUN_VERBOSE_INSTALLING
+			sudo apt install -y gettext
+			sudo apt install -y gnome-shell-extensions
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			git clone https://gitlab.com/marcosdalvarez/thinkpad-battery-threshold-extension.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/thinkpad-battery-threshold-extension
+			sudo chmod -R 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/thinkpad-battery-threshold-extension
+			cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/thinkpad-battery-threshold-extension || exit
+			# the build script will create the installable .zip gnome extension file , always in the root directory of the repo
+			./scripts/build.sh
+			gnome-extensions install --force thinkpad-battery-threshold@marcosdalvarez.org.shell-extension.zip
+			gnome-extensions enable thinkpad-battery-threshold@marcosdalvarez.org
+			cd $CD_DIRNAME || exit # cd back into root dir of APT-AUTO-INSTALLS, exits if cant cd into directory
+			#Skip password prompt
+			sudo wget https://gitlab.com/marcosdalvarez/thinkpad-battery-threshold-extension/-/raw/main/others/99-thinkpad-thresholds-udev.rules -N -P /etc/udev/rules.d/
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		fi
+
+		#install HIDAMARI live wallpapaer - flatpak
+		BANNER_PKG_NAME_MSG="install HIDAMARI live wallpapaer - flatpak"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install flatpak -y
+		sudo apt install gnome-software-plugin-flatpak -y                                            #makes it possible to install apps without needing the command line
+		sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo #add flathub repository
+		flatpak install -y flathub io.github.jeffshee.Hidamari
+
+		sudo mkdir -p /etc/skel/Videos/Hidamari
+		sudo mkdir -p "$HOME"/Videos/Hidamari
+		sudo cp ./AUTO-INSTALLS-FILES/BACKGROUND-IMAGES-VIDEOS/VIDEOS/* /etc/skel/Videos/Hidamari
+		sudo cp ./AUTO-INSTALLS-FILES/BACKGROUND-IMAGES-VIDEOS/VIDEOS/* "$HOME"/Videos/Hidamari
+		sudo chmod -R 777 /etc/skel/Videos/Hidamari && sudo chmod -R 777 "$HOME"/Videos/Hidamari
+
+		#gnome-user-share for more general file & more remote desktop sharing over network
+		BANNER_PKG_NAME_MSG="gnome-user-share"
+		PKG_NAME="gnome-user-share"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install -y gnome-user-share
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	fi
+
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧		END																    (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ
+	######(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧  GNOME DESKTOP Environment / gnome shell extensions related CODE BLOCK  (ﾉ◕ヮ◕)*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	## (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧						END													(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)✧
+	## gnome Desktop Environment / gnome shell extensions related code sections :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	#::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	## End of gnome Desktop Environment / gnome shell extensions related code section :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	#::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ #
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ #
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ   CODE BLOCK FOR  FUNCTIONS SPECIFIC TO A  MATE DE DISTRO    ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ #
+	##
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ #
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ #
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ #
+
+	# CODE BLOCK FOR  FUNCTIONS SPECIFIC TO A  MATE DE DISTRO
+	#Since Variable MAIN_CHOICE is inside a checklist (amongst other values)..we have to match it to exactly desired value here..
+	if echo "$MAIN_CHOICE_SANITIZED" | grep -q -o -w "1"; then
+		# install snapd to linux mint :
+		#From Linux Mint 20 onwards, a file called nosnap.pref needs to be either moved or removed from /etc/apt/preferences.d/ before Snap can be installed.
+		if [[ $SELECTED_MATE_DE_DISTRO -eq 1 ]]; then
+			#LINUX MINT
+			PKG_NAME="snapd  for  Linuxmint"
+			FUN_VERBOSE_INSTALLING
+			sudo rm -rf /etc/apt/preferences.d/nosnap.pref
+			sudo apt update
+			sudo apt install -y snapd
+
+			#install snapstore
+			sudo snap install snap-store
+		fi
+
+		PKG_NAME="mate-desktop-environment-extras"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install -y mate-desktop-environment
+		sudo apt install -y caja-eiciel
+		sudo apt install -y caja-gtkhash
+		sudo apt install -y caja-image-converter
+		sudo apt install -y caja-rename
+		sudo apt install -y caja-seahorse
+		sudo apt install -y dconf-editor
+		sudo apt install -y mate-dock-applet
+		sudo apt install -y mate-menu
+		sudo apt install -y mate-user-share
+		sudo apt install -y mate-tweak
+		sudo apt install -y blueman
+		sudo apt install mate-desktop-environment-extras -y
+
+		PKG_NAME="caja-gtkhash"
+		FUN_VERBOSE_INSTALLING
+		sudo apt install caja-gtkhash -y
+
+	fi
+
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙   END CODE BLOCK FOR  FUNCTIONS SPECIFIC TO A  MATE DE DISTRO   ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙
+	#˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙													END
+	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙
+	##˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙˙ ͜ʟ˙
+
+	# PKG_NAME="mkusb"
+	# FUN_VERBOSE_INSTALLING
+	# sudo add-apt-repository -y ppa:mkusb/ppa
+	# sudo apt update
+	# sudo apt install -y mkusb
+	# sudo apt install -y usb-pack-efi # package to make persistent drives
+
+	BANNER_PKG_NAME_MSG="live-boot"
+	PKG_NAME="live-boot"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y live-boot
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	BANNER_PKG_NAME_MSG="CUBIC ubuntu"
+	PKG_NAME="cubic"
+	FUN_VERBOSE_INSTALLING
+	####
+	###  Add CUBIC (Custom Ubuntu ISO Creator) PPA
+	sudo apt update
+	echo -ne "\n" | sudo apt-add-repository universe
+	echo -ne "\n" | sudo apt-add-repository ppa:cubic-wizard/release
+	sudo apt update
+	sudo apt install --no-install-recommends cubic -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+	###
+	####
+
+	####
+	###
+	BANNER_PKG_NAME_MSG=" MAINLINE kernel instller VIA gui"
+	FUN_VERBOSE_INSTALLING
+	echo -ne "\n" | sudo add-apt-repository ppa:cappelikan/ppa
+	echo -ne "\n" | sudo apt update
+	sudo apt install -y mainline
+	###
+	####
+
+	BANNER_PKG_NAME_MSG="macchanger"
+	PKG_NAME="macchanger"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y debconf-utils
+	echo macchanger macchanger/automatically_run boolean false | sudo debconf-set-selections #set preseed of install question
+	sudo apt install macchanger -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	######################################################################################
+	##### install VIRTUALBOX 7.1 & add users to vboxusers // MANUALLY Import VirtualBox Repo GPG Key ######################
+	##################
+	#guest additions iso file is in /usr/share/virtualbox
+	#######################################################################
+	BANNER_PKG_NAME_MSG="Install  VIRTUALBOX 7.1 --- MANUALLY Import VirtualBox Repo GPG Key"
+	PKG_NAME="virtualbox-7.1"
+	FUN_VERBOSE_INSTALLING
+	sudo apt update
+	sleep 1
+	sudo mkdir -p /etc/apt/keyrings
+	wget -q -O- https://www.virtualbox.org/download/oracle_vbox_2016.asc | sudo gpg --dearmor --yes --output /etc/apt/keyrings/oracle-virtualbox-2016.gpg
+
+	cat <<EOF | sudo tee /etc/apt/sources.list.d/virtualbox.sources
+Types: deb
+URIs: https://download.virtualbox.org/virtualbox/debian
+Suites: $(cat /etc/os-release | grep UBUNTU_CODENAME= | cut -d = -f2 | tr -d '[:space:]')
+Components: contrib
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/oracle-virtualbox-2016.gpg
+
+EOF
+	sudo apt update
+	sudo apt install -y virtualbox-7.1
+
+	# packages and options to unattended install virtualbox-ext-pack
+	sudo apt install -y debconf-utils
+	echo virtualbox-ext-pack virtualbox-ext-pack/license select true | sudo debconf-set-selections
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+	#wget -qO- :q quiet:  -O- Output the content directly to the terminal (stdout)
+	LATEST_VERSION_EXT_PACK=$(wget -qO- https://www.virtualbox.org/wiki/Downloads | grep -o 'Oracle_VirtualBox_Extension_Pack-[0-9]\+\.[0-9]\+\.[0-9]\+' | sed 's/Oracle_VirtualBox_Extension_Pack-\(.*\)/\1/' | tr -d '[:space:]')
+	wget https://download.virtualbox.org/virtualbox/${LATEST_VERSION_EXT_PACK}/Oracle_VirtualBox_Extension_Pack-${LATEST_VERSION_EXT_PACK}.vbox-extpack -P ./AUTO-INSTALLS-FILES/WORKER-TEMP
+	#echo virtualbox-ext-pack/license	select	true | sudo debconf-set-selections
+	yes | sudo VBoxManage extpack install ./AUTO-INSTALLS-FILES/WORKER-TEMP/*.vbox-extpack
+
+	#install virtualbox guest additions iso
+	if [ -f /usr/share/virtualbox/VBoxGuestAdditions.iso ]; then
+		echo "VBoxGuestAdditions.iso exists in [/usr/share/virtualbox] ... installing"
+		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		7z x /usr/share/virtualbox/VBoxGuestAdditions.iso -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+		sudo chmod 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/*
+		sudo ./AUTO-INSTALLS-FILES/WORKER-TEMP/VBoxLinuxAdditions.run
+		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+	else
+		echo "VBoxGuestAdditions.iso does not exist in [/usr/share/virtualbox] ... skipping"
+	fi
+
+	sudo usermod -aG vboxusers $USER
+	# enable VIRTUALBOX raw disk access without root
+	sudo usermod -aG disk $USER
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+	######################################################################
+	######################################################################
+	###······································································································
+	###······································································································
+
+	# ######################################################################################
+	# ##### install VIRTUALBOX & add users to vboxusers from repository ######################
+	# ##################
+	# #######################################################################
+	# BANNER_PKG_NAME_MSG="Install  VIRTUALBOX via apt package manager repository"
+	# PKG_NAME="virtualbox debconf-utils virtualbox-ext-pack virtualbox-guest-utils virtualbox-guest-additions-iso"
+	# FUN_VERBOSE_INSTALLING
+	# sudo apt update
+	# sleep 1
+	# sudo apt install -y virtualbox
+	# # packages and options to unattended install virtualbox-ext-pack
+	# sudo apt install -y debconf-utils
+	# echo virtualbox-ext-pack virtualbox-ext-pack/license select true | sudo debconf-set-selections
+	# sudo apt install -y virtualbox-ext-pack
+	# # you can go on with your day automating the heck out of things :-)
+	# sudo apt install -y virtualbox-guest-utils
+	# sudo apt install -y virtualbox-guest-additions-iso #iso file will be located in /usr/share/virtualbox
+	# sudo usermod -aG vboxusers $USER
+	# # enable VIRTUALBOX raw disk access without root
+	# sudo usermod -aG disk $USER
+	# FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+	# ######################################################################
+	# ######################################################################
+	# ###······································································································
+	# ###······································································································
+
+	###······································································································
+	### INSTALL LINUX-WIFI-HOTSPOT Build From Source GITHUBBBBBBB !!!! .......................
+	# Install its dependencies
+	BANNER_PKG_NAME_MSG="LINUX-WIFI-HOTSPOT"
+	PKG_NAME="linux-wifi-hotspot"
+	FUN_VERBOSE_INSTALLING
+	echo -ne "\n" | sudo add-apt-repository ppa:lakinduakash/lwh
+	sudo apt update
+	sudo apt install linux-wifi-hotspot -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+	###########################
+
+	############################################################################################################################
+	###·!!!!!·+··/.*\··+··^··+·/···+·\···+·|··*··`···\'/.···+······.*··`··+···^····+·*.··'·/,.···`···+··+··\···^··.*/|···+···*+
+	###·!!!!!···+····+····+····+····+······· NETWORKING INSTALLS FOR  FILE SHARING OVER NETWORK ····+··········+·······+·····+·
+	###·!!!!!·+··/.*\··+··^··+·/···+·\···+·|··*··`···\'/.···+······.*··`··+···^····+·*.··'·/,.···`···+··+··\···^··.*/|···+···*+
+	###·!!!!!···················································································································
+	###·!!!!!···················································································································
+	###·!!!!!···+····+····+····+····+·····*······+··········+·······+············+·····*·····+······+············*···········+···
+	###·!!!!!··························[ SAMBA & for general file sharing over network]·················+···
+	BANNER_PKG_NAME_MSG="installing  SAMBA"
+	PKG_NAME="samba"
+	FUN_VERBOSE_INSTALLING
+	sudo apt install -y samba
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	###·!!!!!···+····+····+····+····+·····*······+··········+·······+············+·····*·····+······+············*···········+···
+	###·!!!!!···+····+····+····+····+······*·····+··········+·······+············+··········+······+··········*·············+···
+	###·!!!!!·+··/.*\··+··^··+·/···+·\···+·|··*··`···\'/.···+······.*··`··+···^····+·*.··'·/,.···`···+··+··\···^··.*/|···+···*+
+	###·!!!!!·+··/.*\··+··^··+·/···+·\···+·|··*··`···\'/.···+······.*··`··+···^····+·*.··'·/,.···`···+··+··\···^··.*/|···+···*+
+	############################################################################################################################
+
+	## install google chrome .deb file in terminal
+	BANNER_PKG_NAME_MSG="install google chrome .deb (wget downloaded) file in terminal"
+	PKG_NAME="google-chrome-stable"
+	FUN_VERBOSE_INSTALLING
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+	wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -P ./AUTO-INSTALLS-FILES/WORKER-TEMP/
+	sudo apt install -y ./AUTO-INSTALLS-FILES/WORKER-TEMP/google-chrome-stable_current_amd64.deb
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+	# to be able to run google-chrome browser from/while being root user
+	sudo sed -i 's+exec -a "$0" "$HERE/chrome" "$@"+exec -a "$0" "$HERE/chrome" "$@" --user-data-dir --test-type --no-sandbox+g' /opt/google/chrome/google-chrome
+	##.........
+
+	##### copy WARES_INCLUDED from AUTO-INSTALLS-FILES/WARES/WARES/INCLUDED to $HOME & /etc/skel to make available to all users
+	BANNER_PKG_NAME_MSG="copy WARES_INCLUDED from AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED to $HOME & /etc/skel to make available to all users"
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED /etc/skel
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED $HOME
+
+	## fix directories in /etc/skel... since adding any other directories than the oficial ones will create a blank drop down menu for places
+	sudo mkdir /etc/skel/Desktop
+	sudo mkdir /etc/skel/Documents
+	sudo mkdir /etc/skel/Downloads
+	sudo mkdir /etc/skel/Music
+	sudo mkdir /etc/skel/Pictures
+	sudo mkdir /etc/skel/Public
+	sudo mkdir /etc/skel/Templates
+	sudo mkdir /etc/skel/Videos
+
+	############### install CUSTOM-SH-SCRIPTS to /bin/CUSTOM-SH-SCRIPTS & /bin  and must add user permissions to it chmod 777
+	BANNER_PKG_NAME_MSG="install CUSTOM-SH-SCRIPTS to /bin/CUSTOM-SH-SCRIPTS & /bin"
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE
+	sudo cp -rf $CD_DIRNAME/AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS /bin
+	sudo chmod -Rf 777 /bin/CUSTOM-SH-SCRIPTS
+
+	sudo sed -i 's|export PATH=$PATH:/bin/CUSTOM-SH-SCRIPTS||g' /etc/profile
+	echo "export PATH=$PATH:/bin/CUSTOM-SH-SCRIPTS" | sudo tee -a /etc/profile
+
+	sudo cp -rf $CD_DIRNAME/AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS/* /bin
+	sudo chmod -R 777 /bin/custom*
+	######################################
+
+	#..................................................................................
+	# Automatically add users to groups..................................
+	sudo sed -i 's/#EXTRA_GROUPS=*.*/EXTRA_GROUPS="vboxusers disk libvirt libvirt-qemu kvm"/' /etc/adduser.conf 2>/dev/null
+	sudo sed -i 's/#ADD_EXTRA_GROUPS=*.*/ADD_EXTRA_GROUPS=1/' /etc/adduser.conf 2>/dev/null
+	# ....................................................................................
+
+	# ....................................................................................
+	# ......  DISABLE AUTO UPGRADES/UPDATES ON LINUX
+
+	sudo sed -i 's/APT::Periodic::Update-Package-Lists "1";/APT::Periodic::Update-Package-Lists "0";/g' /etc/apt/apt.conf.d/20auto-upgrades
+	sudo sed -i 's/APT::Periodic::Unattended-Upgrade "1";/APT::Periodic::Unattended-Upgrade "0";/g' /etc/apt/apt.conf.d/20auto-upgrades
+
+	# ....................................................................................
+
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via systemd unit file :: to run : AT BOOT : NOTE: IF SYSTEMD IS AVAILABE, ELSE; USE CRONTAB
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via systemd unit file :: to run : AT BOOT : NOTE: IF SYSTEMD IS AVAILABE, ELSE; USE CRONTAB
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via systemd unit file :: to run : AT BOOT : NOTE: IF SYSTEMD IS AVAILABE, ELSE; USE CRONTAB
+	BANNER_PKG_NAME_MSG="C-CO-OM-MA-AN-ND-DS-S TO RUN AT BOOT UP  ... via systemd unit file :: to run : AT BOOT UP"
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE
+
+	sudo mkdir -p /etc/systemd/system/CUST-SYSD
+	sudo chmod 777 -R /etc/systemd/system/CUST-SYSD
+
+	cat <<EOF | sudo tee /etc/systemd/system/CUST-SYSD/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.bash
+#!/bin/bash
+
+#◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕
+## This is the executable bash file for:
+##      [C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.service]
+## located at:
+##      [/etc/systemd/system/CUST-SYSD/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.bash]
+##  systemd unit/service
+#◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕◕
+# Input Commands To Run At startup   ◕
+#######################################
+#  Input Commands To Run At startup  ◕
+#######################################
+
+
+sudo dpkg --configure -a
+sudo systemctl start libvirtd
+sudo update-icon-caches /usr/share/icons/*
+
+EOF
+
+	cat <<EOF | sudo tee /etc/systemd/system/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.service
+[Unit]
+Description=Run script at startup after all systemd services are loaded
+After=multi-user.target
+
+[Service]
+ExecStart=/etc/systemd/system/CUST-SYSD/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.bash
+RestartSec=5
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+EOF
+
+	sudo chmod 777 /etc/systemd/system/CUST-SYSD/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.bash
+	sudo systemctl daemon-reload
+	sudo systemctl enable C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.service
+	sudo systemctl start C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.service
+
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via systemd unit file  END END END$$
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via systemd unit file  END END END$$
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via systemd unit file  END END END$$
+
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP AT BOOT UP  ... via crontab .. non interactively
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP AT BOOT UP  ... via crontab .. non interactively
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP AT BOOT UP  ... via crontab .. non interactively
+	BANNER_PKG_NAME_MSG="RUN COMMANDS AT BOOT UP  ... via crontab .. non interactively"
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE
+
+	#create crontab config file via Bash -HEREDOC - <cat HereDOC>
+	cat <<EOF | sudo tee /tmp/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP-CRONTAB.tmp
+@reboot sleep 12 && sudo update-icon-caches /usr/share/icons/*
+@reboot sleep 12 && sudo dpkg --configure -a
+@reboot sleep 12 && sudo systemctl start libvirtd
+
+EOF
+
+	sudo crontab /tmp/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP-CRONTAB.tmp
+
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via crontab .. non interactively END END END
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via crontab .. non interactively END END END
+	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via crontab .. non interactively END END END
+
+} ##ENDING OF FUNCTION

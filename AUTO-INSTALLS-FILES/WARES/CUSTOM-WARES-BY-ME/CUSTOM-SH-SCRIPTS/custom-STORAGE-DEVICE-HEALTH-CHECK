@@ -1,0 +1,152 @@
+#!/bin/bash
+#check dependency nvme-cli and smartmontools is installed and install if not already
+for PACKAGE in nvme-cli smartmontools; do                                              # the dependencies needed
+    if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
+        echo "dependency $PACKAGE is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y $PACKAGE
+
+        if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then #exits if package is not installed even after installation code was executed...something went wrong
+            echo "Posibly didn't install dependency $PACKAGE .. exiting"
+            exit
+        fi
+    fi
+done
+
+export NEWT_COLORS='
+root=green,black
+border=green,black
+title=green,black
+roottext=white,black
+window=green,black
+textbox=white,black
+button=black,green
+compactbutton=white,black
+listbox=white,black
+actlistbox=black,white
+actsellistbox=black,green
+checkbox=green,black
+actcheckbox=black,green
+'
+
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+function FUN_OBTAIN_STORAGE_DEVICES {
+
+    sudo nvme list | grep -E -o -w "/dev/nvme[0-9][a-z][0-9]" >/tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp
+
+    # check if there is a sdXX device
+    if find /dev/ | grep -w "sd[a-z]" >/dev/null; then
+        find /dev/ | grep -w -o "/dev/sd[a-z]" | sort >>/tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp
+    fi
+
+    NUMBERED_DEV_ITEMS=$(nl -s " " /tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp)
+    DEV_ITEMS_COUNT=$(cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp | wc -l)
+
+    SELECTION=$(whiptail --title "Storage Device Health Checker" --menu "Select device" 0 0 $DEV_ITEMS_COUNT $NUMBERED_DEV_ITEMS 3>&1 1>&2 2>&3)
+
+    if [ -z $SELECTION ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    SELECTED_STORAGE_DEV=$(cat -n /tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp | grep -w $SELECTION | sed "s/$SELECTION//1" | tr -d '[:space:]')
+
+    echo $SELECTED_STORAGE_DEV
+    echo $SELECTED_STORAGE_DEV
+    echo $SELECTED_STORAGE_DEV
+    # other ways of eliminating the first character
+    #echo $(cat -n /tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp | grep -w 3) | sed s/^.//
+    #echo $(cat -n /tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp | grep -w 3) | cut -c 2-50 | tr -d '[:space:]'
+    # cat -n /tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp | grep -w $SELECTION | cut -f2 | tr -d '[:space:]'
+    # cat -n /tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp | grep -w 2 | tr -d '[:space:]' | sed s/^.//
+    #<><>##<><>##<><>##<><>##<><>##<><>##<><>##<><>##<><>##<><>##<><>##<><>##<><>##<><>##<><>##<><>#
+    # sed -i "s/$SELECTION//1" /tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST-FINALS.tmp #replaces only first occurrence of pattern match from a file
+    # sed "s/$SELECTION//1" /tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST-FINALS.tmp #replaces only first occurrence of pattern match from a stdin ... such as a pipe
+
+}
+
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+
+FUN_STORAGE_HEALTH_INFO_NVME() {
+
+    if echo $SELECTED_STORAGE_DEV | grep nvme; then
+        tput setab 130
+        sudo nvme smart-log $SELECTED_STORAGE_DEV -H | tee /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+        tput setab 234
+        sudo smartctl -a $SELECTED_STORAGE_DEV | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+        tput setab 5
+        sudo smartctl -H $SELECTED_STORAGE_DEV | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep -E "Model Number: " | tee /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep -E "Total NVM Capacity: " | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "critical_warning" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "temperature" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "available_spare" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        echo "" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "percentage_used" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "Data Units Read:" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "Data Units Written:" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "power_on_hours" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        echo "" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "media_errors" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "Warning Temperature Time" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "Critical Composite Temperature Time" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "Temperature Sensor 1" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "Temperature Sensor 2" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+        cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep -w "SMART overall-health self-assessment test result:" | head -1 | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+
+        whiptail --backtitle "$(cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | grep "percentage_used" | head -1 | tr -d '[:space:]')" \
+            --title "SHORT SUMMARY FOR: $SELECTED_STORAGE_DEV" --msgbox "$(cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp)" 0 0 3>&1 1>&2 2>&3
+
+    fi
+
+}
+
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+
+FUN_STORAGE_HEALTH_INFO_SDX() {
+
+    if echo $SELECTED_STORAGE_DEV | grep -w "sd[a-z]"; then
+
+        tput setab 103
+        tput setaf 15
+        sudo smartctl -a $SELECTED_STORAGE_DEV | tee /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+        tput setab 67
+        tput setaf 82
+        sudo smartctl -H $SELECTED_STORAGE_DEV | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+
+        whiptail --backtitle "SMART overall health: $(sudo smartctl -H $SELECTED_STORAGE_DEV | grep "self-assessment test result:" | cut -d: -f2 | tr -d '[:space:]')" \
+            --title "SHORT SUMMARY FOR: $SELECTED_STORAGE_DEV" --msgbox "$(cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp)" 0 0 3>&1 1>&2 2>&3
+    fi
+
+}
+
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+#(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ(つ◉益◉)つ
+
+FUN_OBTAIN_STORAGE_DEVICES
+# Display Storage Health info for NVME If Selected Device is NVME Type
+FUN_STORAGE_HEALTH_INFO_NVME
+# Display Storage Health info for SDX/SATA If Selected Device is SDX/SATA Type
+FUN_STORAGE_HEALTH_INFO_SDX
+
+unset NEWT_COLORS

@@ -1,0 +1,86 @@
+#!/bin/bash
+
+export NEWT_COLORS='
+root=white,brightmagenta
+border=yellow,black
+window=brightmagenta,brightblue
+shadow=green,yellow
+title=white,brightblue
+button=brightmagenta,black
+actbutton=black,lightgray
+checkbox=lightgray,black
+actcheckbox=brightgreen,green
+entry=black,white
+label=brightgreen,brightmagenta
+listbox=white,gray
+actlistbox=black,red
+textbox=black,yellow
+acttextbox=brightred,green
+helpline=lightgray,green
+roottext=green,lightgray
+emptyscale=green,brightmagenta
+fullscale=yellow,brightgreen
+disentry=brightblue,lightgray
+compactbutton=white,gray
+actsellistbox=black,yellow
+sellistbox=brightmagenta,lightgray'
+
+_MASTER_CHOICE=$(whiptail --fullbuttons --title "NIC [ETHERNET] SPEED CONFIGURATOR" --menu "NIC [ETHERNET] SPEED CONFIGURATOR" 0 0 2 \
+    1 "Set NIC {ETHERNET} SPEED" 2 "VIEW NIC [ETHERNET] CONFIGURATION & CAPABILITIES" 3>&1 1>&2 2>&3)
+
+case $_MASTER_CHOICE in
+1)
+
+    _COUNT_ETHERNET_NICS=$(ip a | cut -d ' ' -f2 | sed 's/://g' | grep -o -w "enp.*" | wc -l)
+    _MENU_BODY_ETHERNET_NICS=$(ip a | cut -d ' ' -f2 | sed 's/://g' | grep -o -w "enp.*" | cat -n | tr -s ' ' | sed 's/^ //g')
+
+    _SELECT_ETHERNET_NIC=$(whiptail --fullbuttons --title "Select NIC [ETHERNET interface]" --menu "Select NIC [ETHERNET interface]" 0 0 "$_COUNT_ETHERNET_NICS" $_MENU_BODY_ETHERNET_NICS 3>&1 1>&2 2>&3)
+
+    _SELECT_ETHERNET_NIC_SANITIZED_FINAL=$(ip a | cut -d ' ' -f2 | sed 's/://g' | grep -o -w "enp.*" | cat -n | tr -s ' ' | sed 's/^ //g' | grep -w "^${_SELECT_ETHERNET_NIC}" | sed "s/^${_SELECT_ETHERNET_NIC}//1" | tr -d '[:space:]')
+
+    sudo ethtool "$_SELECT_ETHERNET_NIC_SANITIZED_FINAL" | sed -n '/Supported link modes:/, /Supported pause frame use:/{/Supported pause frame use:/!p}' | tr -d '\t' >/tmp/CUSTOM-AVAILABLE-NIC-ETHERNET-SPEEDS-BANNER-TEXT.tmp
+
+    #now we choose what network speed for ethernet NIC
+    _AVAILABLE_NIC_SPEEDS_COUNT=$(cat /tmp/CUSTOM-AVAILABLE-NIC-ETHERNET-SPEEDS-BANNER-TEXT.tmp | sed 's/Supported link modes://g' | sed 's/ //g' | wc -l)
+    _AVAILABLE_NIC_SPEEDS_MENU_BODY=$(cat /tmp/CUSTOM-AVAILABLE-NIC-ETHERNET-SPEEDS-BANNER-TEXT.tmp | sed 's/Supported link modes://g' | sed 's/ //g' | cat -n | cut -d/ -f1 | sed 's/baseT//g')
+
+    _SELECTED_NIC_ETHERNET_SPEED=$(whiptail --scrolltext --fullbuttons --title "Select Speed for [$_SELECT_ETHERNET_NIC_SANITIZED_FINAL]" --menu "$(cat /tmp/CUSTOM-AVAILABLE-NIC-ETHERNET-SPEEDS-BANNER-TEXT.tmp)" 0 0 "$_AVAILABLE_NIC_SPEEDS_COUNT" $_AVAILABLE_NIC_SPEEDS_MENU_BODY 3>&1 1>&2 2>&3)
+
+    _SELECTED_NIC_ETHERNET_SPEED_SANITIZED_FINAL=$(printf "%s\n" "$_AVAILABLE_NIC_SPEEDS_MENU_BODY" | sed 's/ //g' | grep -w "^$_SELECTED_NIC_ETHERNET_SPEED" | sed "s/$_SELECTED_NIC_ETHERNET_SPEED//1" | tr -d '[:space:]')
+
+    #here we actually set the ethernet NIC speed
+    sudo ethtool -s "$_SELECT_ETHERNET_NIC_SANITIZED_FINAL" autoneg off speed "$_SELECTED_NIC_ETHERNET_SPEED_SANITIZED_FINAL" duplex full
+
+    sleep 0.1
+
+    sudo ip link set "$_SELECT_ETHERNET_NIC_SANITIZED_FINAL" down
+    sleep 0.1
+    sudo ip link set "$_SELECT_ETHERNET_NIC_SANITIZED_FINAL" up
+
+    ;;
+
+2)
+
+    _COUNT_ETHERNET_NICS=$(ip a | cut -d ' ' -f2 | sed 's/://g' | grep -o -w "enp.*" | wc -l)
+    _MENU_BODY_ETHERNET_NICS=$(ip a | cut -d ' ' -f2 | sed 's/://g' | grep -o -w "enp.*" | cat -n | tr -s ' ' | sed 's/^ //g')
+
+    _SELECT_ETHERNET_NIC=$(whiptail --fullbuttons --title "Select NIC [ETHERNET interface]" --menu "Select NIC [ETHERNET interface]" 0 0 "$_COUNT_ETHERNET_NICS" $_MENU_BODY_ETHERNET_NICS 3>&1 1>&2 2>&3)
+
+    _SELECT_ETHERNET_NIC_SANITIZED_FINAL=$(ip a | cut -d ' ' -f2 | sed 's/://g' | grep -o -w "enp.*" | cat -n | tr -s ' ' | sed 's/^ //g' | grep -w "^${_SELECT_ETHERNET_NIC}" | sed "s/^${_SELECT_ETHERNET_NIC}//1" | tr -d '[:space:]')
+
+    sudo ethtool "$_SELECT_ETHERNET_NIC_SANITIZED_FINAL" | tee /tmp/CUSTOM_ETHERNET_NIC_ETHTOOL_INFO.tmp
+
+    whiptail --scrolltext --textbox /tmp/CUSTOM_ETHERNET_NIC_ETHTOOL_INFO.tmp 0 0 
+
+    echo -e "\n ::::::: RAN ::: sudo ethtool $_SELECT_ETHERNET_NIC_SANITIZED_FINAL"
+
+    ;;
+
+*)
+
+    echo "USER AORTED ... EXITING ..."
+    exit
+    ;;
+esac
+
+unset NEWT_COLORS

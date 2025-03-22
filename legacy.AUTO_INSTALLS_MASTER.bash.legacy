@@ -1,0 +1,213 @@
+#!/bin/bash
+
+###DONT RUN AS SUDO; RUN AS NORMAL USER AND IT WILL PROMPT YOU FOR SUDO PASSWORD
+## !!!! RUN THIS SCRIPT BY ITS ABSOLUTE PATH ALWAYS!!
+## ALWAYS BE OR TRY TO BE IN THE SCRIPTS DIRECTORY !
+
+CD_DIRNAME=${0%AUTO_INSTALLS_MASTER.bash} #precede with cd to cd into basename directory (cd $CD_DIRNAME)
+#cd ${0%AUTO_INSTALLS_MASTER.bash}
+cd $CD_DIRNAME || exit # exits if cant cd into directory
+
+FUN_VERBOSE_INSTALLING() {
+    echo ""
+    tput setab 7
+    tput setaf 18
+    echo "-_-_-_-_-_-_-_-_-_-_-_installing  $PKG_NAME  _-_-_-_-_-_-_-_-_-_-_"
+    tput sgr0
+    sudo apt update
+    sleep 1
+    sudo apt --fix-broken install -y
+    tput setab 7
+    tput setaf 18
+    echo "-_-_-_-_-_-_-_-_-_-_-_installing  $PKG_NAME  _-_-_-_-_-_-_-_-_-_-_"
+    tput sgr0
+}
+
+FUN_VERBOSE_INSTALLING_NO_APT_UPDATE() {
+    echo ""
+    tput setab 7
+    tput setaf 18
+    echo "-_-_-_-_-_-_-_-_-_-_-_installing  $PKG_NAME  _-_-_-_-_-_-_-_-_-_-_"
+    tput sgr0
+}
+
+
+FUN_CHOICE_BLOCK_INDICATOR () {
+    echo ""
+    tput setab 112; tput setaf 234; tput bold
+    echo "_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-"
+
+    echo -e "\n-_-_-_-_-_-_-_-_-_-_-_installing  $CHOICE_BLOCK_INDICATOR  _-_-_-_-_-_-_-_-_-_-_ \n"
+    
+    echo "_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-"
+    tput sgr0
+
+
+}
+
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##        for running a command as root  one liner :: sudo su -c ' command to run'
+
+############# file descriptors 0, 1 and 2 also known as
+############# 204 # 0 standard input (stdin),
+############# 205 # 1 standard output (stdout)
+############# 206 # 2 and standard error (stderr).
+############# 207 #or ?
+############# 208 # 1 stdin
+############# 209 # 2 stdout
+############# 210 # 3 error
+############# 211 foobar=$(whiptail --inputbox "REDIRECT TEST Enter some text" 10 30\
+############# 212  3>&1 1>&2 2>&3)
+############# 213 # error to input
+############# 214 # input to output
+############# 215 # output to error
+
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)##%$)(*\/*)
+
+MAIN_CHOICE=$(whiptail --title AUTO-INSTALLS-MASTER! --backtitle "RUN SCRIPT BY ITS ABSOLUTE PATH!" --menu "Choice" 0 0 10 \
+    1 "Mate Desktops [MINT/UBUNTU] (Wares for all Mate Desktops )" \
+    2 "[LINUX MINT MATE SPECIFIC ! FULL SEND] Executes options 1 3 4 5" \
+    3 "Manually installed Wares Only [.DEB Files]" \
+    4 "[LINUX MINT MATE SPECIFIC] Runs Commands Specific to LINUX MINT MATE" \
+    5 "[LINUX MINT MATE SPECIFIC] COPY MATE PANEL SETTING & APP CONFIGS TO /ETC/SKEL" \
+    6 "[UBUNTU'S SPECIFIC] (Wares for Ubuntu Vanilla [GNOME DE])" \
+    7 "[UBUNTU'S SPECIFIC !!! Full  Send !!!] Executes options 6, 3, 8" \
+    8 "[UBUNTU'S SPECIFIC] COPY GNOME PANEL SETTING & APP CONFIGS TO /ETC/SKEL" \
+    9 "INSTALL GAMING CONSOLES ONLY" \
+    10 "INSTAL [INTEL OPENCL runtime]" \
+    3>&1 1>&2 2>&3)
+
+echo "chosen $MAIN_CHOICE"
+echo "chosen $MAIN_CHOICE"
+echo "chosen $MAIN_CHOICE"
+echo "chosen $MAIN_CHOICE"
+
+#echo $MAIN_CHOICE > /tmp/CUSTOM-TEMP-AUTOINSTALLS-MAIN-CHOICE.tmp
+
+# i think i should make each of these options into functions, so as to not repeat dso much code... maybe in future release
+
+case $MAIN_CHOICE in
+1)
+    echo "1. Mate Desktops [MINT/UBUNTU] (Wares for all Mate Desktops)"
+   
+
+    source ./WARES-LIB/FUNCTIONS_FOR_MAIN_CHOICE_EXT_LIB
+    FUN_MAIN_CHOICE_1
+
+
+    echo "	All DONE  with Choice  1	:D  :-)"
+
+    ;;
+
+2)
+    echo "2. [LINUX MINT MATE SPECIFIC ! FULL SEND] Executes options 1 3 4 5"
+
+    source ./WARES-LIB/FUNCTIONS_FOR_MAIN_CHOICE_EXT_LIB
+    FUN_MAIN_CHOICE_2
+   
+    echo "	All DONE  with Choice  2	:D  :-)"
+
+    ;;
+
+3)
+    echo " 3.  Manually installed Wares Only  [.DEB Files Only] "
+
+    source ./WARES-LIB/FUNCTIONS_FOR_MAIN_CHOICE_EXT_LIB
+    FUN_MAIN_CHOICE_3
+    echo "	All DONE  with Choice  3	:D  :-)"
+
+    ;;
+
+4)
+    echo "4. [LINUX MINT MATE SPECIFIC] Runs Commands Specific to LINUX MINT MATE "
+    source ./WARES-LIB/FUNCTIONS_FOR_MAIN_CHOICE_EXT_LIB
+    FUN_MAIN_CHOICE_4
+    echo "	All DONE  with Choice  4	:D  :-)"
+
+    ;;
+
+5) 
+    #NOTE: this is done using dconf [if you want it done via terminal] (but only works if access to GUI)...[cubic doesn't have gui] in cubic we copy the ~/.config/dconf/User file
+    echo "5. [LINUX MINT MATE SPECIFIC] COPY MATE PANEL SETTING & APP CONFIGS TO /ETC/SKEL"
+
+    source ./WARES-LIB/FUNCTIONS_FOR_MAIN_CHOICE_EXT_LIB
+    FUN_MAIN_CHOICE_5
+   
+    echo "All DONE  with Choice  5	:D  :-)"
+    ;;
+
+6)
+    echo "6. [UBUNTU'S SPECIFIC] "
+
+    source ./WARES-LIB/FUNCTIONS_FOR_MAIN_CHOICE_EXT_LIB
+    FUN_MAIN_CHOICE_6
+    echo "	All DONE  with Choice  6	:D  :-)"
+
+    ;;
+
+7)
+    source ./WARES-LIB/FUNCTIONS_FOR_MAIN_CHOICE_EXT_LIB
+    FUN_MAIN_CHOICE_7
+
+    echo "	All DONE  with Choice  7	:D  :-)"
+
+    ;;
+
+8)
+    source ./WARES-LIB/FUNCTIONS_FOR_MAIN_CHOICE_EXT_LIB
+    FUN_MAIN_CHOICE_8
+
+    echo "	All DONE  with Choice  8	:D  :-)"
+
+    ;;
+
+9)
+    source ./WARES-LIB/FUNCTIONS_FOR_MAIN_CHOICE_EXT_LIB
+    FUN_MAIN_CHOICE_9
+
+    echo "	All DONE  with Choice  9	:D  :-)"
+
+    ;;
+
+10)
+
+    source ./WARES-LIB/FUNCTIONS_FOR_MAIN_CHOICE_EXT_LIB
+    FUN_MAIN_CHOICE_10
+
+    echo "    All DONE  with Choice 10    :D  :-)"
+
+    ;;
+
+
+*)
+    echo "Unknown"
+    ;;
+
+esac

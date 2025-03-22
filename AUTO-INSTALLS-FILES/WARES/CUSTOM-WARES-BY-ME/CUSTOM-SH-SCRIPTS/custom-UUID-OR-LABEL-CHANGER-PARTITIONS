@@ -1,0 +1,478 @@
+#!/bin/bash
+# vvaall=$(uuidgen); echo ${vvaall^^}
+# check dependency btrfs-progs is installed and install it if not already installed
+for PACKAGE in btrfs-progs; do                                                         # the dependencies needed
+    if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
+        echo "dependency $PACKAGE is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y $PACKAGE
+
+        if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then #exits if package is not installed even after installation code was executed...something went wrong
+            echo "Posibly didn't install dependency $PACKAGE .. exiting"
+            exit
+        fi
+    fi
+done
+
+function FUN_REPEATING_HEX_CHARACTER {
+
+    REPEATED_HEX_CHAR=$(whiptail --menu "Select the [Repeating] Hex caracter to use For new partition UUID" 0 0 16 0 "0" 1 "1" 2 "2" 3 "3" 4 "4" 5 "5" 6 "6" 7 "7" 8 "8" 9 "9" A "A" B "B" C "C" D "D" E "E" F "F" 3>&1 1>&2 2>&3)
+
+    if [ -z $REPEATED_HEX_CHAR ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    REPEAT_UUID=$(echo "${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}-${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}-${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}-${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}-${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}${REPEATED_HEX_CHAR}" | tr -d '[:space:]')
+
+}
+
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+function FUN_SELECT_PARTITION_DEV {
+
+    lsblk -f -o NAME,FSTYPE,LABEL,UUID,SIZE | grep -w "ext4\|btrfs\|vfat" | sed 's/├─//g' | sed 's/└─//g' | sed 's/ /./g' >/tmp/custom-UUID-CHANGER-PARTITIONS-LIST.tmp
+
+    NL_PARTITIONS_UUID_CHANGER=$(cat -n /tmp/custom-UUID-CHANGER-PARTITIONS-LIST.tmp)
+    COUNT_PARTITIONS_UUID_CHANGER=$(cat /tmp/custom-UUID-CHANGER-PARTITIONS-LIST.tmp | wc -l)
+
+    SELECTED_PARTITION_CHOICE=$(whiptail --title "SELECT PARTITION TO CHANGE UUID" --menu "SELECT PARTITION TO CHANGE UUID" 0 0 $COUNT_PARTITIONS_UUID_CHANGER $NL_PARTITIONS_UUID_CHANGER 3>&1 1>&2 2>&3)
+
+    if [ -z "$SELECTED_PARTITION_CHOICE" ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    cat -n /tmp/custom-UUID-CHANGER-PARTITIONS-LIST.tmp | grep -w "$SELECTED_PARTITION_CHOICE" | head -1 | tr . "@" >/tmp/custom-UUID-CHANGER-SELECTED-PARTITION.tmp
+    sed -i "s/$SELECTED_PARTITION_CHOICE//1" /tmp/custom-UUID-CHANGER-SELECTED-PARTITION.tmp #replaces only first occurrence of pattern match
+
+    cat /tmp/custom-UUID-CHANGER-SELECTED-PARTITION.tmp | cut -d '@' -f1 | tr -d '[:space:]' >/tmp/custom-UUID-CHANGER-SELECTED-PARTITION-FINALS-DEV.tmp
+
+    #############################
+    # get partition number ... minor num
+
+    PARTITON_RESULT_DEV=$(cat /tmp/custom-UUID-CHANGER-SELECTED-PARTITION-FINALS-DEV.tmp | sed 's+^+/dev/+g' | tr -d '[:space:]')
+
+}
+
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+function FUN_PARTITION_FSTYPE_DECISION_UUID {
+
+    if lsblk -o FSTYPE $PARTITON_RESULT_DEV | sed 's/FSTYPE//' | tr -d '[:space:]' | grep ext4; then
+
+        echo "Target partition FSTYPE is ext4 "
+        FUN_UUID_CHANGER_PARTITION_FSTYPE_EXT4
+
+    elif lsblk -o FSTYPE $PARTITON_RESULT_DEV | sed 's/FSTYPE//' | tr -d '[:space:]' | grep btrfs; then
+
+        echo "Target partition FSTYPE is btrfs "
+
+        FUN_UUID_CHANGER_PARTITION_FSTYPE_BTRFS
+
+    elif lsblk -o FSTYPE $PARTITON_RESULT_DEV | sed 's/FSTYPE//' | tr -d '[:space:]' | grep vfat; then
+
+        _CHECK_IF_PARTITION_IS_FAT32=$(lsblk -o FSVER $PARTITON_RESULT_DEV | sed 's/FSVER//' | tr -d '[:space:]')
+
+        if [[ $_CHECK_IF_PARTITION_IS_FAT32 == "FAT32" ]]; then
+
+            echo "Target partition FSTYPE is vfat (FAT32) "
+            FUN_UUID_CHANGER_PARTITION_FSTYPE_VFAT_FAT32
+
+        else
+            echo "PARTITION:: $PARTITON_RESULT_DEV :: is [NOT FAT32] !!!! MUST BE A FAT32 PARTITION TO PROCEED WITH THIS OPTION"
+            echo "EXITING .................. "
+            exit
+        fi
+
+    fi
+
+}
+
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+function FUN_PARTITION_FSTYPE_DECISION_LABEL {
+
+    if lsblk -o FSTYPE $PARTITON_RESULT_DEV | sed 's/FSTYPE//' | tr -d '[:space:]' | grep ext4; then
+
+        echo "Target partition FSTYPE is ext4 "
+        FUN_LABEL_CHANGER_PARTITION_FSTYPE_EXT4
+
+    elif lsblk -o FSTYPE $PARTITON_RESULT_DEV | sed 's/FSTYPE//' | tr -d '[:space:]' | grep btrfs; then
+
+        echo "Target partition FSTYPE is btrfs "
+
+        FUN_LABEL_CHANGER_PARTITION_FSTYPE_BTRFS
+
+    elif lsblk -o FSTYPE $PARTITON_RESULT_DEV | sed 's/FSTYPE//' | tr -d '[:space:]' | grep vfat; then
+
+        _CHECK_IF_PARTITION_IS_FAT32=$(lsblk -o FSVER $PARTITON_RESULT_DEV | sed 's/FSVER//' | tr -d '[:space:]')
+
+        if [[ $_CHECK_IF_PARTITION_IS_FAT32 == "FAT32" ]]; then
+
+            echo "Target partition FSTYPE is vfat (FAT32) "
+            FUN_LABEL_CHANGER_PARTITION_FSTYPE_VFAT_FAT32
+
+        else
+            echo "PARTITION:: $PARTITON_RESULT_DEV :: is [NOT FAT32] !!!! MUST BE A FAT32 PARTITION TO PROCEED WITH THIS OPTION"
+            echo "EXITING .................. "
+            exit
+        fi
+
+    fi
+}
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+function FUN_LABEL_CHANGER_PARTITION_FSTYPE_VFAT_FAT32 {
+
+    printf "max [ 11 characters ]\n" >/tmp/CUSTOM-LABEL-CHANGER-BANNER-MESSAGE.tmp
+    printf "%-12s %-12s %-12s %8s\n" "$(lsblk -f -o NAME,FSTYPE,LABEL,SIZE "$PARTITON_RESULT_DEV")" >>/tmp/CUSTOM-LABEL-CHANGER-BANNER-MESSAGE.tmp
+
+    # FAT32 Has a label length limit of 11 characters
+    _FAT32_LABEL_CUSTOM=$(whiptail --fullbuttons --backtitle "MAX !!! [ 11 characters !!!!]" --title "INPUT new LABEL for [$PARTITON_RESULT_DEV]" --inputbox "$(cat /tmp/CUSTOM-LABEL-CHANGER-BANNER-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3)
+
+    _FAT32_LABEL_CUSTOM=$(echo $_FAT32_LABEL_CUSTOM | tr -d '[:space:]')
+
+    _FAT32_LABEL_CUSTOM_FINAL_SANITIZED=$(echo $_FAT32_LABEL_CUSTOM | tr -d '[:space:]')
+    _FAT32_LABEL_CUSTOM_FINAL_SANITIZED_LENGTH=$(echo $_FAT32_LABEL_CUSTOM_FINAL_SANITIZED | tr -d '[:space:]' | wc -m)
+
+    if [[ -z $_FAT32_LABEL_CUSTOM ]]; then
+        echo "ERORR ........ input LABEL is empty ..... EXITING"
+        exit
+    fi
+
+    if [[ $_FAT32_LABEL_CUSTOM_FINAL_SANITIZED_LENGTH -gt 11 ]]; then
+        echo "WARNING !! ... PARTITION NAME TOO LONG (ABOVE 11 CHAR) .... TRUNCATING"
+        _FAT32_LABEL_CUSTOM_FINAL_SANITIZED=$(echo "$_FAT32_LABEL_CUSTOM_FINAL_SANITIZED" | tr -d '[:space:]' | cut -c 1-11)
+    fi
+
+    if [[ -n $_FAT32_LABEL_CUSTOM ]] || [[ $_FAT32_LABEL_CUSTOM_FINAL_SANITIZED_LENGTH -le 11 ]]; then
+
+        sudo mlabel -i $PARTITON_RESULT_DEV ::"$_FAT32_LABEL_CUSTOM_FINAL_SANITIZED"
+
+    else
+        echo "ERORR ........ input LABEL is either empty or more than 11 characters ..... EXITING"
+        exit
+    fi
+
+}
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+function FUN_LABEL_CHANGER_PARTITION_FSTYPE_EXT4 {
+
+    printf "max [ 16 characters ]\n" >/tmp/CUSTOM-LABEL-CHANGER-BANNER-MESSAGE.tmp
+    printf "%-16s %-16s %-16s %8s\n" "$(lsblk -f -o NAME,FSTYPE,LABEL,SIZE "$PARTITON_RESULT_DEV")" >>/tmp/CUSTOM-LABEL-CHANGER-BANNER-MESSAGE.tmp
+
+    sudo e2fsck -y -f $PARTITON_RESULT_DEV
+    echo "░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+    _EXT4_LABEL_CUSTOM=$(whiptail --fullbuttons --backtitle "MAX !!! [ 16 characters !!!!]" --title "INPUT new LABEL for $PARTITON_RESULT_DEV" --inputbox "$(cat /tmp/CUSTOM-LABEL-CHANGER-BANNER-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3)
+    _EXT4_LABEL_CUSTOM=$(echo $_EXT4_LABEL_CUSTOM | tr -d '[:space:]')
+    _EXT4_LABEL_CUSTOM_FINAL_SANITIZED=$(echo $_EXT4_LABEL_CUSTOM | tr -d '[:space:]')
+    _EXT4_LABEL_CUSTOM_FINAL_SANITIZED_LENGTH=$(echo $_EXT4_LABEL_CUSTOM_FINAL_SANITIZED | tr -d '[:space:]' | wc -m)
+
+    if [[ -z $_EXT4_LABEL_CUSTOM ]]; then
+        echo "ERORR ........ input LABEL is empty ..... EXITING"
+        exit
+    fi
+
+    if [[ $_EXT4_LABEL_CUSTOM_FINAL_SANITIZED_LENGTH -gt 16 ]]; then
+        echo "WARNING !! ... PARTITION NAME TOO LONG (ABOVE 16 CHAR) .... TRUNCATING"
+        _EXT4_LABEL_CUSTOM_FINAL_SANITIZED=$(echo "$_EXT4_LABEL_CUSTOM_FINAL_SANITIZED" | tr -d '[:space:]' | cut -c 1-16)
+    fi
+
+    if [[ -n $_EXT4_LABEL_CUSTOM ]] || [[ $_EXT4_LABEL_CUSTOM_FINAL_SANITIZED_LENGTH -le 16 ]]; then
+        sudo tune2fs -L "$_EXT4_LABEL_CUSTOM_FINAL_SANITIZED" $PARTITON_RESULT_DEV
+    else
+        echo "ERORR ........ input LABEL is either empty or more than 16 characters ..... EXITING"
+        exit
+    fi
+
+}
+
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+function FUN_LABEL_CHANGER_PARTITION_FSTYPE_BTRFS {
+
+    printf "max [ 255 characters ]\n" >/tmp/CUSTOM-LABEL-CHANGER-BANNER-MESSAGE.tmp
+    printf "%-16s %-16s %-16s %8s\n" "$(lsblk -f -o NAME,FSTYPE,LABEL,SIZE "$PARTITON_RESULT_DEV")" >>/tmp/CUSTOM-LABEL-CHANGER-BANNER-MESSAGE.tmp
+
+    sudo btrfs check --readonly $PARTITON_RESULT_DEV
+    echo "░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+    _BTRFS_LABEL_CUSTOM=$(whiptail --fullbuttons --backtitle "MAX !!! [ 255 characters !!!!]" --title "INPUT new LABEL for $PARTITON_RESULT_DEV" --inputbox "$(cat /tmp/CUSTOM-LABEL-CHANGER-BANNER-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3)
+    _BTRFS_LABEL_CUSTOM=$(echo $_BTRFS_LABEL_CUSTOM | tr -d '[:space:]')
+    _BTRFS_LABEL_CUSTOM_FINAL_SANITIZED=$(echo $_BTRFS_LABEL_CUSTOM | tr -d '[:space:]')
+    _BTRFS_LABEL_CUSTOM_FINAL_SANITIZED_LENGTH=$(echo $_BTRFS_LABEL_CUSTOM_FINAL_SANITIZED | tr -d '[:space:]' | wc -m)
+
+    if [[ -z $_BTRFS_LABEL_CUSTOM ]]; then
+        echo "ERORR ........ input LABEL is empty ..... EXITING"
+        exit
+    fi
+
+    if [[ $_BTRFS_LABEL_CUSTOM_FINAL_SANITIZED_LENGTH -gt 255 ]]; then
+        echo "WARNING !! ... PARTITION NAME TOO LONG (ABOVE 255 CHAR) .... TRUNCATING"
+        _BTRFS_LABEL_CUSTOM_FINAL_SANITIZED=$(echo "$_BTRFS_LABEL_CUSTOM_FINAL_SANITIZED" | tr -d '[:space:]' | cut -c 1-255)
+    fi
+
+    if [[ -n $_BTRFS_LABEL_CUSTOM ]] || [[ $_BTRFS_LABEL_CUSTOM_FINAL_SANITIZED_LENGTH -le 255 ]]; then
+
+        sudo btrfs filesystem label "$PARTITON_RESULT_DEV" "$_BTRFS_LABEL_CUSTOM_FINAL_SANITIZED"
+
+    else
+        echo "ERORR ........ input LABEL is either empty or more than 255 characters ..... EXITING"
+        exit
+    fi
+
+}
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+function FUN_UUID_CHANGER_PARTITION_FSTYPE_EXT4 {
+    sudo e2fsck -y -f $PARTITON_RESULT_DEV
+    echo "░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+    if [ $REPEAT_OR_RANDOM_HEX -eq 1 ]; then
+        FUN_REPEATING_HEX_CHARACTER
+
+        sudo tune2fs -U $REPEAT_UUID $PARTITON_RESULT_DEV
+
+    elif [ $REPEAT_OR_RANDOM_HEX -eq 2 ]; then
+        echo "Random uuid"
+        UUIDGEN_VAL_RANDOM=$(uuidgen)
+        UUIDGEN_RANDOM_CAP=$(echo "${UUIDGEN_VAL_RANDOM^^}" | tr -d '[:space:]')
+
+        sudo tune2fs -U $UUIDGEN_RANDOM_CAP $PARTITON_RESULT_DEV
+    fi
+
+}
+
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+function FUN_UUID_CHANGER_PARTITION_FSTYPE_BTRFS {
+    sudo btrfs check --readonly $PARTITON_RESULT_DEV
+    echo "░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+    if [ $REPEAT_OR_RANDOM_HEX -eq 1 ]; then
+        FUN_REPEATING_HEX_CHARACTER
+
+        sudo btrfstune -U $REPEAT_UUID $PARTITON_RESULT_DEV
+
+    elif [ $REPEAT_OR_RANDOM_HEX -eq 2 ]; then
+        echo "Random uuid"
+        UUIDGEN_VAL_RANDOM=$(uuidgen)
+        UUIDGEN_RANDOM_CAP=$(echo "${UUIDGEN_VAL_RANDOM^^}" | tr -d '[:space:]')
+
+        sudo btrfstune -U $UUIDGEN_RANDOM_CAP $PARTITON_RESULT_DEV
+
+    fi
+
+}
+
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+function FUN_UUID_CHANGER_PARTITION_FSTYPE_VFAT_FAT32 {
+
+    echo "░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+    _FAT32_LABEL=$(lsblk -o LABEL $PARTITON_RESULT_DEV | sed 's/LABEL//' | tr -d '[:space:]')
+    sudo mlabel -n -i $PARTITON_RESULT_DEV
+    sudo mlabel -i $PARTITON_RESULT_DEV ::"$_FAT32_LABEL"
+
+}
+
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+function FUN_FINAL_MESSAGE {
+
+    sleep 1
+    FINAL_LABEL=$(lsblk -f -o LABEL $PARTITON_RESULT_DEV | sed 's/├─//g' | sed 's/└─//g' | sed 's/LABEL//g' | tr -d '[:space:]')
+    FINAL_UUID=$(lsblk -f -o UUID $PARTITON_RESULT_DEV | sed 's/├─//g' | sed 's/└─//g' | sed 's/UUID//g' | tr -d '[:space:]')
+    FINAL_SIZE=$(lsblk -f -o SIZE $PARTITON_RESULT_DEV | sed 's/├─//g' | sed 's/└─//g' | sed 's/SIZE//g' | tr -d '[:space:]')
+
+    cat <<EOF >/tmp/custom-UUID-CHANGER-PARTITIONS-FINAL-MESSAGE.tmp
+    ::: FINAL MESSAGE UUID CHANGER PARTITIONS FOR [$PARTITON_RESULT_DEV] :::
+PARTITION
+        [$PARTITON_RESULT_DEV]
+UUID
+        [$FINAL_UUID]
+LABEL
+        [$FINAL_LABEL]
+SIZE
+        [$FINAL_SIZE]
+
+EOF
+
+    whiptail --backtitle "[$PARTITON_RESULT_DEV]  [$FINAL_UUID]" --msgbox "$(cat /tmp/custom-UUID-CHANGER-PARTITIONS-FINAL-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3
+
+}
+
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+function FUN_IF_MOUNTED {
+
+    lsblk -o MOUNTPOINTS $PARTITON_RESULT_DEV | sed s/MOUNTPOINTS// >/tmp/custom-UUID-CHANGER-PARTITON-MOUNTPOINTS-CHECK-IF-MOUNTED.tmp
+
+    IS_MOUNTPOINT=$(cat /tmp/custom-UUID-CHANGER-PARTITON-MOUNTPOINTS-CHECK-IF-MOUNTED.tmp | tr -d '[:space:]')
+
+    if [ -z "$IS_MOUNTPOINT" ]; then
+        echo ""
+
+    elif whiptail --title "TARGET PARTITION [$PARTITON_RESULT_DEV] IS MOUNTED! MUST UNMOUNT" --yesno "UNMOUNT ? [$PARTITON_RESULT_DEV] " 0 0; then
+
+        sudo umount $IS_MOUNTPOINT || exit
+
+    fi
+
+}
+
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+function FUN_SHOW_ALL_EXT4_BTRFS_VFAT_DEVICES_UUID {
+
+    lsblk -f --noheadings -o NAME,FSTYPE,LABEL,UUID,SIZE | grep -w "ext4\|btrfs\|vfat" | sed 's/├─//g' | sed 's/└─//g' | sed 's/ /./g' >/tmp/custom-UUID-CHANGER-SHOW-INFO-FOR-ALL.tmp
+
+    whiptail --title "UUID CHANGER PARTITIONS [SHOW] Info for ALL EXT(x)/BTRFS/FAT32 Partitions" --scrolltext --msgbox "$(cat /tmp/custom-UUID-CHANGER-SHOW-INFO-FOR-ALL.tmp)" 0 0 3>&1 1>&2 2>&3
+
+}
+
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+#################===========================================================================================================================================================%%%%%^^^^^^^^^^^^^
+
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+
+#!/bin/bash
+
+NEWT_COLORS='
+root=white,red
+window=white,gray
+border=lightgray,gray
+shadow=white,yellow
+button=black,green
+actbutton=black,red
+compactbutton=lightgray,black
+title=yellow,gray
+roottext=red,black
+textbox=lightgray,gray
+acttextbox=gray,white
+entry=black,lightgray
+disentry=gray,black
+checkbox=black,lightgray
+actcheckbox=black,green
+emptyscale=,lightgray
+fullscale=,brown
+listbox=black,lightgray
+actlistbox=yellow,black
+actsellistbox=black,green
+'
+export NEWT_COLORS
+
+while true; do
+    REPEAT_OR_RANDOM_HEX=$(
+        whiptail --title "UUID OR LABEL [PARTITION] CHANGER" --menu "UUID OR LABEL [PARTITION] CHANGER [Select Option]" 0 0 5 \
+            1 "[Repeating UUID CHAR] Hex Character For New UUID" \
+            2 "[Random UUID]    Hex Characters For New UUID" \
+            3 "[LABEL] Change Partition LABEL" \
+            4 "[SHOW] All ext4/btrfs/fat32 Filesystems UUID Info" \
+            5 "[EXIT] Exit the Script" 3>&1 1>&2 2>&3
+    )
+
+    if [ -z "$REPEAT_OR_RANDOM_HEX" ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    case "$REPEAT_OR_RANDOM_HEX" in
+    1)
+        FUN_SELECT_PARTITION_DEV
+        FUN_IF_MOUNTED
+        FUN_PARTITION_FSTYPE_DECISION_UUID
+        FUN_FINAL_MESSAGE
+        ;;
+    2)
+        FUN_SELECT_PARTITION_DEV
+        FUN_IF_MOUNTED
+        FUN_PARTITION_FSTYPE_DECISION_UUID
+        FUN_FINAL_MESSAGE
+        ;;
+    3)
+        FUN_SELECT_PARTITION_DEV
+        FUN_IF_MOUNTED
+        FUN_PARTITION_FSTYPE_DECISION_LABEL
+        FUN_FINAL_MESSAGE
+        ;;
+    4)
+        FUN_SHOW_ALL_EXT4_BTRFS_VFAT_DEVICES_UUID
+        ;;
+    5)
+        echo "Exiting the script. Goodbye!"
+        unset NEWT_COLORS
+        exit
+        ;;
+    *)
+        echo "Invalid option selected. Please try again."
+        ;;
+    esac
+done

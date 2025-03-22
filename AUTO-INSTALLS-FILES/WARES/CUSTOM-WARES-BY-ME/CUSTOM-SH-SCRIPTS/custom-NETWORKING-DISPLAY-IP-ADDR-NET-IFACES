@@ -1,0 +1,52 @@
+#!/bin/bash
+
+####################################################################
+####################################################################
+####################################################################
+####################################################################
+# BASH escape sequences color codes::::::::
+
+# Associative array of color codes escape sequences
+declare -A _FCOLORS=(
+    [black]='\e[30m'
+    [red]='\e[31m'
+    [green]='\e[32m'
+    [yellow]='\e[33m'
+    [blue]='\e[34m'
+    [magenta]='\e[35m'
+    [cyan]='\e[36m'
+    [gray]='\e[90m'
+    # LIGHT COLOURS
+    [lgray]='\e[37m'
+    [lred]='\e[91m'
+    [lgreen]='\e[92m'
+    [lyellow]='\e[93m'
+    [lblue]='\e[94m'
+    [lmagenta]='\e[95m'
+    [lcyan]='\e[96m'
+    [white]='\e[97m'
+    [default]='\e[0m')
+
+echo -e "DISPLAY IP ADDRES OF NETWORK INTERFACES (If Available) \n"
+function FUN_CONNECTION_DETAILS_INFO {
+    LIST_AVAILABLE_NET_INTERFACES=$(ip link show | grep -w "[0-9]:" | cut -d: -f2)
+
+    for VAL in $LIST_AVAILABLE_NET_INTERFACES; do
+
+        NET_IFACE_IP_ADDR=$(ip address show $VAL | grep -w inet | grep -o "^.*/.." | sed s/inet// | sed s+/..++ | tr -d '[:space:]')
+
+        echo -e "${_FCOLORS[cyan]} [NET-IFACE]: ${_FCOLORS[yellow]} $VAL ${_FCOLORS[default]}"
+        ip address show $VAL | grep -w inet
+        echo -e "\t⬞⬞⬞ip-addr⬞⬞⬞ip-addr⬞⬞⬞ip-addr⬞⬞⬞ip-addr⬞⬞⬞"
+        echo -e "\t[${_FCOLORS[green]} $VAL ${_FCOLORS[default]}] >>>>>> [[${_FCOLORS[green]} ${NET_IFACE_IP_ADDR} ${_FCOLORS[default]}]]"
+        echo ""
+
+    done
+
+    echo ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+    echo ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+    read -p "press ENTER to continue ::"
+
+}
+
+FUN_CONNECTION_DETAILS_INFO

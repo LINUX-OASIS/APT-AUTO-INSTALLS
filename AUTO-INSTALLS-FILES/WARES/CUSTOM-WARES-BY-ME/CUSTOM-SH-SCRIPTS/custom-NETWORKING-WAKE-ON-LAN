@@ -1,0 +1,383 @@
+#!/bin/bash
+
+#PROGRAM TO WAKE ON LAN DEVICES THAT SUPPPORT IT ATTACHED TO NETWORK INTERFACE(S)
+
+#check dependency ethtool etherwake  netdiscover and wakeonlan is installed and install if not already
+for PACKAGE in ethtool etherwake netdiscover wakeonlan; do                             # the dependencies needed
+    if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
+        echo "dependency $PACKAGE is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y $PACKAGE
+
+        if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then #exits if package is not installed even after installation code was executed...something went wrong
+            echo "Posibly didn't install dependency $PACKAGE .. exiting"
+            exit
+        fi
+    fi
+done
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+function FUN_SCAN_NEW_WOL_TARGETS_UNDER_NETIFACE {
+
+    __AVAILABLE_NETIFACE=$(ip addr show | grep "^[0-9]\|^[0-9][^0-9]" | cut -d: -f2 | nl | tr -d ' ')
+
+    __AVAILABLE_NETIFACE_COUNT=$(ip addr show | grep "^[0-9]\|^[0-9][^0-9]" | cut -d: -f2 | wc -l)
+
+    __CHOICE_NETIFACE=$(whiptail --title "SELECT NETWORK INTERFACE THAT TARGET WOL DEVICE IS UNDER:" --menu "SELECT NETWORK INTERFACE THAT TARGET WOL DEVICE IS UNDER:" 0 0 $__AVAILABLE_NETIFACE_COUNT $__AVAILABLE_NETIFACE 3>&1 1>&2 2>&3)
+
+    if [ -z "$__CHOICE_NETIFACE" ]; then
+
+        echo "USER ABORTED ....EXITING ..."
+        exit
+
+    fi
+
+    __SELECTED_NETIFACE_FINAL=$(ip addr show | grep "^[0-9]\|^[0-9][^0-9]" | cut -d: -f2 | nl | tr -d ' ' | grep -w "^$__CHOICE_NETIFACE" | sed "s/$__CHOICE_NETIFACE//1" | tr -d '[:space:]')
+
+    __NETIFACE_IPADDR_SCAN_RANGE=$(ip addr show $__SELECTED_NETIFACE_FINAL | grep -w "inet" | sed 's/ /@/g' | tr -s @ | cut -d @ -f3 | tr -d '[:space:]')
+
+    #Will exit program if network interface has no ip address
+    if [ -z $__NETIFACE_IPADDR_SCAN_RANGE ]; then
+
+        echo "NETIFACE [${__SELECTED_NETIFACE_FINAL}] HAS NO IP ADDRESS-----EXITING"
+        exit
+
+    fi
+
+    echo "><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><"
+    echo -e "><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><\n"
+
+    __AVAILABLE_WOL_TARGETS_COUNT=$(sudo netdiscover -r "$__NETIFACE_IPADDR_SCAN_RANGE" -NP | grep -v "Active scan completed," | sed '/^$/d' | sed 's/ /@/g' | tr -s @ | cut -d@ -f2,3 | sed 's/@/ /g' | wc -l)
+    __AVAILABLE_WOL_TARGETS_NL=$(sudo netdiscover -r "$__NETIFACE_IPADDR_SCAN_RANGE" -NP | grep -v "Active scan completed," | sed '/^$/d' | sed 's/ /@/g' | tr -s @ | cut -d@ -f2,3 | sed 's/@/ /g' | cat -n | sed 's/ //g')
+
+    #Save all available wol target under selected Net-interface to a temp file
+    echo "$__AVAILABLE_WOL_TARGETS_NL" >/tmp/CUSTOM__WAKE__ON__LAN__TARGETS__AVAILABLE.tmp
+
+    __CHOICE_WOL_TARGET=$(whiptail --title "select new WOL target to be added to database" --menu "WOL Target(s)/devices under NETIFACE: $__SELECTED_NETIFACE_FINAL" 0 0 $__AVAILABLE_WOL_TARGETS_COUNT $__AVAILABLE_WOL_TARGETS_NL 3>&1 1>&2 2>&3)
+    __CHOICE_WOL_TARGET_SANITIZED=$(echo $__CHOICE_WOL_TARGET | tr -d '[:space:]')
+
+    if [ -z $__CHOICE_WOL_TARGET ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    __WOL_TARGET_MAC=$(cat /tmp/CUSTOM__WAKE__ON__LAN__TARGETS__AVAILABLE.tmp | grep -w "^$__CHOICE_WOL_TARGET_SANITIZED" | grep -E -o "[[:xdigit:]][[:xdigit:]]:[[:xdigit:]][[:xdigit:]]:[[:xdigit:]][[:xdigit:]]:[[:xdigit:]][[:xdigit:]]:[[:xdigit:]][[:xdigit:]]:[[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+    __WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL=$(echo "$__SELECTED_NETIFACE_FINAL" "$__WOL_TARGET_MAC")
+
+    #Save the Wol target to file  if target mac address is not empty ..
+    if [ -n "$__WOL_TARGET_MAC" ]; then
+
+        ##···········ºººººººººªªªªªªªªªªªªºººººªªººººªªªººººªªºººªªªººªªªªºººªªººººªºººº HERE WE SAVE THE OUTPUTED <<netiface>> <<target wol (wake on lan) device>> TO A FILE... TO quickly & easily send  WOL magic packets to easily
+        sudo mkdir -p /bin/CUSTOM-WAKE-ON-LAN-TARGETS
+        sudo chmod 777 /bin/CUSTOM-WAKE-ON-LAN-TARGETS
+
+        # writes the WOL target to file, if the WOL target isn't already present in the file
+        if ! grep -q "$__WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL" /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt 2>/dev/null; then
+            echo $__WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL >>/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt
+
+            echo "<> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <>"
+            echo "SAVED NEW Wake On Lan Target [ $__WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL ] To FILE ::::::::: /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+            echo "<> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <>"
+
+            # add nickname to newly scanned target(s) under an interface
+            if whiptail --title "¿¿ADD NICK-NAME TO TARGET [[$__WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL]]??" --yesno "¿¿ADD NICK-NAME TO TARGET [[$__WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL]]??" 0 0; then
+
+                _TARGET_NICKNAME=$(whiptail --title "INPUT NICKNAME FOR TARGET [$__WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL]" --inputbox "INPUT NICKNAME FOR TARGET [$__WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL]" 0 0 3>&1 1>&2 2>&3)
+                #will append nickname to target if inputed name is not empty
+                if [ -n "$_TARGET_NICKNAME" ]; then
+                    sed -i "s/$__WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL/$__WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL ##$_TARGET_NICKNAME/g" /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt
+                fi
+            fi
+
+        elif grep -q "$__WOL_TARGET_TO_SAVE_NETIFACE_AND_MAC_FINAL" /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt 2>/dev/null; then
+
+            echo "Target WOL [Wake On LAN] Target Device is Already saved in File .... Nothing Done "
+
+        fi
+
+    elif [ -z "$__WOL_TARGET_MAC" ]; then
+
+        whiptail --title "!!  WARNING  !!" --msgbox " !! No Devices/IP Addresses/MAC Addresses found under Selected NETIFACE [$__SELECTED_NETIFACE_FINAL]! Perhaps Target Device is OFF ???? " 0 0
+
+    fi
+
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+FUN_SEND_WOL_MAGIC_PACKET_TO_TARGET() {
+
+    #check if Saved Wake On LAN target file exists and is not empty
+    if [ -s /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt ] && [ "$(cat /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | wc -w)" -ge 1 ]; then
+
+        #Remove empty lines
+        sed -i '/^$/d' /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt
+
+        __WOL_SAVED_TARGETS_COUNT=$(cat /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | wc -l | tr -d '[:space:]')
+        __WOL_SAVED_TARGETS_LINES=$(cat /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | cat -n | sed 's/ /@/g' | tr -s @ | sed 's/@//1' | tr -d ' ' | sed 's/@/ /g')
+
+        __CHOICE_SEND_WOL_MAGIC_PACKET_TARGET=$(whiptail --title "[ SEND WOL MAGIC PACKET ] TO SELECTED TARGET" --menu "[ SEND WOL MAGIC PACKET ] TO SELECTED TARGET" 0 0 $__WOL_SAVED_TARGETS_COUNT $__WOL_SAVED_TARGETS_LINES 3>&1 1>&2 2>&3)
+
+        if [ -z $__CHOICE_SEND_WOL_MAGIC_PACKET_TARGET ]; then
+            echo "USER ABORTED ...... EXITING"
+            exit
+
+        fi
+
+        __SEND_WOL_MAGIC_PACKET_TARGET_FINALS=$(cat -n /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | sed 's/ /@/g' | tr -s @ | sed 's/@//1' | sed 's/@/ /g' | grep -w "^$__CHOICE_SEND_WOL_MAGIC_PACKET_TARGET" | sed "s/$__CHOICE_SEND_WOL_MAGIC_PACKET_TARGET//1" | sed 's/ /@/g' | tr -d '[:space:]' | sed 's/@/ /g')
+
+        #Prepare tools configurations to send WOL magick packets to target
+        #
+        echo "<> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <>"
+        echo "RUNNING :::::::::  sudo etherwake -i $__SEND_WOL_MAGIC_PACKET_TARGET_FINALS"
+        echo "<> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <>"
+
+        sudo etherwake -i $__SEND_WOL_MAGIC_PACKET_TARGET_FINALS
+
+    elif [ -f /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt ] || [[ $(cat /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | wc -w) -eq 0 ]]; then
+
+        echo "NO SAVED WOL (Wake On LAN) TARGETS ... Or the File where WOL Targets are stored Doesn't exist ..... EXITING"
+        exit
+    fi
+
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+FUN_DELETE_SAVED_WOL_TARGET_DEVICES() {
+
+    #check if Saved Wake On LAN target file exists and is not empty
+    if [ -s /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt ] && [ "$(cat /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | wc -w)" -ge 1 ]; then
+
+        #Remove empty lines
+        sed -i '/^$/d' /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt
+
+        __WOL_SAVED_TARGETS_COUNT=$(cat /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | wc -l | tr -d '[:space:]')
+        __WOL_SAVED_TARGETS_LINES=$(cat /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | cat -n | sed 's/ /@/g' | tr -s @ | sed 's/@//1' | tr -d ' ' | sed 's/@/ /g')
+
+        __CHOICE_WOL_TARGET_TO_DELETE=$(whiptail --title "[ DELETE SELECTED SAVED WOL TARGET DEVICE ]" --menu "[ DELETE SELECTED SAVED WOL TARGET DEVICE ]" 0 0 $__WOL_SAVED_TARGETS_COUNT $__WOL_SAVED_TARGETS_LINES 3>&1 1>&2 2>&3)
+
+        if [ -z $__CHOICE_WOL_TARGET_TO_DELETE ]; then
+            echo "USER ABORTED ...... EXITING"
+            exit
+        fi
+
+        __SELECTED_WOL_DEVICE_TO_DELETE_FINALS=$(cat -n /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | sed 's/ /@/g' | tr -s @ | sed 's/@//1' | sed 's/@/ /g' | grep -w "^$__CHOICE_WOL_TARGET_TO_DELETE" | sed "s/$__CHOICE_WOL_TARGET_TO_DELETE//1" | sed 's/ /@/g' | tr -d '[:space:]' | sed 's/@/ /g')
+
+        ##### SANITY CHECK HERE BEFORE DELETEING
+        if whiptail --title "[DELETE] SANITY CHECK !!!!!" --yesno "You're About To DELETE  WOL Target [$__SELECTED_WOL_DEVICE_TO_DELETE_FINALS] Continue ???" 0 0; then
+
+            echo -e "\n\n !!!! [ DELETE WOL TARGET ]"
+            echo "Running :::::  sed -i s/$__SELECTED_WOL_DEVICE_TO_DELETE_FINALS//g /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+
+            sed -i "s/$__SELECTED_WOL_DEVICE_TO_DELETE_FINALS//g" /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt
+
+        else
+
+            echo " USER ABORTED ... NOTHING DONE ..EXITING"
+            exit
+        fi
+
+    elif [ -f /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt ] || [[ $(cat /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | wc -w) -eq 0 ]]; then
+
+        echo "NO SAVED WOL (Wake On LAN) TARGETS ... Or the File where WOL Targets are stored Doesn't exist ..... EXITING"
+        exit
+
+    fi
+
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+FUN_CHANGE_OR_ADD_NICKNAME_OF_WOL_TARGET() {
+
+    if whiptail --title "¿¿ VIEW / CHANGE NICK-NAME OF A SAVED TARGET(s) ??" --yesno "¿¿ VIEW / CHANGE NICK-NAME OF A SAVED TARGET(s) ??" 0 0; then
+
+        #select from previously saved WOL target(s) to change its nickname ::::: TODO -FEATURE- IF NO NICKNAME EXISTS FOR THE TARGET ...EXIT (or something - still in progress - todo)
+
+        _TARGET_TO_CHANGE_NICKNAME_COUNT=$(cat /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | wc -l)
+        _TARGET_TO_CHANGE_NICKNAME_LINES=$(cat -n /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | tr -s ' ' | sed 's/ /@/g' | sed 's/@//1' | sed 's/@/ /g')
+
+        _TARGET_TO_CHANGE_NICKNAME_CHOICE=$(whiptail --title "SELECT WOL TARGET TO CHANGE NICKNAME" --menu "Select WOL TARGET TO CHANGE NICKNAME" 0 0 $_TARGET_TO_CHANGE_NICKNAME_COUNT $_TARGET_TO_CHANGE_NICKNAME_LINES 3>&1 1>&2 2>&3)
+
+        if [ -z "$_TARGET_TO_CHANGE_NICKNAME_CHOICE" ]; then
+            echo "USER .. SELECTED NOTHING ... NOTHING DONE ... EXITING"
+            exit
+        fi
+
+        _TARGET_TO_CHANGE_NICKNAME_SELECTION_FINAL=$(cat -n /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | tr -s ' ' | sed 's/ /@/g' | sed 's/@//1' | sed 's/@/ /g' | grep -w "^$_TARGET_TO_CHANGE_NICKNAME_CHOICE" | sed "s/$_TARGET_TO_CHANGE_NICKNAME_CHOICE//1" | sed 's/ /@/g' | tr -d '[:space:]' | sed 's/@/ /g')
+
+        _TARGET_TO_CHANGE_NICKNAME_SELECTION_FINAL_TARGET_ONLY_NO_NICKNAME=$(cat -n /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt | tr -s ' ' | sed 's/ /@/g' | sed 's/@//1' | sed 's/@/ /g' | grep -w "^$_TARGET_TO_CHANGE_NICKNAME_CHOICE" | sed "s/$_TARGET_TO_CHANGE_NICKNAME_CHOICE//1" | cut -d' ' -f1,2 | sed 's/ /@/g' | tr -d '[:space:]' | sed 's/@/ /g')
+
+        _OLD_NICKNAME_FROM_SELECTED_TARGET=$_TARGET_TO_CHANGE_NICKNAME_SELECTION_FINAL
+
+        _NEW_NICKNAME_INPUTED=$(whiptail --title "INPUT NEW NICKNAME FOR TARGET [$_TARGET_TO_CHANGE_NICKNAME_SELECTION_FINAL]" --inputbox "INPUT NEW NICKNAME FOR TARGET [$_TARGET_TO_CHANGE_NICKNAME_SELECTION_FINAL]" 0 0 3>&1 1>&2 2>&3)
+
+        _NEW_NICKNAME_REPLACEMENT_FINAL_TARGET="$_TARGET_TO_CHANGE_NICKNAME_SELECTION_FINAL_TARGET_ONLY_NO_NICKNAME ##$_NEW_NICKNAME_INPUTED"
+
+        ################################################################
+        #######################################
+        #######################  HERE WE DO THE REPLACING
+        ########
+        ###
+
+        #will append nickname to target if inputed name is not empty
+        if [ -n "$_NEW_NICKNAME_INPUTED" ]; then
+
+            echo "runing ::::  sed -i s/$_TARGET_TO_CHANGE_NICKNAME_SELECTION_FINAL/$_NEW_NICKNAME_REPLACEMENT_FINAL_TARGET/g" "/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+            sed -i "s/$_TARGET_TO_CHANGE_NICKNAME_SELECTION_FINAL/$_NEW_NICKNAME_REPLACEMENT_FINAL_TARGET/g" /bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt
+
+        fi
+
+    else
+        echo -e "\n\n USER ABORTED....EXITING"
+        exit
+    fi
+
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+
+########################################################################
+########################################################################
+########################################################################
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################
+########################################################################
+########################################################################
+#  ,,     ,,     ,,
+#   oo    _oo_   ,oo,
+#  /==\   /==\   /==\
+# (/==\) (/==\) (/==\)
+#   \/     \/     \/
+########################################################################
+########################################################################
+########################################################################
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################
+########################################################################
+########################################################################
+
+export NEWT_COLORS='
+root=green,green
+border=lightgray,green
+window=magenta,blue
+shadow=blue,brightred
+title=black,yellow
+actbutton=black,brown
+checkbox=white,gray
+actcheckbox=brightred,white
+entry=black,yellow
+label=brightgreen,blue
+listbox=white,black
+actlistbox=black,brightgreen
+textbox=white,gray
+acttextbox=lightgray,brightgreen
+helpline=brightgreen,brightmagenta
+roottext=black,brightred
+emptyscale=lightgray,green
+fullscale=green,black
+disentry=gray,green
+actsellistbox=white,red
+sellistbox=black,brightmagenta
+compactbutton=black,gray
+button=white,yellow'
+
+__MASTER_ACTION=$(whiptail --backtitle "CUSTOM WAKE ON LAN" --title "Select Action :: Wake On LAN" --menu "Select Action :: Wake On LAN" 0 0 4 1 "SCAN/ADD TARGET IP/MAC ADDRESS FOR DEVICES UNDER NETIFACE" 2 "SEND WOL (Wake On LAN) Magic Packet To Selected Target" 3 "DELETE [ SAVED WOL TARGET DEVICES ]" 4 "VIEW/CHANGE/ADD NICKNAME TO WOL TARGET(s)" 3>&1 1>&2 2>&3)
+
+case $__MASTER_ACTION in
+1)
+    # Code to be executed if variable matches choice 1
+    FUN_SCAN_NEW_WOL_TARGETS_UNDER_NETIFACE
+
+    ;;
+2)
+    # Code to be executed if variable matches choice 2
+    FUN_SEND_WOL_MAGIC_PACKET_TO_TARGET
+    ;;
+3)
+    # Code to be executed if variable matches choice 3
+    FUN_DELETE_SAVED_WOL_TARGET_DEVICES
+    ;;
+
+4)
+    # Code to be executed if variable matches choice 4
+    FUN_CHANGE_OR_ADD_NICKNAME_OF_WOL_TARGET
+    ;;
+*)
+    # Code to be executed if variable doesn't match any choice
+    echo "USER ABORTED...EXITING"
+    exit
+    ;;
+esac

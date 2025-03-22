@@ -1,0 +1,89 @@
+#!/bin/bash
+
+while true;do
+export NEWT_COLORS='
+ root=white,red
+window=white,gray
+border=lightgray,gray
+shadow=white,black
+button=black,green
+actbutton=black,red
+compactbutton=lightgray,black
+title=yellow,gray
+roottext=red,black
+textbox=lightgray,gray
+acttextbox=gray,white
+entry=black,lightgray
+disentry=gray,black
+checkbox=black,lightgray
+actcheckbox=black,green
+emptyscale=,lightgray
+fullscale=,brown
+listbox=black,lightgray
+actlistbox=lightgray,black
+actsellistbox=black,green
+' 
+# to reset the color back to default use:
+# unset NEWT_COLORS
+
+#this code is kept here for documentation purposes "legacy" code .... 
+: '
+echo ""
+echo -e "		Running :: \v tree /bin/CUSTOM-SH-SCRIPTS | grep custom \n"
+echo "-------------------------------------------------------------------"
+echo ""
+tree /bin/CUSTOM-SH-SCRIPTS | grep custom
+echo "____________________________________________________________________"
+echo "--------------------------------------------------------------------"
+
+
+echo ""
+read -p "	Input [Command to run]  :: " RUN
+
+$RUN
+'
+
+
+#############################################################################################################################
+
+#count the number of items or lines : wc -l command used to find line, word, and character counts
+files_list_count=$(ls /bin/CUSTOM-SH-SCRIPTS/custom* -1 | wc -l)
+
+
+ls /bin/CUSTOM-SH-SCRIPTS/custom* > /tmp/custom-CWLS-FILES-NUM.tmp
+
+sed -i 's+/bin/CUSTOM-SH-SCRIPTS/++g' /tmp/custom-CWLS-FILES-NUM.tmp
+#sed -i 's/^/"/' /tmp/custom-CWLS-FILES-NUM.tmp #sed ^ option deletes match from beginning of line
+#sed -i 's/$/"/' /tmp/custom-CWLS-FILES-NUM.tmp #sed $ option deletes match from end of line
+
+
+# numbers the lines in a file , -s option designate a seperator between the line number and the begining of line text
+nl_tmp_list=$(nl -s " " /tmp/custom-CWLS-FILES-NUM.tmp)
+
+
+#selection=$(whiptail --title "cwls  Custom Wares List" --inputbox "$nl_tmp_list" 0 0 3>&1 1>&2 2>&3)
+selection=$(whiptail --title "cwls Custom Wares List" --menu "cwls Custom Wares List" 0 0 $files_list_count $nl_tmp_list  3>&1 1>&2 2>&3)
+
+if [ -z "$selection" ]; then
+exit
+fi
+
+unset NEWT_COLORS
+
+
+#cat -n option enumerates lines in file or its output, grep -w will look for only an exact match
+echo "Running $(cat -n /tmp/custom-CWLS-FILES-NUM.tmp | grep -w $selection)"
+echo "Running $(cat -n /tmp/custom-CWLS-FILES-NUM.tmp | grep -w $selection)"
+echo "Running $(cat -n /tmp/custom-CWLS-FILES-NUM.tmp | grep -w $selection)"
+echo -e "\n\n\n\n\n"
+
+
+cat -n /tmp/custom-CWLS-FILES-NUM.tmp | grep -w $selection > /tmp/custom-CWLS-FILES-NUM-FINALS.tmp
+sed -i "s/$selection//g" /tmp/custom-CWLS-FILES-NUM-FINALS.tmp
+
+NO_WHITESPACES_N_RUN=$(tr -d " \t\n\r" < /tmp/custom-CWLS-FILES-NUM-FINALS.tmp)
+
+
+$NO_WHITESPACES_N_RUN
+
+done

@@ -1,0 +1,647 @@
+#!/bin/bash
+
+#####  grub reinstaller for BTRFS fs systems with @ root subvolume ######
+#####                                                              ######
+
+echo "░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+echo "Made By.............. LINUX-LIVING"
+
+##############################################################################################################################
+
+##function with --removable option (grub install <efi partition> --removable)
+
+function FUN_GRUB_REINSTALL_BTRFS_CHROOT {
+
+	# echo "  grub-reinstaller. BTRFS fs.  [grub-install] --removable option"
+	# echo "  grub-reinstaller. BTRFS fs.  [grub-install]  [chroot]   for BTRFS filesystems"
+	# echo -e "!! CAUTION !!: use --removable option ONLY in a dedicated efi partition for that OS \n since it will overwrite any existing /EFI/boot/bootx64.efi file \n \n"
+
+	#we already have OS partition dev
+	#obtain efi esp partition dev (we already have OS partition dev)
+	FUN_OBTAIN_EFI_ESP_PARTITION_DEV
+
+	#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## obtain btrfs root subvolume #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+	#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## obtain btrfs root subvolume #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+	# remove forward slashes / & blank space from JUST_OS_PARTITION_DEV to append to the folder where os partition will be mounted to
+	echo "/tmp/MOUNT-GRUB-REINSTALL-$(echo $JUST_OS_PARTITION_DEV | sed s+/dev/+dev-+)" | tr -d '[:space:]' >/tmp/GRUB-REINSTALL-OS-PARTITION-MOUNT-LOCATION.tmp
+
+	#create directory for the target os partition to be mounted at
+	mkdir -p /tmp/MOUNT-GRUB-REINSTALL-"$(echo $JUST_OS_PARTITION_DEV | sed s+/dev/+dev-+)"
+
+	OS_PARTITION_MOUNT_LOCATION=$(cat /tmp/GRUB-REINSTALL-OS-PARTITION-MOUNT-LOCATION.tmp)
+
+	#mount the target OS Partition To find root Subvolume(s)
+	sudo mount $JUST_OS_PARTITION_DEV $OS_PARTITION_MOUNT_LOCATION
+
+	# sudo btrfs subvolume list /media/ubuntu/61aea9b4-dfc5-4faf-ae8d-5542b66ff4b6 | sed -n 's+^.*path ++p'  ###-n means not to print anything by default. ##he final p means to print the transformed line.
+
+	# ls $OS_PARTITION_MOUNT_LOCATION | tr " " '\n' >/tmp/custom-GRUB-REINSTALL-BTRFS-SUBVOLUMES.tmp
+	# sed -i s+$OS_PARTITION_MOUNT_LOCATION++  /tmp/custom-GRUB-REINSTALL-BTRFS-SUBVOLUMES.tmp
+
+	COUNT_TOTAL_BTRFS_SUBVOLUMES=$(sudo btrfs subvolume list $OS_PARTITION_MOUNT_LOCATION | wc -l)
+	NL_BTRFS_SUBVOLUMES=$(sudo btrfs subvolume list $OS_PARTITION_MOUNT_LOCATION | sed -n 's+^.*path ++p' | cat -n | sed 's/^[[:space:]]*//g')
+
+	#%%%%%%%%%%%% CODE BLOCK FOR EDGE CASE THAT THERES NO SUBVOLUMES IN BTRFS FILESYSTEM (SUBVOLUMELESS BTRFS FILESYSTEM)
+
+	if [ $COUNT_TOTAL_BTRFS_SUBVOLUMES -eq 0 ]; then
+
+		whiptail --title "Selected [ BTRFS FILESYSTEM HAS NO SUBVOLUMES] " --msgbox "Selected [ BTRFS FILESYSTEM HAS NO SUBVOLUMES]" 0 0 3>&1 1>&2 2>&3
+		sudo umount $OS_PARTITION_MOUNT_LOCATION
+
+		######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+		######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+		######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+		cat <<EOF >/tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp
+
+OS PARTITION          :: [$JUST_OS_PARTITION_DEV] ::  $(lsblk -o FSTYPE $JUST_OS_PARTITION_DEV | sed s/FSTYPE//g | tr -d '[:space:]') :: $(lsblk -o LABEL $JUST_OS_PARTITION_DEV | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE $JUST_OS_PARTITION_DEV | sed s/SIZE//g | tr -d '[:space:]')
+BTRFS FS NO/SUBVOLUME :: [NO SUBVOLUME(S) FOR SELECTED BTRFS FS]
+EFI/ESP PARTITION     :: [$EFI_ESP_PARTITION_DEV] ::  $(lsblk -o FSTYPE $EFI_ESP_PARTITION_DEV | sed s/FSTYPE//g | tr -d '[:space:]') ::  $(lsblk -o LABEL $EFI_ESP_PARTITION_DEV | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE $EFI_ESP_PARTITION_DEV | sed s/SIZE//g | tr -d '[:space:]')
+
+EOF
+
+		#Sanity Check
+		if whiptail --title "! Sanity Check 1 !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+			echo ""
+		else
+			echo "USER ABORTED"
+			sudo umount $OS_PARTITION_MOUNT_LOCATION
+			exit
+		fi
+
+		#Sanity Check 2
+		if whiptail --title "! Sanity check 2 !! ?? [Check Partitions Carefully]  !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+			echo ""
+		else
+			echo "USER ABORTED"
+			sudo umount $OS_PARTITION_MOUNT_LOCATION
+			exit
+		fi
+
+		#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EEFI/ESP PARTITION UUID #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+		#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EEFI/ESP PARTITION UUID #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+		# mount the target linux system OS partition to it's mount directory
+		echo "sudo mount $JUST_OS_PARTITION_DEV $OS_PARTITION_MOUNT_LOCATION"
+		sudo mount $JUST_OS_PARTITION_DEV $OS_PARTITION_MOUNT_LOCATION
+
+		### Fix the target linux systems FSTAB file: /etc/fstab ###
+
+		# for tab delimiters we use cut -d$'\t'
+		#obtain uuid of old EFI partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default)
+		UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | head -1 | tr -d '[:space:]')
+		#obtain uuid of old EFI partition from the /etc/fstab: Modern method :: only outputs the uuid by itself :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+		UUID_OLD_EFI_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /boot/efi" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+		#obtain uuid of new efi partition, directly from the target efi partition to use: older UUID=value method
+		UUID_NEW_EFI_PART=$(blkid $EFI_ESP_PARTITION_DEV | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]')
+		#obtain uuid of new efi partition, directly from the target efi partition to use: modern method;;; only outputs the uuid value by itself, nothing more
+		UUID_NEW_EFI_PART_MODERN=$(blkid $EFI_ESP_PARTITION_DEV | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]' | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+		#replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; older UUID=value method
+		sudo sed -i "s+${UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID}+${UUID_NEW_EFI_PART}+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab
+
+		#replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+		sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_MODERN_UUID+$UUID_NEW_EFI_PART_MODERN+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab
+
+		#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## GRUB REINSTALL - CHROOT #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+		######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## MOUNT PARTITIONS - PRE CHROOT #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@######### We are doing this regular way (not chroot) for now
+
+		echo -e "\n sudo mount ${EFI_ESP_PARTITION_DEV} $OS_PARTITION_MOUNT_LOCATION/boot/efi"
+		sudo mount "${EFI_ESP_PARTITION_DEV}" "$OS_PARTITION_MOUNT_LOCATION"/boot/efi
+		echo -e "\n sudo mount -B /dev $OS_PARTITION_MOUNT_LOCATION/dev"
+		sudo mount -B /dev "$OS_PARTITION_MOUNT_LOCATION"/dev
+		echo -e "\n sudo mount -B /dev/pts $OS_PARTITION_MOUNT_LOCATION/dev/pts"
+		sudo mount -B /dev/pts "$OS_PARTITION_MOUNT_LOCATION"/dev/pts
+		echo -e "\n sudo mount -B /proc $OS_PARTITION_MOUNT_LOCATION/proc"
+		sudo mount -B /proc "$OS_PARTITION_MOUNT_LOCATION"/proc
+		echo -e "\n sudo mount -B /sys $OS_PARTITION_MOUNT_LOCATION/sys"
+		sudo mount -B /sys "$OS_PARTITION_MOUNT_LOCATION"/sys
+
+		#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## ENTERING CHROOT#######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+		echo "Now changing root into other system's terminal... (chroot)"
+
+		# echo "WARNING!!!!  use --removable (grub-install /dev/part --removable) option ONLY on a dedicated efi partition for that OS since it will overwrite any existing /EFI/boot/bootx64.efi file"
+		echo -e "\n *WARNING!! You may need to Edit/Remove the previous EFI partition mount point in *[/etc/fstab]*  If you still encounter problems booting/entering into your Linux System \n"
+
+		echo "sudo grub-install ${EFI_ESP_PARTITION_DEV}"
+		echo "sudo update-grub"
+		echo -e "sudo grub-install --recheck ${EFI_ESP_PARTITION_DEV}  \n\n\n\n"
+
+		# change root into /mnt (chroot command)
+		cat <<EOF | sudo chroot "$OS_PARTITION_MOUNT_LOCATION"
+
+sudo grub-install ${EFI_ESP_PARTITION_DEV}
+sudo update-grub
+sudo grub-install --recheck ${EFI_ESP_PARTITION_DEV}
+
+EOF
+
+		#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## EXITING CHROOT#######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+	fi
+
+	# $%$%$%$%$%$%$%$%$%$%$%$%$%$%$%$//
+
+	### CODE BLOCK FOR BTRFS FILESYSTEM WITH SUBVOLUME(S)
+
+	if [ "$COUNT_TOTAL_BTRFS_SUBVOLUMES" -ge 1 ]; then
+
+		CHOICE_FOR_BTRFS_SUBVOLUME=$(whiptail --fullbuttons --cancel-button "Procede w/no Subvol" --backtitle "Procede w/o Subvol [maybe target under the FS root?]" --title "Select [ BTRFS ROOT SUBVOLUME ] (default is @ on most systems)" --menu "Select [ BTRFS ROOT SUBVOLUME ] for [$JUST_OS_PARTITION_DEV]" 0 65 $COUNT_TOTAL_BTRFS_SUBVOLUMES $NL_BTRFS_SUBVOLUMES 3>&1 1>&2 2>&3)
+
+		_BTRFS_SUBVOLUME_TARGET_SANITIZED=$(sudo btrfs subvolume list $OS_PARTITION_MOUNT_LOCATION | sed -n 's+^.*path ++p' | cat -n | sed 's/^[[:space:]]*//g' | grep -w "^$CHOICE_FOR_BTRFS_SUBVOLUME" | tr '[:space:]' "#" | cut -d# -f2 | tr -d '[:space:]')
+
+		if [ -z "$CHOICE_FOR_BTRFS_SUBVOLUME" ]; then
+
+			if whiptail --fullbuttons --title "Will Continue w/o Subvolume [ MAYBE TARGET IS Directly IN THE BTRFS FS ROOT ]" --yesno " Continue w/o Subvolume [ MAYBE TARGET IS Directly IN THE BTRFS FS ROOT ] ??" 0 0 3>&1 1>&2 2>&3; then
+
+				sudo umount $OS_PARTITION_MOUNT_LOCATION
+
+				######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK - w/o subvol    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+				######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK - w/o subvol    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+				######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK - w/o subvol    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+				cat <<EOF >/tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp
+
+OS PARTITION          :: [$JUST_OS_PARTITION_DEV] ::  $(lsblk -o FSTYPE $JUST_OS_PARTITION_DEV | sed s/FSTYPE//g | tr -d '[:space:]') :: $(lsblk -o LABEL $JUST_OS_PARTITION_DEV | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE $JUST_OS_PARTITION_DEV | sed s/SIZE//g | tr -d '[:space:]')
+BTRFS ROOT SUBVOLUME  :: [ chose none - Targeting the root FS ]
+EFI/ESP PARTITION     :: [$EFI_ESP_PARTITION_DEV] ::  $(lsblk -o FSTYPE $EFI_ESP_PARTITION_DEV | sed s/FSTYPE//g | tr -d '[:space:]') ::  $(lsblk -o LABEL $EFI_ESP_PARTITION_DEV | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE $EFI_ESP_PARTITION_DEV | sed s/SIZE//g | tr -d '[:space:]')
+
+EOF
+
+				#Sanity Check
+				if whiptail --title "! Sanity Check 1 !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+					echo ""
+				else
+					echo "USER ABORTED"
+					sudo umount $OS_PARTITION_MOUNT_LOCATION
+					exit
+				fi
+
+				#Sanity Check 2
+				if whiptail --title "! Sanity check 2 !! ?? [Check Partitions Carefully]  !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+					echo ""
+				else
+					echo "USER ABORTED"
+					sudo umount $OS_PARTITION_MOUNT_LOCATION
+					exit
+				fi
+
+				#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EEFI/ESP PARTITION UUID #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+				#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EEFI/ESP PARTITION UUID #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+				# bind mount the target linux system OS partition's btrfs to it's mount directory
+				echo "sudo mount $JUST_OS_PARTITION_DEV $OS_PARTITION_MOUNT_LOCATION"
+				sudo mount $JUST_OS_PARTITION_DEV $OS_PARTITION_MOUNT_LOCATION
+
+				### Fix the target linux systems FSTAB file: /etc/fstab ###
+
+				# for tab delimiters we use cut -d$'\t'
+				#obtain uuid of old EFI partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default)
+				UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | head -1 | tr -d '[:space:]')
+				#obtain uuid of old EFI partition from the /etc/fstab: Modern method :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+				UUID_OLD_EFI_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /boot/efi" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+				#obtain uuid of new efi partition, directly from the target efi partition to use: older UUID=value method
+				UUID_NEW_EFI_PART=$(blkid $EFI_ESP_PARTITION_DEV | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]')
+				#obtain uuid of new efi partition, directly from the target efi partition to use: modern method, only give the uuid value by itself, nothing more
+				UUID_NEW_EFI_PART_MODERN=$(blkid $EFI_ESP_PARTITION_DEV | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]' | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+				#replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; older UUID=value method
+				sudo sed -i "s+${UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID}+${UUID_NEW_EFI_PART}+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab
+
+				#replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+				sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_MODERN_UUID+$UUID_NEW_EFI_PART_MODERN+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab
+
+				#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## GRUB REINSTALL - CHROOT #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+				######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## MOUNT PARTITIONS - PRE CHROOT #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@######### We are doing this regular way (not chroot) for now
+
+				echo -e "\n sudo mount ${EFI_ESP_PARTITION_DEV} $OS_PARTITION_MOUNT_LOCATION/boot/efi"
+				sudo mount "${EFI_ESP_PARTITION_DEV}" "$OS_PARTITION_MOUNT_LOCATION"/boot/efi
+				echo -e "\n sudo mount -B /dev $OS_PARTITION_MOUNT_LOCATION/dev"
+				sudo mount -B /dev "$OS_PARTITION_MOUNT_LOCATION"/dev
+				echo -e "\n sudo mount -B /dev/pts $OS_PARTITION_MOUNT_LOCATION/dev/pts"
+				sudo mount -B /dev/pts "$OS_PARTITION_MOUNT_LOCATION"/dev/pts
+				echo -e "\n sudo mount -B /proc $OS_PARTITION_MOUNT_LOCATION/proc"
+				sudo mount -B /proc "$OS_PARTITION_MOUNT_LOCATION"/proc
+				echo -e "\n sudo mount -B /sys $OS_PARTITION_MOUNT_LOCATION/sys"
+				sudo mount -B /sys "$OS_PARTITION_MOUNT_LOCATION"/sys
+
+				#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## ENTERING CHROOT#######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+				echo "Now changing root into other system's terminal... (chroot)"
+
+				# echo "WARNING!!!!  use --removable (grub-install /dev/part --removable) option ONLY on a dedicated efi partition for that OS since it will overwrite any existing /EFI/boot/bootx64.efi file"
+				echo -e "\n *WARNING!! You may need to Edit/Remove the previous EFI partition mount point in *[/etc/fstab]*  If you still encounter problems booting/entering into your Linux System \n"
+
+				echo "sudo grub-install ${EFI_ESP_PARTITION_DEV}"
+				echo "sudo update-grub"
+				echo -e "sudo grub-install --recheck ${EFI_ESP_PARTITION_DEV}  \n\n\n\n"
+
+				# change root into /mnt (chroot command)
+				cat <<EOF | sudo chroot "$OS_PARTITION_MOUNT_LOCATION"
+
+sudo grub-install ${EFI_ESP_PARTITION_DEV}
+sudo update-grub
+sudo grub-install --recheck ${EFI_ESP_PARTITION_DEV}
+
+EOF
+
+				return
+			fi #### DONE FOR BTRFS FS - WITH SUBVOLUME PRESENT ... BUT CHOSEN NOT TO TARGET SUBVOLUME(s) ---- TARGET DIRECTLY UNDER ROOT OF FS #########
+
+			#here we target btrfs with subvolume and terget the subvolume
+		elif [ -n "$CHOICE_FOR_BTRFS_SUBVOLUME" ]; then
+
+			sudo umount $OS_PARTITION_MOUNT_LOCATION
+
+			######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+			######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+			######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+			cat <<EOF >/tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp
+
+OS PARTITION          :: [$JUST_OS_PARTITION_DEV] ::  $(lsblk -o FSTYPE $JUST_OS_PARTITION_DEV | sed s/FSTYPE//g | tr -d '[:space:]') :: $(lsblk -o LABEL $JUST_OS_PARTITION_DEV | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE $JUST_OS_PARTITION_DEV | sed s/SIZE//g | tr -d '[:space:]')
+BTRFS ROOT SUBVOLUME  :: [$_BTRFS_SUBVOLUME_TARGET_SANITIZED]
+EFI/ESP PARTITION     :: [$EFI_ESP_PARTITION_DEV] ::  $(lsblk -o FSTYPE $EFI_ESP_PARTITION_DEV | sed s/FSTYPE//g | tr -d '[:space:]') ::  $(lsblk -o LABEL $EFI_ESP_PARTITION_DEV | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE $EFI_ESP_PARTITION_DEV | sed s/SIZE//g | tr -d '[:space:]')
+
+EOF
+
+			#Sanity Check
+			if whiptail --title "! Sanity Check 1 !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+				echo ""
+			else
+				echo "USER ABORTED"
+				sudo umount $OS_PARTITION_MOUNT_LOCATION
+				exit
+			fi
+
+			#Sanity Check 2
+			if whiptail --title "! Sanity check 2 !! ?? [Check Partitions Carefully]  !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+				echo ""
+			else
+				echo "USER ABORTED"
+				sudo umount $OS_PARTITION_MOUNT_LOCATION
+				exit
+			fi
+
+			#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EEFI/ESP PARTITION UUID #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+			#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EEFI/ESP PARTITION UUID #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+			# bind mount the target linux system OS partition's btrfs subvolume to it's mount directory
+			echo "sudo mount $JUST_OS_PARTITION_DEV -o subvol=$_BTRFS_SUBVOLUME_TARGET_SANITIZED $OS_PARTITION_MOUNT_LOCATION"
+			sudo mount "$JUST_OS_PARTITION_DEV" -o subvol="$_BTRFS_SUBVOLUME_TARGET_SANITIZED" "$OS_PARTITION_MOUNT_LOCATION"
+
+			### Fix the target linux systems FSTAB file: /etc/fstab ###
+
+			# for tab delimiters we use cut -d$'\t'
+			#obtain uuid of old EFI partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default)
+			UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | head -1 | tr -d '[:space:]')
+			#obtain uuid of old EFI partition from the /etc/fstab: Modern method :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+			UUID_OLD_EFI_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /boot/efi" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+			#obtain uuid of new efi partition, directly from the target efi partition to use: older UUID=value method
+			UUID_NEW_EFI_PART=$(blkid $EFI_ESP_PARTITION_DEV | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]')
+			#obtain uuid of new efi partition, directly from the target efi partition to use: modern method, only give the uuid value by itself, nothing more
+			UUID_NEW_EFI_PART_MODERN=$(blkid $EFI_ESP_PARTITION_DEV | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]' | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+			#replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; older UUID=value method
+			sudo sed -i "s+${UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID}+${UUID_NEW_EFI_PART}+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab
+
+			#replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+			sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_MODERN_UUID+$UUID_NEW_EFI_PART_MODERN+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab
+
+			#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## GRUB REINSTALL - CHROOT #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+			######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## MOUNT PARTITIONS - PRE CHROOT #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@######### We are doing this regular way (not chroot) for now
+
+			echo -e "\n sudo mount ${EFI_ESP_PARTITION_DEV} $OS_PARTITION_MOUNT_LOCATION/boot/efi"
+			sudo mount "${EFI_ESP_PARTITION_DEV}" "$OS_PARTITION_MOUNT_LOCATION"/boot/efi
+			echo -e "\n sudo mount -B /dev $OS_PARTITION_MOUNT_LOCATION/dev"
+			sudo mount -B /dev "$OS_PARTITION_MOUNT_LOCATION"/dev
+			echo -e "\n sudo mount -B /dev/pts $OS_PARTITION_MOUNT_LOCATION/dev/pts"
+			sudo mount -B /dev/pts "$OS_PARTITION_MOUNT_LOCATION"/dev/pts
+			echo -e "\n sudo mount -B /proc $OS_PARTITION_MOUNT_LOCATION/proc"
+			sudo mount -B /proc "$OS_PARTITION_MOUNT_LOCATION"/proc
+			echo -e "\n sudo mount -B /sys $OS_PARTITION_MOUNT_LOCATION/sys"
+			sudo mount -B /sys "$OS_PARTITION_MOUNT_LOCATION"/sys
+
+			#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## ENTERING CHROOT#######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+			echo "Now changing root into other system's terminal... (chroot)"
+
+			# echo "WARNING!!!!  use --removable (grub-install /dev/part --removable) option ONLY on a dedicated efi partition for that OS since it will overwrite any existing /EFI/boot/bootx64.efi file"
+			echo -e "\n *WARNING!! You may need to Edit/Remove the previous EFI partition mount point in *[/etc/fstab]*  If you still encounter problems booting/entering into your Linux System \n"
+
+			echo "sudo grub-install ${EFI_ESP_PARTITION_DEV}"
+			echo "sudo update-grub"
+			echo -e "sudo grub-install --recheck ${EFI_ESP_PARTITION_DEV}  \n\n\n\n"
+
+			# change root into /mnt (chroot command)
+			cat <<EOF | sudo chroot "$OS_PARTITION_MOUNT_LOCATION"
+
+sudo grub-install ${EFI_ESP_PARTITION_DEV}
+sudo update-grub
+sudo grub-install --recheck ${EFI_ESP_PARTITION_DEV}
+
+EOF
+
+			sudo umount $OS_PARTITION_MOUNT_LOCATION
+		fi #END OF CODE BLOCK FOR grub reinstall to btrfs with subvolume and target the subvolume
+
+	else
+
+		echo "USER ABORTED"
+		echo "USER ABORTED"
+		echo "USER ABORTED"
+		echo "USER ABORTED"
+		echo "USER ABORTED"
+		echo "USER ABORTED"
+		echo "USER ABORTED"
+		echo "USER ABORTED"
+
+	fi
+
+}
+
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+
+function FUN_GRUB_REINSTALL_EXT4_CHROOT {
+	# echo "  grub-reinstaller. EXT4 fs.  [grub-install] --removable option"
+	# echo "  grub-reinstaller. EXT4 fs.  [grub-install]  [chroot]   for EXT4 filesystems"
+	# echo -e "!! CAUTION !!: use --removable option ONLY in a dedicated efi partition for that OS \n since it will overwrite any existing /EFI/boot/bootx64.efi file \n \n"
+
+	#we already have OS partition dev
+	#obtain efi esp partition dev (we already have OS partition dev)
+	FUN_OBTAIN_EFI_ESP_PARTITION_DEV
+
+	cat <<EOF >/tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp
+
+OS PARTITION      :: [$JUST_OS_PARTITION_DEV] ::  $(lsblk -o FSTYPE $JUST_OS_PARTITION_DEV | sed s/FSTYPE//g | tr -d '[:space:]') :: $(lsblk -o LABEL $JUST_OS_PARTITION_DEV | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE $JUST_OS_PARTITION_DEV | sed s/SIZE//g | tr -d '[:space:]')
+EFI/ESP PARTITION :: [$EFI_ESP_PARTITION_DEV] ::  $(lsblk -o FSTYPE $EFI_ESP_PARTITION_DEV | sed s/FSTYPE//g | tr -d '[:space:]') ::  $(lsblk -o LABEL $EFI_ESP_PARTITION_DEV | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE $EFI_ESP_PARTITION_DEV | sed s/SIZE//g | tr -d '[:space:]')
+
+EOF
+
+	#Sanity Check
+	if whiptail --title "! Sanity Check 1 !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+		echo ""
+	else
+		echo "USER ABORTED"
+		exit
+	fi
+
+	#Sanity Check 2
+	if whiptail --title "! Sanity check 2 !! ?? [Check Partitions Carefully]  !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/custom-GRUB-REINSTALL-SELECTED-PARTITONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+		echo ""
+	else
+		echo "USER ABORTED"
+		exit
+	fi
+
+	#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## mount the target linux system OS partition & its fat32 EFI partition code block #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+	# remove forward slashes / & blank space from JUST_OS_PARTITION_DEV to append to the folder where os partition will be mounted to
+	echo "/tmp/MOUNT-GRUB-REINSTALL-$(echo $JUST_OS_PARTITION_DEV | sed s+/dev/+dev-+)" | tr -d '[:space:]' >/tmp/GRUB-REINSTALL-OS-PARTITION-MOUNT-LOCATION.tmp
+
+	#create directory for the target os partition to be mounted at
+	mkdir -p /tmp/MOUNT-GRUB-REINSTALL-"$(echo $JUST_OS_PARTITION_DEV | sed s+/dev/+dev-+)"
+
+	OS_PARTITION_MOUNT_LOCATION=$(cat /tmp/GRUB-REINSTALL-OS-PARTITION-MOUNT-LOCATION.tmp)
+
+	#mount the target OS Partition
+	sudo mount $JUST_OS_PARTITION_DEV $OS_PARTITION_MOUNT_LOCATION
+
+	### Fix the target linux systems FSTAB file: /etc/fstab ###
+
+	# for tab delimiters we use cut -d$'\t'
+	#obtain uuid of old EFI partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default)
+	UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | head -1 | tr -d '[:space:]')
+	#obtain uuid of old EFI partition from the /etc/fstab: Modern method :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+	UUID_OLD_EFI_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /boot/efi" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+	#obtain uuid of new efi partition, directly from the target efi partition to use: older UUID=value method
+	UUID_NEW_EFI_PART=$(blkid $EFI_ESP_PARTITION_DEV | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]')
+	#obtain uuid of new efi partition, directly from the target efi partition to use: modern method, only give the uuid value by itself, nothing more
+	UUID_NEW_EFI_PART_MODERN=$(blkid $EFI_ESP_PARTITION_DEV | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]' | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+	#replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; older UUID=value method
+	sudo sed -i "s+${UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID}+${UUID_NEW_EFI_PART}+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab
+
+	#replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+	sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_MODERN_UUID+$UUID_NEW_EFI_PART_MODERN+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab
+
+	#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## GRUB REINSTALL - CHROOT #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+	######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## MOUNT PARTITIONS - PRE CHROOT #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@######### We are doing this regular way (not chroot) for now
+
+	echo -e "\n sudo mount ${EFI_ESP_PARTITION_DEV} $OS_PARTITION_MOUNT_LOCATION/boot/efi"
+	sudo mount "${EFI_ESP_PARTITION_DEV}" "$OS_PARTITION_MOUNT_LOCATION"/boot/efi
+	echo -e "\n sudo mount -B /dev $OS_PARTITION_MOUNT_LOCATION/dev"
+	sudo mount -B /dev "$OS_PARTITION_MOUNT_LOCATION"/dev
+	echo -e "\n sudo mount -B /dev/pts $OS_PARTITION_MOUNT_LOCATION/dev/pts"
+	sudo mount -B /dev/pts "$OS_PARTITION_MOUNT_LOCATION"/dev/pts
+	echo -e "\n sudo mount -B /proc $OS_PARTITION_MOUNT_LOCATION/proc"
+	sudo mount -B /proc "$OS_PARTITION_MOUNT_LOCATION"/proc
+	echo -e "\n sudo mount -B /sys $OS_PARTITION_MOUNT_LOCATION/sys"
+	sudo mount -B /sys "$OS_PARTITION_MOUNT_LOCATION"/sys
+
+	#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## ENTERING CHROOT#######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+	echo "Now changing root into other system's terminal... (chroot)"
+
+	# echo "WARNING!!!!  use --removable (grub-install /dev/part --removable) option ONLY on a dedicated efi partition for that OS since it will overwrite any existing /EFI/boot/bootx64.efi file"
+	echo -e "\n *WARNING!! You may need to Edit/Remove the previous EFI partition mount point in *[/etc/fstab]*  If you still encounter problems booting/entering into your Linux System \n"
+
+	echo "sudo grub-install ${EFI_ESP_PARTITION_DEV}"
+	echo "sudo update-grub"
+	echo -e "sudo grub-install --recheck ${EFI_ESP_PARTITION_DEV}  \n\n\n\n"
+
+	# change root into /mnt (chroot command)
+	cat <<EOF | sudo chroot "$OS_PARTITION_MOUNT_LOCATION"
+
+sudo grub-install ${EFI_ESP_PARTITION_DEV}
+sudo update-grub
+sudo grub-install --recheck ${EFI_ESP_PARTITION_DEV}
+
+EOF
+
+	#######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## EXITING CHROOT #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+	# #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## GRUB REINSTALL - REGULAR (NOT CHROOT) #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+	# #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## GRUB REINSTALL - REGULAR (NOT CHROOT) #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+	# sudo mount "${EFI_ESP_PARTITION_DEV}" "$OS_PARTITION_MOUNT_LOCATION"/boot/efi
+
+	# sudo grub-install --boot-directory=$OS_PARTITION_MOUNT_LOCATION/boot --efi-directory=$OS_PARTITION_MOUNT_LOCATION/boot/efi $EFI_ESP_PARTITION_DEV
+	# sudo update-grub
+	# # sudo grub-install --recheck ${EFI_ESP_PARTITION_DEV}
+
+	# sudo umount $OS_PARTITION_MOUNT_LOCATION/boot/efi
+	# sudo umount $OS_PARTITION_MOUNT_LOCATION
+
+	# #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## END GRUB REINSTALL - REGULAR (NOT CHROOT) END #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+	# #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## END GRUB REINSTALL - REGULAR (NOT CHROOT) END #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+}
+
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+function FUN_OBTAIN_JUST_OS_PARTITION_DEV {
+
+	lsblk -o NAME,FSTYPE,LABEL,SIZE | grep "ext4\|btrfs" | sed s/├─// | sed s/└─// | sed 's/ /./g' | sed s+^+/dev/+ >/tmp/custom-GRUB-REINSTALL-PARTITIONS.tmp
+
+	COUNT_TOTAL_EXT4_BTRFS_PARTITIONS=$(cat /tmp/custom-GRUB-REINSTALL-PARTITIONS.tmp | wc -l)
+	NL_PARTITONS=$(cat -n /tmp/custom-GRUB-REINSTALL-PARTITIONS.tmp)
+
+	CHOICE_FOR_OS_PARTITION=$(whiptail --title "grub-install for [UEFI systems] [Chroot & Standard] .. (btrfs/ext4)" --menu "Select [OS PARTITION]" 0 0 $COUNT_TOTAL_EXT4_BTRFS_PARTITIONS $NL_PARTITONS 3>&1 1>&2 2>&3)
+
+	if [ -z $CHOICE_FOR_OS_PARTITION ]; then
+		echo "USER ABORTED"
+		exit
+	fi
+
+	JUST_OS_PARTITION_DEV=$(cat -n /tmp/custom-GRUB-REINSTALL-PARTITIONS.tmp | grep -w $CHOICE_FOR_OS_PARTITION | sed s/$CHOICE_FOR_OS_PARTITION//1 | cut -d. -f1 | tr -d '[:space:]')
+
+}
+
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+
+function FUN_OBTAIN_EFI_ESP_PARTITION_DEV {
+
+	lsblk -f -o NAME,FSTYPE,FSVER,LABEL,SIZE | grep vfat >/tmp/custom-VFAT-PARTITION-LIST.tmp
+	sed -i 's/├─//g' /tmp/custom-VFAT-PARTITION-LIST.tmp
+	sed -i 's/└─//g' /tmp/custom-VFAT-PARTITION-LIST.tmp
+	sed -i 's/ /./g' /tmp/custom-VFAT-PARTITION-LIST.tmp
+
+	NL_VFAT_PARTITION_LIST=$(cat -n /tmp/custom-VFAT-PARTITION-LIST.tmp)
+	DEV_ITEMS_COUNT=$(cat /tmp/custom-VFAT-PARTITION-LIST.tmp | wc -l)
+
+	EFI_PARTITION_SELECTION=$(whiptail --title "SELECT [EFI/ESP] PARTITION" --menu "SELECT THE [EFI/ESP] PARTITION" 0 0 $DEV_ITEMS_COUNT $NL_VFAT_PARTITION_LIST 3>&1 1>&2 2>&3)
+
+	if [ -z $EFI_PARTITION_SELECTION ]; then
+		echo "USER ABORTED"
+		exit
+	fi
+
+	cat -n /tmp/custom-VFAT-PARTITION-LIST.tmp | grep -w "$EFI_PARTITION_SELECTION" | head -1 | tr . "@" >/tmp/custom-VFAT-PARTITION-LIST-FINALS.tmp
+	sed -i "s/$EFI_PARTITION_SELECTION//1" /tmp/custom-VFAT-PARTITION-LIST-FINALS.tmp #replaces only first occurrence of pattern match
+
+	cat /tmp/custom-VFAT-PARTITION-LIST-FINALS.tmp | cut -d '@' -f1 | tr -d '[:space:]' | sed s+^+/dev/+ >/tmp/custom-VFAT-PARTITION-LIST-FINALS-SELECTION.tmp
+
+	EFI_ESP_PARTITION_DEV=$(cat /tmp/custom-VFAT-PARTITION-LIST-FINALS-SELECTION.tmp)
+
+}
+
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+###########################################################################################################################################
+###########################################################################################################################################
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+
+NEWT_COLORS='
+    
+	textbox=white,green
+	shadow=,red
+    button=black,cyan
+    actbutton=white,cyan
+    actcheckbox=lightgray,cyan
+    actlistbox=black,cyan
+    acttextbox=black,cyan
+    fullscale=,cyan
+    roottext=lightgrey,black 
+	'
+
+export NEWT_COLORS
+
+cat <<EOF >/tmp/custom-GRUB-REINSTALL-TARGET-OS-INSIDE-OR-OUT.tmp
+From where Are you Installing GRUB From?
+	[Inside target System] 
+			or
+	[Outside target System]
+
+EOF
+
+INSIDE_OR_OUTSIDE_TARGET_OS=$(whiptail --title "Select Choice" --menu "$(cat /tmp/custom-GRUB-REINSTALL-TARGET-OS-INSIDE-OR-OUT.tmp)" 0 0 2 1 "Reinstalling GRUB 2  [Inside Target System] from a Working System" \
+	2 "Reinstalling GRUB 2  [Outside Target System]" 3>&1 1>&2 2>&3)
+
+if [ -z $INSIDE_OR_OUTSIDE_TARGET_OS ]; then
+	echo "USER ABORTED"
+	exit
+elif [ $INSIDE_OR_OUTSIDE_TARGET_OS -eq 1 ]; then
+	#####################################################################################################
+	sudo umount /boot/efi
+	FUN_OBTAIN_EFI_ESP_PARTITION_DEV
+
+	### Fix the target linux systems FSTAB file: /etc/fstab ### FROM WITHIN WORKING TARGET OS PARTITION !
+	# for tab delimiters we use cut -d$'\t'
+	UUID_OLD_EFI_PART_FSTAB=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | head -1 | tr -d '[:space:]')
+
+	#uuid of new efi partition
+	UUID_NEW_EFI_PART=$(blkid $EFI_ESP_PARTITION_DEV | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]')
+
+	#replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file
+	sudo sed -i "s+${UUID_OLD_EFI_PART_FSTAB}+${UUID_NEW_EFI_PART}+g" /etc/fstab
+
+	#NOW WE REINSTALL GRUB FROM WITHIN THE WORKING TARGET OS PARTITION
+	sudo mount $EFI_ESP_PARTITION_DEV /boot/efi
+	sudo grub-install $EFI_ESP_PARTITION_DEV
+	sudo grub-install --recheck $EFI_ESP_PARTITION_DEV
+
+	exit
+#####################################################################################################
+fi
+
+FUN_OBTAIN_JUST_OS_PARTITION_DEV
+
+# Check filesystem type for OS partition
+if lsblk -o FSTYPE $JUST_OS_PARTITION_DEV | grep -q btrfs; then
+	whiptail --title "OS PARTITON [$JUST_OS_PARTITION_DEV] :: $(lsblk $JUST_OS_PARTITION_DEV -o LABEL | sed s/LABEL// | tr -d '[:space:]') :: FSTYPE is [btrfs]" \
+		--msgbox "OS PARTITON [$JUST_OS_PARTITION_DEV] :: $(lsblk $JUST_OS_PARTITION_DEV -o LABEL | sed s/LABEL// | tr -d '[:space:]') :: FSTYPE is [btrfs]" 0 0 3>&1 1>&2 2>&3
+
+	FUN_GRUB_REINSTALL_BTRFS_CHROOT
+
+elif lsblk -o FSTYPE $JUST_OS_PARTITION_DEV | grep -q ext4; then
+
+	whiptail --title "OS PARTITON [$JUST_OS_PARTITION_DEV] :: $(lsblk $JUST_OS_PARTITION_DEV -o LABEL | sed s/LABEL// | tr -d '[:space:]') :: FSTYPE is [ext4]" \
+		--msgbox "OS PARTITON [$JUST_OS_PARTITION_DEV] :: $(lsblk $JUST_OS_PARTITION_DEV -o LABEL | sed s/LABEL// | tr -d '[:space:]') :: FSTYPE is [ext4]" 0 0 3>&1 1>&2 2>&3
+
+	FUN_GRUB_REINSTALL_EXT4_CHROOT
+fi
+
+# echo "░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+cat <<EOF
+(\_/) (\_/) (\_/) (\_/) (\_/) (\_/) (\_/) (\_/) (\_/)
+(•x•) (•x•) (•x•) (•x•) (•x•) (•x•) (•x•) (•x•) (•x•)     
+(<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦)
+
+
+EOF
+
+unset NEWT_COLORS

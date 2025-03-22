@@ -1,0 +1,1594 @@
+#!/bin/bash
+
+# NEWT_COLOR Profile: Industrial Look
+export NEWT_COLORS='
+root=black,lightgray
+border=gray,black
+window=yellow,black
+shadow=black,gray
+title=black,lightyellow
+textbox=white,black
+textbox_border=gray,black
+entry=black,lightgray
+entry_border=gray,black
+checkbox=black,lightgray
+checkbox_border=gray,black
+radio=black,lightgray
+radio_border=gray,black
+button=black,yellow
+button_border=gray,black
+compactbutton=black,lightyellow
+compactbutton_border=gray,black
+listbox=white,black
+listbox_border=gray,black
+actlistbox=black,lightyellow
+helpline=black,gray
+roottext=lightgray,black
+emptyscale=black,gray
+fullscale=black,lightyellow
+disabled=gray,black
+'
+
+# Enforce script to run as root & display its full path name
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root"
+    echo -e "RUN :::::: sudo $(realpath $0)  \n"
+    echo "Please run as root"
+    sudo "$0"
+    exit 1
+fi
+
+# Function definitions for each script in the src directory
+fun_CreateUnit() {
+
+    local _UNIT_NAME
+    _UNIT_NAME=$(whiptail --fullbuttons --title "Input Unit Name" --inputbox "Enter the name of the systemd unit (without spaces):" 0 0 3>&1 1>&2 2>&3)
+
+    if [ -z "$_UNIT_NAME" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    local SANITIZED_UNIT_NAME
+    SANITIZED_UNIT_NAME=$(echo "$_UNIT_NAME" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+    mkdir -p /etc/systemd/system/CUST-SYSD
+    local service_file_location="/etc/systemd/system/CUSTOM-${SANITIZED_UNIT_NAME}.service"
+    local exec_script_location="/etc/systemd/system/CUST-SYSD/CUSTOM-${SANITIZED_UNIT_NAME}.sh"
+    # local exec_script_location="/usr/local/bin/CUSTOM-${SANITIZED_UNIT_NAME}.sh"
+
+    # Create the executable script
+    cat <<EOF | sudo tee "$exec_script_location"
+#!/bin/bash
+# Commands to run for the systemd unit
+EOF
+
+    sudo chmod 777 "$exec_script_location"
+
+    # Create the systemd service file
+    cat <<EOF | sudo tee "$service_file_location" >/dev/null
+[Unit]
+Description=Service for $SANITIZED_UNIT_NAME
+
+[Service]
+ExecStart=$exec_script_location
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable "CUSTOM-${SANITIZED_UNIT_NAME}.service"
+
+    echo "Systemd unit and executable script created successfully."
+
+}
+
+fun_EditUnit() {
+    # create whiptail menu body to list systemd units/timers executable files. Name preceded by "CUSTOM-" is a custom systemd unit/timer
+
+    _CUSTOM_UNITS_EXEC_FILE_MENU_BODY=$(ls /etc/systemd/system/CUST-SYSD | grep "CUSTOM-" | cat -n | sed 's/^[[:space:]]*//g')
+    _CUSTOM_UNITS_EXEC_FILE_COUNT=$(ls /etc/systemd/system/CUST-SYSD | grep "CUSTOM-" | wc -l)
+
+    UNIT_CHOICE=$(
+        whiptail --fullbuttons --scrolltext --title "Edit CUSTOM Systemd Unit  Executable file" \
+            --menu "Select the CUSTOM systemd unit Executable file to edit:" 0 0 "$_CUSTOM_UNITS_EXEC_FILE_COUNT" $_CUSTOM_UNITS_EXEC_FILE_MENU_BODY 3>&1 1>&2 2>&3
+    )
+
+    EXIT_STATUS=$?
+    if [ $EXIT_STATUS = 0 ]; then
+
+        #edit the selected systemd unit file with nano
+
+        CUSTOM_UNIT_EXEC_TO_EDIT=$(ls /etc/systemd/system/CUST-SYSD | grep "CUSTOM-" | cat -n | sed 's/^[[:space:]]*//g' | grep "^$UNIT_CHOICE" | sed "s/^$UNIT_CHOICE//1" | tr -d '[:space:]')
+
+        sudo nano /etc/systemd/system/CUST-SYSD/"$CUSTOM_UNIT_EXEC_TO_EDIT"
+    else
+        echo "User canceled."
+        echo "Exiting..."
+        exit 1
+    fi
+}
+
+fun_DeleteUnit() {
+    #!/bin/bash
+
+    # Check if there are any existing custom systemd unit files
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*" | grep -q "."; then
+        whiptail --msgbox "No custom systemd units found. Exiting." 0 0
+        echo "No custom systemd units found. Exiting."
+        exit 1
+    fi
+
+    # Prepare the checklist options
+    TO_DELETE_UNIT_FILE_CHECKLIST_BODY=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*" |
+        sed 's|/etc/systemd/system/||' |
+        sed 's/^/"/g' |           # Add opening quotes
+        sed 's/$/"/g' |           # Add closing quotes
+        sed 's/$/ off/g' |        # Default to "off"
+        cat -n |                  # Add line numbers
+        sed 's/^[[:space:]]*//g') # Remove leading spaces
+
+    TO_DELETE_UNIT_FILE_COUNT=$(echo "$TO_DELETE_UNIT_FILE_CHECKLIST_BODY" | wc -l)
+
+    # Prompt the user with a checklist
+    CHOICES=$(whiptail --separate-output --fullbuttons --title "Delete Systemd Units" \
+        --checklist "Select the custom systemd units to delete:" 0 0 "$TO_DELETE_UNIT_FILE_COUNT" \
+        $TO_DELETE_UNIT_FILE_CHECKLIST_BODY 3>&1 1>&2 2>&3)
+
+    # Exit if no choices were made
+    if [ -z "$CHOICES" ]; then
+        echo "No units selected. Exiting."
+        exit 1
+    fi
+
+    # Sanitize user input by trimming leading/trailing whitespace and removing extra newlines
+    CHOICES=$(echo "$CHOICES" | tr -s '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Create an array to store the selected unit names
+    UNIT_NAMES_ARRAY=()
+
+    # Collect the unit names into an array
+    for SELECTION in $CHOICES; do
+        UNIT_NAME=$(echo "$TO_DELETE_UNIT_FILE_CHECKLIST_BODY" |
+            grep "^$SELECTION" |
+            sed "s/^$SELECTION//1" |
+            sed 's/ off$//' | # Remove trailing ' off'
+            tr -d '[:space:]' |
+            sed 's|"||g') # Remove quotes
+
+        UNIT_NAMES_ARRAY+=("$UNIT_NAME")
+    done
+
+    # Loop through each selected unit and delete it
+    for UNIT_NAME in "${UNIT_NAMES_ARRAY[@]}"; do
+        # Sanitize the unit name
+        UNIT_NAME=$(echo "$UNIT_NAME" | tr -s ' ')
+
+        # Skip if the unit name is empty
+        if [ -z "$UNIT_NAME" ]; then
+            echo "Failed to resolve unit name. Skipping."
+            continue
+        fi
+
+        # Confirm deletion for each unit
+        if ! whiptail --fullbuttons --yesno "Are you sure you want to delete [ $UNIT_NAME ]?" 0 0; then
+            echo "Deletion aborted for unit '$UNIT_NAME'."
+            continue
+        fi
+
+        echo "Deleting $UNIT_NAME and its associated executable file."
+
+        # Derive the executable file name
+        TO_DELETE_UNIT_FILE_EXECUTABLE=$(echo "$UNIT_NAME" |
+            sed 's/.service/.sh/g' |
+            tr -d '[:space:]')
+
+        # Stop, disable, and delete the unit and its executable
+        sudo systemctl stop "$UNIT_NAME"
+        sudo systemctl disable "$UNIT_NAME"
+        sudo rm "/etc/systemd/system/$UNIT_NAME"
+        sudo rm "/etc/systemd/system/CUST-SYSD/$TO_DELETE_UNIT_FILE_EXECUTABLE"
+
+        echo -e "\e[1;32m $UNIT_NAME has been deleted successfully.\e[0m"
+    done
+
+    # Reload the systemd daemon
+    sudo systemctl daemon-reload
+
+    echo -e "\e[1;35mAll selected units have been processed. Exiting.\e[0m"
+    exit 0
+
+}
+
+fun_EnableUnit() {
+    #enable systemd unit services
+
+    # Check if there are any existing Custom systemd services
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" | grep -q ".service"; then
+        # whiptail message box
+        whiptail --msgbox "No Custom systemd services found. Exiting." 0 0
+        echo "No Custom systemd services found. Exiting."
+        exit 1
+    fi
+
+    # List existing services and display them in a whiptail checklist
+    SERVICES_TO_ENABLE_COUNT=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" | grep ".service" | wc -l)
+    SERVICES_TO_ENABLE_CHECKLIST_BODY=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" |
+        sed 's|.*/||' |           # Extract service name
+        sed 's/^/"/g' |           # Add opening quotes
+        sed 's/$/"/g' |           # Add closing quotes
+        sed 's/$/ off/g' |        # Default to "off"
+        cat -n |                  # Add line numbers
+        sed 's/^[[:space:]]*//g') # Remove leading spaces
+
+    # Prompt the user to select services using a whiptail checklist
+    CHOICES=$(whiptail --separate-output --fullbuttons --backtitle "DIR to systemd services: /etc/systemd/system/" \
+        --title "Enable Systemd Services" \
+        --checklist "Select the Custom systemd services to enable:" 0 0 "$SERVICES_TO_ENABLE_COUNT" \
+        $SERVICES_TO_ENABLE_CHECKLIST_BODY 3>&1 1>&2 2>&3)
+
+    # Exit if no choices are made
+    if [ -z "$CHOICES" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Sanitize user input by trimming leading/trailing whitespace and removing extra newlines
+    CHOICES=$(echo "$CHOICES" | tr -s '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Create an array to store the sanitized service names
+    SERVICE_NAMES_ARRAY=()
+
+    # Collect the service names into an array
+    for SELECTION in $CHOICES; do
+        SERVICE_NAME=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" |
+            grep ".service" |          # Match services only
+            cat -n |                   # Add line numbers
+            sed 's/^[[:space:]]*//g' | # Remove leading spaces
+            grep -w "^$SELECTION" |    # Match selection
+            sed "s/^$SELECTION//1" |   # Remove the line number
+            tr -d '[:space:]' |        # Clean up spaces
+            sed 's|.*/||')             # Extract service name
+
+        # Add the sanitized service name to the array
+        SERVICE_NAMES_ARRAY+=("$SERVICE_NAME")
+    done
+
+    # Loop through each selected service and enable it
+    for SERVICE_NAME in "${SERVICE_NAMES_ARRAY[@]}"; do
+        # Sanitize the service name
+        SERVICE_NAME=$(echo "$SERVICE_NAME" | tr -s ' ')
+
+        # Skip if the service name is empty
+        if [ -z "$SERVICE_NAME" ]; then
+            echo "Failed to resolve service name. Skipping."
+            continue
+        fi
+
+        # Confirm enabling of the selected service
+        if ! whiptail --fullbuttons --yesno "Are you sure you want to enable the service [ ${SERVICE_NAME} ]?" 0 0; then
+            echo "Enabling aborted by the user for service '$SERVICE_NAME'."
+            continue
+        fi
+
+        # Enable the service if not already enabled
+        if ! systemctl is-enabled --quiet "$SERVICE_NAME"; then
+            echo "Enabling the service: $SERVICE_NAME"
+            sudo systemctl enable "$SERVICE_NAME"
+        fi
+
+        # Start the service if not already active
+        if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+            echo "Starting the service: $SERVICE_NAME"
+            sudo systemctl start "$SERVICE_NAME"
+        fi
+
+        # Sanity check if the service is enabled and active
+        if systemctl is-enabled --quiet "$SERVICE_NAME" && systemctl is-active --quiet "$SERVICE_NAME"; then
+            echo -e "\e[1;32mSuccessfully enabled and started service: $SERVICE_NAME\e[0m"
+        else
+            echo -e "\e[1;31mFailed to enable or start service: $SERVICE_NAME\e[0m"
+        fi
+
+        sudo systemctl enable "$SERVICE_NAME"
+        sudo systemctl start "$SERVICE_NAME"
+    done
+
+    # Reload systemd daemon to apply changes
+    systemctl daemon-reload
+
+    echo -e "\e[1;35mAll selected services have been processed.\e[0m"
+    exit 0
+
+}
+
+fun_DisableUnit() {
+
+    # Disable systemd unit services
+
+    # Check if there are any existing systemd units
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" | grep -q ".service"; then
+        # whiptail message box
+        whiptail --msgbox "No Custom systemd units found. Exiting." 0 0
+        echo "No Custom systemd units found. Exiting."
+        exit 1
+    fi
+
+    # List existing units and display them in a whiptail checklist
+    UNITS_TO_DISABLE_COUNT=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" | grep ".service" | wc -l)
+    UNITS_TO_DISABLE_CHECKLIST_BODY=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" |
+        sed 's|.*/||' |           # Extract service name
+        sed 's/^/"/g' |           # Add opening quotes
+        sed 's/$/"/g' |           # Add closing quotes
+        sed 's/$/ off/g' |        # Default to "off"
+        cat -n |                  # Add line numbers
+        sed 's/^[[:space:]]*//g') # Remove leading spaces
+
+    # Prompt the user to select units using a whiptail checklist
+    CHOICES=$(whiptail --separate-output --fullbuttons --backtitle "DIR to systemd units: /etc/systemd/system/" \
+        --title "Disable Systemd Units" \
+        --checklist "Select the Custom systemd units to disable:" 0 0 "$UNITS_TO_DISABLE_COUNT" \
+        $UNITS_TO_DISABLE_CHECKLIST_BODY 3>&1 1>&2 2>&3)
+
+    # Exit if no choices are made
+    if [ -z "$CHOICES" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Sanitize user input by trimming leading/trailing whitespace and removing extra newlines
+    CHOICES=$(echo "$CHOICES" | tr -s '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Create an array to store the sanitized unit names
+    UNIT_NAMES_ARRAY=()
+
+    # Collect the unit names into an array
+    for SELECTION in $CHOICES; do
+        UNIT_NAME=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" |
+            grep ".service" |          # Match services only
+            cat -n |                   # Add line numbers
+            sed 's/^[[:space:]]*//g' | # Remove leading spaces
+            grep -w "^$SELECTION" |    # Match selection
+            sed "s/^$SELECTION//1" |   # Remove the line number
+            tr -d '[:space:]' |        # Clean up spaces
+            sed 's|.*/||')             # Extract service name
+
+        # Add the sanitized unit name to the array
+        UNIT_NAMES_ARRAY+=("$UNIT_NAME")
+    done
+
+    # Loop through each selected unit and disable it
+    for UNIT_NAME in "${UNIT_NAMES_ARRAY[@]}"; do
+        # Sanitize the unit name
+        UNIT_NAME=$(echo "$UNIT_NAME" | tr -s ' ')
+
+        # Skip if the unit name is empty
+        if [ -z "$UNIT_NAME" ]; then
+            echo "Failed to resolve unit name. Skipping."
+            continue
+        fi
+
+        # Confirm disabling of the selected unit
+        if ! whiptail --fullbuttons --yesno "Are you sure you want to disable the unit [ ${UNIT_NAME} ]?" 0 0; then
+            echo "Disabling aborted by the user for unit '$UNIT_NAME'."
+            continue
+        fi
+
+        # Stop and disable the unit
+        if systemctl is-active --quiet "$UNIT_NAME"; then
+            echo "Stopping the unit: $UNIT_NAME"
+            sudo systemctl stop "$UNIT_NAME"
+        fi
+        if systemctl is-enabled --quiet "$UNIT_NAME"; then
+            echo "Disabling the unit: $UNIT_NAME"
+            sudo systemctl disable "$UNIT_NAME"
+        fi
+
+        # Sanity check if the unit is disabled
+        if systemctl is-enabled --quiet "$UNIT_NAME"; then
+            echo -e "\e[1;31mFailed to disable unit: $UNIT_NAME\e[0m"
+        else
+            echo -e "\e[1;32mSuccessfully disabled unit: $UNIT_NAME\e[0m"
+            echo "Disabled unit: $UNIT_NAME"
+        fi
+        sudo systemctl stop "$UNIT_NAME"
+        sudo systemctl disable "$UNIT_NAME"
+    done
+
+    # Reload systemd daemon to apply changes
+    systemctl daemon-reload
+
+    echo -e "\e[1;35mAll selected units have been processed.\e[0m"
+    exit 0
+
+}
+
+fun_StartUnit() {
+
+    #start a systemd unit
+
+    # Check if there are any existing Custom systemd services
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" | grep -q ".service"; then
+        # whiptail message box
+        whiptail --msgbox "No Custom systemd services found. Exiting." 0 0
+        echo "No Custom systemd services found. Exiting."
+        exit 1
+    fi
+
+    # List existing services and display them in a whiptail checklist
+    SERVICES_TO_START_COUNT=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" | grep ".service" | wc -l)
+    SERVICES_TO_START_CHECKLIST_BODY=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" |
+        sed 's|.*/||' |           # Extract service name
+        sed 's/^/"/g' |           # Add opening quotes
+        sed 's/$/"/g' |           # Add closing quotes
+        sed 's/$/ off/g' |        # Default to "off"
+        cat -n |                  # Add line numbers
+        sed 's/^[[:space:]]*//g') # Remove leading spaces
+
+    # Prompt the user to select services using a whiptail checklist
+    CHOICES=$(whiptail --separate-output --fullbuttons --backtitle "DIR to systemd services: /etc/systemd/system/" \
+        --title "Start Systemd Services" \
+        --checklist "Select the Custom systemd services to start:" 0 0 "$SERVICES_TO_START_COUNT" \
+        $SERVICES_TO_START_CHECKLIST_BODY 3>&1 1>&2 2>&3)
+
+    # Exit if no choices are made
+    if [ -z "$CHOICES" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Sanitize user input by trimming leading/trailing whitespace and removing extra newlines
+    CHOICES=$(echo "$CHOICES" | tr -s '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Create an array to store the sanitized service names
+    SERVICE_NAMES_ARRAY=()
+
+    # Collect the service names into an array
+    for SELECTION in $CHOICES; do
+        SERVICE_NAME=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" |
+            grep ".service" |          # Match services only
+            cat -n |                   # Add line numbers
+            sed 's/^[[:space:]]*//g' | # Remove leading spaces
+            grep -w "^$SELECTION" |    # Match selection
+            sed "s/^$SELECTION//1" |   # Remove the line number
+            tr -d '[:space:]' |        # Clean up spaces
+            sed 's|.*/||')             # Extract service name
+
+        # Add the sanitized service name to the array
+        SERVICE_NAMES_ARRAY+=("$SERVICE_NAME")
+    done
+
+    # Loop through each selected service and start it
+    for SERVICE_NAME in "${SERVICE_NAMES_ARRAY[@]}"; do
+        # Sanitize the service name
+        SERVICE_NAME=$(echo "$SERVICE_NAME" | tr -s ' ')
+
+        # Skip if the service name is empty
+        if [ -z "$SERVICE_NAME" ]; then
+            echo "Failed to resolve service name. Skipping."
+            continue
+        fi
+
+        # Confirm start of the selected service
+        if ! whiptail --fullbuttons --yesno "Are you sure you want to start the service [ ${SERVICE_NAME} ]?" 0 0; then
+            echo "Starting aborted by the user for service '$SERVICE_NAME'."
+            continue
+        fi
+
+        # Enable the service if not already enabled
+        if ! systemctl is-enabled --quiet "$SERVICE_NAME"; then
+            echo "Enabling the service: $SERVICE_NAME"
+            sudo systemctl enable "$SERVICE_NAME"
+        fi
+
+        # Start the service if not already active
+        if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+            echo "Starting the service: $SERVICE_NAME"
+            sudo systemctl start "$SERVICE_NAME"
+        fi
+
+        # Sanity check if the service is active
+        if systemctl is-active --quiet "$SERVICE_NAME"; then
+            echo -e "\e[1;32mStarted service: $SERVICE_NAME\e[0m"
+        elif ! systemctl is-active --quiet "$SERVICE_NAME"; then
+            echo -e "\e[1;33m Service $SERVICE_NAME is not active. No action taken.\e[0m"
+            echo -e "\e[1;31mFailed to start service: $SERVICE_NAME\e[0m"
+        fi
+        sudo systemctl enable "$SERVICE_NAME"
+        sudo systemctl start "$SERVICE_NAME"
+    done
+
+    # Reload systemd daemon to apply changes
+    sudo systemctl daemon-reload
+
+    echo -e "\e[1;35mAll selected services have been processed.\e[0m"
+    exit 0
+
+}
+
+fun_StopUnit() {
+
+    #stop a systemd unit
+
+    # Check if there are any existing Custom systemd services
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" | grep -q ".service"; then
+        # whiptail message box
+        whiptail --msgbox "No Custom systemd services found. Exiting." 0 0
+        echo "No Custom systemd services found. Exiting."
+        exit 1
+    fi
+
+    # List existing services and display them in a whiptail checklist
+    SERVICES_TO_STOP_COUNT=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" | grep ".service" | wc -l)
+    SERVICES_TO_STOP_CHECKLIST_BODY=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" |
+        sed 's|.*/||' |           # Extract service name
+        sed 's/^/"/g' |           # Add opening quotes
+        sed 's/$/"/g' |           # Add closing quotes
+        sed 's/$/ off/g' |        # Default to "off"
+        cat -n |                  # Add line numbers
+        sed 's/^[[:space:]]*//g') # Remove leading spaces
+
+    # Prompt the user to select services using a whiptail checklist
+    CHOICES=$(whiptail --separate-output --fullbuttons --backtitle "DIR to systemd services: /etc/systemd/system/" \
+        --title "Stop Systemd Services" \
+        --checklist "Select the Custom systemd services to stop:" 0 0 "$SERVICES_TO_STOP_COUNT" \
+        $SERVICES_TO_STOP_CHECKLIST_BODY 3>&1 1>&2 2>&3)
+
+    # Exit if no choices are made
+    if [ -z "$CHOICES" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Sanitize user input by trimming leading/trailing whitespace and removing extra newlines
+    CHOICES=$(echo "$CHOICES" | tr -s '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Create an array to store the sanitized service names
+    SERVICE_NAMES_ARRAY=()
+
+    # Collect the service names into an array
+    for SELECTION in $CHOICES; do
+        SERVICE_NAME=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.service" |
+            grep ".service" |          # Match services only
+            cat -n |                   # Add line numbers
+            sed 's/^[[:space:]]*//g' | # Remove leading spaces
+            grep -w "^$SELECTION" |    # Match selection
+            sed "s/^$SELECTION//1" |   # Remove the line number
+            tr -d '[:space:]' |        # Clean up spaces
+            sed 's|.*/||')             # Extract service name
+
+        # Add the sanitized service name to the array
+        SERVICE_NAMES_ARRAY+=("$SERVICE_NAME")
+    done
+
+    # Loop through each selected service and stop it
+    for SERVICE_NAME in "${SERVICE_NAMES_ARRAY[@]}"; do
+        # Sanitize the service name
+        SERVICE_NAME=$(echo "$SERVICE_NAME" | tr -s ' ')
+
+        # Skip if the service name is empty
+        if [ -z "$SERVICE_NAME" ]; then
+            echo "Failed to resolve service name. Skipping."
+            continue
+        fi
+
+        # Confirm stop of the selected service
+        if ! whiptail --fullbuttons --yesno "Are you sure you want to stop the service [ ${SERVICE_NAME} ]?" 0 0; then
+            echo "Stopping aborted by the user for service '$SERVICE_NAME'."
+            continue
+        fi
+
+        # Stop the service if it is active
+        if systemctl is-active --quiet "$SERVICE_NAME"; then
+            echo "Stopping the service: $SERVICE_NAME"
+            sudo systemctl stop "$SERVICE_NAME"
+        else
+            echo -e "\e[1;33m Service $SERVICE_NAME is not active. No action taken.\e[0m"
+        fi
+
+        # Sanity check if the service is inactive
+        if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+            echo -e "\e[1;32mStopped service: $SERVICE_NAME\e[0m"
+        else
+            echo -e "\e[1;31mFailed to stop service: $SERVICE_NAME\e[0m"
+        fi
+
+        sudo systemctl stop "$SERVICE_NAME"
+    done
+
+    # Reload systemd daemon to apply changes
+    sudo systemctl daemon-reload
+
+    echo -e "\e[1;35mAll selected services have been processed.\e[0m"
+    exit 0
+
+}
+
+fun_StatusUnit() {
+
+    while true; do
+        # check for any existing systemd units
+        if ! find /etc/systemd/system/ -maxdepth 1 -name "*.service" | grep -q ".service"; then
+            # Display a message box if no units are found
+            whiptail --msgbox "No systemd unit services found. Exiting." 0 0
+            echo "No systemd unit services found. Exiting."
+            exit 1
+        fi
+
+        # List existing units & display in a whiptail menu
+        UNITS_TO_CHECK_COUNT=$(find /etc/systemd/system/ -maxdepth 1 -name "*.service" | grep ".service" | wc -l)
+        UNITS_TO_CHECK_MENU_BODY=$(find /etc/systemd/system/ -maxdepth 1 -name "*.service" | grep ".service" | sed 's|.*/||' | cat -n | sed 's/^[[:space:]]*//g')
+
+        # Show the whiptail menu for selecting a unit
+        _CHOICE_UNIT_STATUS_NUM=$(whiptail --fullbuttons --backtitle "Directory to systemd units: /etc/systemd/system/" --title "Check Systemd Unit Service Status" --menu "Select the systemd unit service to check status:" 0 0 "$UNITS_TO_CHECK_COUNT" \
+            $UNITS_TO_CHECK_MENU_BODY 3>&1 1>&2 2>&3)
+
+        if [ -z "$_CHOICE_UNIT_STATUS_NUM" ]; then
+            echo "User aborted."
+            exit 1
+        fi
+
+        # Get the unit name from the selected choice
+        UNIT_NAME=$(find /etc/systemd/system/ -maxdepth 1 -name "*.service" | grep ".service" | cat -n | sed 's/^[[:space:]]*//g' | grep -w "^$_CHOICE_UNIT_STATUS_NUM" | sed "s/^$_CHOICE_UNIT_STATUS_NUM//1" | tr -d '[:space:]' | sed 's|.*/||')
+
+        if [ -z "$UNIT_NAME" ]; then
+            echo "Failed to resolve unit name. Exiting."
+            exit 1
+        fi
+
+        # Display the unit service status using systemctl
+        UNIT_STATUS=$(systemctl show -p ActiveState "$UNIT_NAME" | cut -d '=' -f 2)
+        UNIT_DESCRIPTION=$(systemctl show -p Description "$UNIT_NAME" | cut -d '=' -f 2)
+
+        # Display the status in a message box
+        whiptail --msgbox "Unit Service: $UNIT_NAME\nDescription: $UNIT_DESCRIPTION\nStatus: $UNIT_STATUS" 0 0
+
+        # Output the status to the terminal as well
+        echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+        echo -e "\e[1;32mUnit Name: $UNIT_NAME\e[0m"
+        echo -e "\e[1;33mDescription: $UNIT_DESCRIPTION\e[0m"
+        echo -e "\e[1;33mUnit Status: $UNIT_STATUS\e[0m"
+        echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+    done
+
+    exit 0
+
+}
+
+fun_CreateTimer() {
+    # Function to create a systemd timer file
+
+    # Function to create a systemd timer file
+    TIMER_NAME=$(whiptail --fullbuttons --title "Input Timer Name" --inputbox "Enter the name of the timer (without spaces):" 0 0 3>&1 1>&2 2>&3)
+
+    # Sanitize the input, remove spaces and forward slashes
+    TIMER_NAME=$(echo "$TIMER_NAME" | tr -d '[:space:]' | tr -d '/')
+
+    if [ -z "$TIMER_NAME" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Prompt the user to select the interval
+    INTERVAL=$(whiptail --fullbuttons --title "Select Timer Interval" --menu "Choose how often the timer should run:" 15 60 5 \
+        "1" "Seconds" \
+        "2" "Minutes" \
+        "3" "Hours" \
+        "4" "Days" \
+        "5" "Months" \
+        3>&1 1>&2 2>&3)
+
+    # Prompt the user to enter the number (default is 1)
+    INTERVAL_VALUE=$(whiptail --fullbuttons --title "Enter the interval value" --inputbox "Enter the number of units to trigger the timer:" 0 0 "1" 3>&1 1>&2 2>&3)
+
+    # Default to 1 if empty input
+    INTERVAL_VALUE=${INTERVAL_VALUE:-1}
+    # Sanitize the input to only allow digits
+    INTERVAL_VALUE=$(echo "$INTERVAL_VALUE" | tr -cd '0-9')
+
+    # Check if the input is a valid number
+    if ! [[ "$INTERVAL_VALUE" =~ ^[0-9]+$ ]]; then
+        echo "Invalid number for the interval. Exiting."
+        exit 1
+    fi
+
+    # Determine the timer interval
+    case $INTERVAL in
+    1)
+        # Every x seconds
+        ON_CALENDAR="*:0/$INTERVAL_VALUE"
+        ;;
+    2)
+        # Every x minutes
+        ON_CALENDAR="*:0/$INTERVAL_VALUE"
+        ;;
+    3)
+        # Every x hours
+        ON_CALENDAR="0:0/$INTERVAL_VALUE"
+        ;;
+    4)
+        # Every x days
+        ON_CALENDAR="*-*-* 00:00:00"
+        ;; # Modify as per x-day logic
+    5)
+        # Every x months
+        ON_CALENDAR="*-*-01 00:00:00"
+        ;; # Modify as per x-month logic
+    *)
+        echo "Invalid selection"
+        exit 1
+        ;;
+    esac
+
+    sudo mkdir -p /etc/systemd/system/CUST-SYSD-TIMERS
+    sudo chmod -R 777 /etc/systemd/system/CUST-SYSD-TIMERS
+
+    SERVICE_FILE="/etc/systemd/system/CUSTOM-${TIMER_NAME}.service"
+    TIMER_FILE="/etc/systemd/system/CUSTOM-${TIMER_NAME}.timer"
+
+    # Create the executable script file
+    cat <<EOF | sudo tee "/etc/systemd/system/CUST-SYSD-TIMERS/CUSTOM-${TIMER_NAME}.sh" >/dev/null
+#!/bin/bash
+# Placeholder for now
+
+EOF
+
+    # Give full permissions to executable script file for the timer
+    sudo chmod 777 "/etc/systemd/system/CUST-SYSD-TIMERS/CUSTOM-${TIMER_NAME}.sh"
+
+    # Create the service file
+    cat <<EOF | sudo tee "$SERVICE_FILE" >/dev/null
+[Unit]
+Description=Service for $TIMER_NAME
+
+[Service]
+ExecStart=/etc/systemd/system/CUST-SYSD-TIMERS/CUSTOM-${TIMER_NAME}.sh
+
+[Install]
+WantedBy=multi-user.target
+
+EOF
+
+    # Create the timer file
+    cat <<EOF | sudo tee "$TIMER_FILE" >/dev/null
+[Unit]
+Description=Timer for $TIMER_NAME
+
+[Timer]
+OnCalendar=$ON_CALENDAR
+Unit=CUSTOM-${TIMER_NAME}.service
+
+[Install]
+WantedBy=timers.target
+
+EOF
+
+    # Give full permissions to the service and timer files
+    sudo chmod 777 "$SERVICE_FILE"
+    sudo chmod 777 "$TIMER_FILE"
+
+    # Enable the timer
+    sudo systemctl daemon-reload
+    sudo systemctl enable "CUSTOM-${TIMER_NAME}.service"
+    sudo systemctl enable "CUSTOM-${TIMER_NAME}.timer"
+    sudo systemctl start "CUSTOM-${TIMER_NAME}.timer"
+
+    echo "Timer $TIMER_NAME created and enabled successfully."
+    echo "Service file: $SERVICE_FILE"
+    echo "Timer file: $TIMER_FILE"
+
+    # Inform the user about the interval
+    # Inform the user about the interval
+
+    # interval allignment banner message
+    INTERVAL_SANITIZED_NUM=$(echo "$INTERVAL" | tr -d '[:space:]')
+    if [ "$INTERVAL_SANITIZED_NUM" -eq 1 ]; then
+        _INTERVAL_ALIGNMENT_BANNER_MESSAGE="Seconds"
+    elif [ "$INTERVAL_SANITIZED_NUM" -eq 2 ]; then
+        _INTERVAL_ALIGNMENT_BANNER_MESSAGE="Minutes"
+    elif [ "$INTERVAL_SANITIZED_NUM" -eq 3 ]; then
+        _INTERVAL_ALIGNMENT_BANNER_MESSAGE="Hours"
+    elif [ "$INTERVAL_SANITIZED_NUM" -eq 4 ]; then
+        _INTERVAL_ALIGNMENT_BANNER_MESSAGE="Days"
+    elif [ "$INTERVAL_SANITIZED_NUM" -eq 5 ]; then
+        _INTERVAL_ALIGNMENT_BANNER_MESSAGE="Months"
+    fi
+
+    whiptail --msgbox "The timer [ $TIMER_NAME  ] will run every $INTERVAL_VALUE  $_INTERVAL_ALIGNMENT_BANNER_MESSAGE" 0 0 3>&1 1>&2 2>&3
+
+    #echo -e "\e[1;30;43mThis is bold black text on a magenta background!\e[0m"
+    echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+
+    # Display the interval information in the terminal
+    echo "The timer [ $TIMER_NAME ] will run every [ $INTERVAL_VALUE  $_INTERVAL_ALIGNMENT_BANNER_MESSAGE ]"
+    echo "Service file: [ $SERVICE_FILE ]"
+    echo "Timer file: [ $TIMER_FILE ]"
+    echo "Executable File: [ /etc/systemd/system/CUST-SYSD-TIMERS/CUSTOM-${TIMER_NAME}.sh ] "
+
+    echo "Timer $TIMER_NAME created and enabled successfully."
+
+    #echo -e "\e[1;30;43mThis is bold black text on a magenta background!\e[0m"
+    echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+
+}
+
+fun_EditTimer() {
+
+    # custom systemd timers in /etc/systemd/system
+    # systemctl list-timers --all --no-pager | grep -o 'CUSTOM-.*\.timer' # This code works perfectly
+    # ls /etc/systemd/system | grep -o "CUSTOM-.*\.timer" # this code works perfectly also, leaving it here for documentation purposes
+
+    # list all custom systemd timers in /etc/systemd/system via systemctl list-timers
+    _AVAILABLE_CUSTOM_TIMERS_COUNT=$(systemctl list-timers --all --no-pager | grep -o 'CUSTOM-.*\.timer' | wc -l)
+    _AVAILABLE_CUSTOM_TIMERS_MENU_BODY=$(systemctl list-timers --all --no-pager | grep -o 'CUSTOM-.*\.timer' | cat -n | sed 's/^[[:space:]]*//g')
+
+    if [ "$_AVAILABLE_CUSTOM_TIMERS_COUNT" -eq 0 ]; then
+        echo "No custom systemd timers found... exiting."
+        exit 1
+    fi
+
+    _TIMER_NUM_CHOICE=$(whiptail --fullbuttons --scrolltext --title "Edit Systemd Timer" --menu "Select the Custom systemd timer to edit:" 0 0 "$_AVAILABLE_CUSTOM_TIMERS_COUNT" \
+        $_AVAILABLE_CUSTOM_TIMERS_MENU_BODY 3>&1 1>&2 2>&3)
+
+    if [ -z "$_TIMER_NUM_CHOICE" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # output the selected timer name: e.g. CUSTOM-1.timer
+    TIMER_NAME_TIMER=$(systemctl list-timers --all --no-pager | grep -o 'CUSTOM-.*\.timer' | cat -n | sed 's/^[[:space:]]*//g' | grep -w "^$_TIMER_NUM_CHOICE" | sed "s/^$_TIMER_NUM_CHOICE//1" | tr -d '[:space:]')
+
+    if [ -z "$TIMER_NAME_TIMER" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # select to edit the timer frequency or the timer executable script
+    #select what to edit in the timer (freuqency or executable script)
+
+    _TIMER_EDIT_CHOICE=$(whiptail --fullbuttons --title "Edit Systemd Timer" --menu "Select what to edit:" 0 0 2 \
+        "1" "Edit Timer Frequency" \
+        "2" "Edit Timer Executable Script" 3>&1 1>&2 2>&3)
+
+    if [ -z "$_TIMER_EDIT_CHOICE" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    if [ "$_TIMER_EDIT_CHOICE" -eq 1 ]; then
+        # edit the timer frequency
+        _INTERVAL=$(whiptail --fullbuttons --title "Select Timer Interval" --menu "Choose how often the timer should run:" 15 60 5 \
+            "1" "Seconds" \
+            "2" "Minutes" \
+            "3" "Hours" \
+            "4" "Days" \
+            "5" "Months" \
+            3>&1 1>&2 2>&3)
+
+        case $_INTERVAL in
+        1) _ON_CALENDAR="*:0/1" ;;           # Every second
+        2) _ON_CALENDAR="*:0" ;;             # Every minute
+        3) _ON_CALENDAR="0:0" ;;             # Every hour
+        4) _ON_CALENDAR="*-*-* 00:00:00" ;;  # Every day
+        5) _ON_CALENDAR="*-*-01 00:00:00" ;; # Every month
+        *)
+            echo "Invalid selection"
+            exit 1
+            ;;
+        esac
+
+        #interval banner message
+        if [ $_INTERVAL -eq 1 ]; then
+            _INTERVAL_BANNER_MESSAGE="Seconds"
+        elif [ $_INTERVAL -eq 2 ]; then
+            _INTERVAL_BANNER_MESSAGE="Minutes"
+        elif [ $_INTERVAL -eq 3 ]; then
+            _INTERVAL_BANNER_MESSAGE="Hours"
+        elif [ $_INTERVAL -eq 4 ]; then
+            _INTERVAL_BANNER_MESSAGE="Days"
+        elif [ $_INTERVAL -eq 5 ]; then
+            _INTERVAL_BANNER_MESSAGE="Months"
+        fi
+
+        # edit the interval of timer file: only OnCalendar= value is edited
+        sudo sed -i "s/OnCalendar=.*/OnCalendar=$_ON_CALENDAR/g" "/etc/systemd/system/$TIMER_NAME_TIMER"
+
+        #edit the description of the timer file
+        sudo sed -i "s/Description=.*/Description=Timer for $TIMER_NAME_TIMER :: Interval: $_INTERVAL_BANNER_MESSAGE/g" "/etc/systemd/system/$TIMER_NAME_TIMER"
+
+        # reload the systemd daemon
+        sudo systemctl daemon-reload
+
+        # enable the timer
+        sudo systemctl enable "$TIMER_NAME_TIMER"
+
+        # start the timer
+        sudo systemctl start "$TIMER_NAME_TIMER"
+
+        # output the status of the timer
+        sudo systemctl status "$TIMER_NAME_TIMER"
+
+        echo "Timer frequency edited successfully ::: TIMER NAME: $TIMER_NAME_TIMER :: INTERVAL: $_INTERVAL_BANNER_MESSAGE"
+
+        echo "Timer frequency edited successfully to: $_ON_CALENDAR :: every $_INTERVAL_BANNER_MESSAGE"
+
+    fi #end of code block for editing the timer FREQUENCY
+
+    if [ "$_TIMER_EDIT_CHOICE" -eq 2 ]; then
+        # edit the timer executable script
+        # open the timer executable script in nano
+
+        #sanitize timer name .extension: from .timer to .sh
+        _TIMER_EXECUTABLE_FILE_SH=$(echo "$TIMER_NAME_TIMER" | sed 's/\.timer$/.sh/' | tr -d '[:space:]')
+
+        sudo nano "/etc/systemd/system/CUST-SYSD-TIMERS/$_TIMER_EXECUTABLE_FILE_SH"
+
+        # reload the systemd daemon
+        sudo systemctl daemon-reload
+
+        # enable the timer
+        sudo systemctl enable "$TIMER_NAME_TIMER"
+
+        # start the timer
+        sudo systemctl start "$TIMER_NAME_TIMER"
+
+        # output the status of the timer
+        sudo systemctl status "$TIMER_NAME_TIMER"
+
+        echo "Timer executable script edited successfully ::: TIMER NAME: $TIMER_NAME_TIMER"
+
+    fi #end of code block for editing the timer EXECUTABLE SCRIPT
+
+}
+
+fun_DeleteTimer() {
+
+    # Check if any custom systemd timers exist
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" | grep -q ".timer"; then
+        # Inform the user if no timers are found
+        whiptail --msgbox "No Custom systemd timers found. Exiting." 0 0
+        echo "No Custom systemd timers found. Exiting."
+        exit 1
+    fi
+
+    # List the existing custom timers and prepare for user selection
+    TIMERS_TO_DEL_COUNT=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" | grep -c ".timer")
+
+    # Prepare the checklist body for the whiptail menu, listing timers to delete
+    TIMERS_TO_DEL_CHECKLIST_BODY=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" |
+        sed 's|.*/||' |           # Extract timer name
+        sed 's/^/"/g' |           # Add quotes around the name
+        sed 's/$/"/g' |           # Close the quotes
+        cat -n |                  # Add line numbers
+        sed 's/$/ off/g' |        # Set the default option to "off"
+        sed 's/^[[:space:]]*//g') # Remove leading spaces
+
+    # Prompt the user with a checklist of timers to delete
+    CHOICES=$(whiptail --separate-output --fullbuttons --backtitle "DIR to systemd timers: /etc/systemd/system/" \
+        --title "Delete Systemd Timer" --checklist "Select the Custom systemd timers to delete:" 0 0 "$TIMERS_TO_DEL_COUNT" \
+        $TIMERS_TO_DEL_CHECKLIST_BODY 3>&1 1>&2 2>&3)
+
+    # Exit if no choices are selected (empty input)
+    if [ -z "$CHOICES" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Sanitize user input by trimming leading/trailing whitespace and removing extra newlines
+    CHOICES=$(echo "$CHOICES" | tr -s '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Create an array to store the sanitized timer names
+    TIMER_NAMES_ARRAY=()
+
+    # Sanitize and collect the timer names into an array
+    for TIMER_SELECTION in $CHOICES; do
+        TIMER_NAME=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" |
+            grep ".timer" |                # Match timers only
+            cat -n |                       # Add line numbers
+            sed 's/^[[:space:]]*//g' |     # Remove extra spaces
+            grep -w "^$TIMER_SELECTION" |  # Match selection
+            sed "s/^$TIMER_SELECTION//1" | # Remove the line number
+            tr -d '[:space:]' |            # Clean up spaces
+            sed 's|.*/||' |                # Extract timer name
+            tr -d '[:space:]')             # Clean spaces from the timer name
+
+        # Add the sanitized timer name to the array
+        TIMER_NAMES_ARRAY+=("$TIMER_NAME")
+    done
+
+    # Loop through each selected timer and confirm deletion
+    for TIMER_NAME in "${TIMER_NAMES_ARRAY[@]}"; do
+        # Sanitize timer name (remove extra spaces)
+        TIMER_NAME=$(echo "$TIMER_NAME" | tr -s ' ')
+
+        # Skip if the timer name is empty
+        if [ -z "$TIMER_NAME" ]; then
+            echo "Failed to resolve timer name for selection '$TIMER_NAME'. Skipping."
+            continue
+        fi
+
+        # Confirm deletion of the selected timer
+        if ! whiptail --fullbuttons --yesno "Are you sure you want to delete the timer [ ${TIMER_NAME} ] and its related files?" 0 0; then
+            echo "Deletion aborted by the user for timer '$TIMER_NAME'."
+            continue
+        fi
+
+        # Define file paths for the timer, service, and executable files
+        TIMER_FILE="/etc/systemd/system/${TIMER_NAME}"
+        SERVICE_FILE="${TIMER_FILE%.timer}.service"
+        EXECUTABLE_FILE="/etc/systemd/system/CUST-SYSD-TIMERS/${TIMER_NAME%.timer}.sh"
+
+        # Stop and disable the timer if active/enabled
+        if systemctl is-active --quiet "$TIMER_NAME"; then
+            echo "Stopping the timer: $TIMER_NAME"
+            systemctl stop "$TIMER_NAME"
+        fi
+        if systemctl is-enabled --quiet "$TIMER_NAME"; then
+            echo "Disabling the timer: $TIMER_NAME"
+            systemctl disable "$TIMER_NAME"
+        fi
+
+        # Remove the timer file if it exists
+        if [ -f "$TIMER_FILE" ]; then
+            echo "Removing timer file: $TIMER_FILE"
+            sudo rm "$TIMER_FILE" && echo "Removed timer file: $TIMER_FILE" || echo "Failed to remove timer file: $TIMER_FILE"
+        else
+            echo "Timer file not found: $TIMER_FILE"
+        fi
+
+        # Remove the service file if it exists
+        if [ -f "$SERVICE_FILE" ]; then
+            echo "Removing service file: $SERVICE_FILE"
+            sudo rm "$SERVICE_FILE" && echo "Removed service file: $SERVICE_FILE" || echo "Failed to remove service file: $SERVICE_FILE"
+        else
+            echo "Service file not found: $SERVICE_FILE"
+        fi
+
+        # Remove the executable script if it exists
+        if [ -f "$EXECUTABLE_FILE" ]; then
+            echo "Removing executable script: $EXECUTABLE_FILE"
+            sudo rm "$EXECUTABLE_FILE" && echo "Removed executable script: $EXECUTABLE_FILE" || echo "Failed to remove executable script: $EXECUTABLE_FILE"
+        else
+            echo "Executable script not found: $EXECUTABLE_FILE"
+        fi
+
+        # Reload systemd daemon to apply changes
+        systemctl daemon-reload
+
+        # Inform the user of successful removal
+        echo -e "\nTimer '${TIMER_NAME}' and its related files have been removed successfully."
+        echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+    done
+
+}
+
+fun_EnableTimer() {
+
+    #Function to enable a systemd timer
+
+    # Check if any Custom systemd timers exist
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" | grep -q ".timer"; then
+        # Inform the user if no timers are found
+        whiptail --msgbox "No Custom systemd timers found. Exiting." 0 0
+        echo "No Custom systemd timers found. Exiting."
+        exit 1
+    fi
+
+    # List existing timers
+    TIMERS_TO_ENABLE=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" | sed 's|.*/||') # Get just the timer names
+    TIMERS_TO_ENABLE_COUNT=$(echo "$TIMERS_TO_ENABLE" | wc -l)
+
+    # Prepare the checklist body for the whiptail menu
+    TIMERS_TO_ENABLE_CHECKLIST_BODY=""
+    counter=1
+    for TIMER_NAME in $TIMERS_TO_ENABLE; do
+        TIMERS_TO_ENABLE_CHECKLIST_BODY+="$counter \"$TIMER_NAME\" off " # Format each timer for the checklist
+        ((counter++))
+    done
+
+    # Prompt the user with a checklist to select timers to enable
+    CHOICES=$(whiptail --separate-output --fullbuttons --backtitle "DIR to systemd timers: /etc/systemd/system/" \
+        --title "Enable Systemd Timer" --checklist "Select the Custom systemd timers to enable:" 0 0 "$TIMERS_TO_ENABLE_COUNT" \
+        $TIMERS_TO_ENABLE_CHECKLIST_BODY 3>&1 1>&2 2>&3)
+
+    # Exit if no choices are selected (empty input)
+    if [ -z "$CHOICES" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Sanitize the input by trimming leading/trailing whitespace and removing extra newlines
+    CHOICES=$(echo "$CHOICES" | tr -s '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Create an array to store the sanitized timer names
+    TIMER_NAMES_ARRAY=()
+
+    # Collect the selected timer names into an array
+    for TIMER_SELECTION in $CHOICES; do
+        TIMER_NAME=$(echo "$TIMERS_TO_ENABLE" | sed -n "${TIMER_SELECTION}p") # Get the timer name by line number
+        TIMER_NAMES_ARRAY+=("$TIMER_NAME")                                    # Add the selected timer to the array
+    done
+
+    # Loop through each selected timer and enable it
+    for TIMER_NAME in "${TIMER_NAMES_ARRAY[@]}"; do
+        # Confirm with the user before enabling the timer
+        if ! whiptail --fullbuttons --yesno "Are you sure you want to enable the timer ${TIMER_NAME}?" 0 0; then
+            echo "Enabling aborted by the user for timer $TIMER_NAME."
+            continue
+        fi
+
+        # Enable and start the timer if it's not already enabled or active
+        if ! systemctl is-enabled --quiet "$TIMER_NAME"; then
+            echo "Enabling the timer: $TIMER_NAME"
+            systemctl enable "$TIMER_NAME"
+        fi
+        if ! systemctl is-active --quiet "$TIMER_NAME"; then
+            echo "Starting the timer: $TIMER_NAME"
+            systemctl start "$TIMER_NAME"
+        fi
+
+        # Enable and start the associated unit
+        UNIT_NAME="${TIMER_NAME%.timer}.service"
+        if [ -z "$UNIT_NAME" ]; then
+            echo "Failed to resolve unit name. Exiting."
+            exit 1
+        fi
+
+        if ! systemctl is-enabled --quiet "$UNIT_NAME"; then
+            echo "Enabling the unit: $UNIT_NAME"
+            systemctl enable "$UNIT_NAME"
+        fi
+        if ! systemctl is-active --quiet "$UNIT_NAME"; then
+            echo "Starting the unit: $UNIT_NAME"
+            systemctl start "$UNIT_NAME"
+        fi
+
+        # Provide feedback to the user
+        echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+
+        # Check if the timer and unit were successfully enabled
+        if ! systemctl is-enabled --quiet "$TIMER_NAME"; then
+            echo -e "\e[1;31m Failed to enable timer: $TIMER_NAME\e[0m"
+        else
+            echo -e "\e[1;32m Enabled timer: $TIMER_NAME\e[0m"
+        fi
+
+        if ! systemctl is-enabled --quiet "$UNIT_NAME"; then
+            echo -e "\e[1;31m Failed to enable unit: $UNIT_NAME\e[0m"
+        else
+            echo -e "\e[1;32m Enabled unit: $UNIT_NAME\e[0m"
+        fi
+    done
+
+    # Reload systemd daemon to apply changes
+    systemctl daemon-reload
+
+    # Provide final feedback
+    echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+
+    # Exit the script
+    exit 0
+
+}
+
+fun_DisableTimer() {
+
+    #function to disable a systemd timer
+
+    # Check if any Custom systemd timers exist
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" | grep -q ".timer"; then
+        # Inform the user if no timers are found
+        whiptail --msgbox "No Custom systemd timers found. Exiting." 0 0
+        echo "No Custom systemd timers found. Exiting."
+        exit 1
+    fi
+
+    # List the existing timers
+    TIMERS_TO_DISABLE=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" | sed 's|.*/||') # Get just the timer names
+    TIMERS_TO_DISABLE_COUNT=$(echo "$TIMERS_TO_DISABLE" | wc -l)
+
+    # Prepare the checklist body for the whiptail menu
+    TIMERS_TO_DISABLE_CHECKLIST_BODY=""
+    counter=1
+    for TIMER_NAME in $TIMERS_TO_DISABLE; do
+        TIMERS_TO_DISABLE_CHECKLIST_BODY+="$counter \"$TIMER_NAME\" off " # Format each timer for the checklist
+        ((counter++))
+    done
+
+    # Prompt the user with a checklist to select timers to disable
+    CHOICES=$(whiptail --separate-output --fullbuttons --backtitle "DIR to systemd timers: /etc/systemd/system/" \
+        --title "Disable Systemd Timer" --checklist "Select the Custom systemd timers to disable:" 0 0 "$TIMERS_TO_DISABLE_COUNT" \
+        $TIMERS_TO_DISABLE_CHECKLIST_BODY 3>&1 1>&2 2>&3)
+
+    # Exit if no choices are selected (empty input)
+    if [ -z "$CHOICES" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Sanitize the input by trimming leading/trailing whitespace and removing extra newlines
+    CHOICES=$(echo "$CHOICES" | tr -s '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Create an array to store the sanitized timer names
+    TIMER_NAMES_ARRAY=()
+
+    # Collect the selected timer names into an array
+    for TIMER_SELECTION in $CHOICES; do
+        TIMER_NAME=$(echo "$TIMERS_TO_DISABLE" | sed -n "${TIMER_SELECTION}p") # Get the timer name by line number
+        TIMER_NAMES_ARRAY+=("$TIMER_NAME")                                     # Add the selected timer to the array
+    done
+
+    # Loop through each selected timer and disable it
+    for TIMER_NAME in "${TIMER_NAMES_ARRAY[@]}"; do
+        # Confirm with the user before disabling the timer
+        if ! whiptail --fullbuttons --yesno "Are you sure you want to disable the timer ${TIMER_NAME}?" 0 0; then
+            echo "Disabling aborted by the user for timer $TIMER_NAME."
+            continue
+        fi
+
+        # Stop and disable the timer if it's active or enabled
+        if systemctl is-active --quiet "$TIMER_NAME"; then
+            echo "Stopping the timer: $TIMER_NAME"
+            systemctl stop "$TIMER_NAME"
+        fi
+        if systemctl is-enabled --quiet "$TIMER_NAME"; then
+            echo "Disabling the timer: $TIMER_NAME"
+            systemctl disable "$TIMER_NAME"
+        fi
+
+        # Define the associated unit name by replacing '.timer' with '.service'
+        UNIT_NAME="${TIMER_NAME%.timer}.service"
+
+        # Check if the unit name is valid and disable it
+        if systemctl is-active --quiet "$UNIT_NAME"; then
+            echo "Stopping the unit: $UNIT_NAME"
+            systemctl stop "$UNIT_NAME"
+        fi
+        if systemctl is-enabled --quiet "$UNIT_NAME"; then
+            echo "Disabling the unit: $UNIT_NAME"
+            systemctl disable "$UNIT_NAME"
+        fi
+
+        # Provide feedback to the user
+        echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+
+        # Check if the timer and unit were successfully disabled
+        if systemctl is-enabled --quiet "$TIMER_NAME"; then
+            echo -e "\e[1;31m Failed to disable timer: $TIMER_NAME\e[0m"
+        else
+            echo -e "\e[1;32m Disabled timer: $TIMER_NAME\e[0m"
+        fi
+
+        if systemctl is-enabled --quiet "$UNIT_NAME"; then
+            echo -e "\e[1;31m Failed to disable unit: $UNIT_NAME\e[0m"
+        else
+            echo -e "\e[1;32m Disabled unit: $UNIT_NAME\e[0m"
+        fi
+    done
+
+    # Reload systemd daemon to apply the changes
+    systemctl daemon-reload
+
+    # Provide final feedback
+    echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+
+    # Exit the script
+    exit 0
+
+}
+
+fun_StartTimer() {
+
+    #function to start a systemd timer
+
+    # Check if any Custom systemd timers exist
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" | grep -q ".timer"; then
+        # Inform the user if no timers are found
+        whiptail --msgbox "No Custom systemd timers found. Exiting." 0 0
+        echo "No Custom systemd timers found. Exiting."
+        exit 1
+    fi
+
+    # List existing timers
+    TIMERS_TO_START=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" | sed 's|.*/||') # Get just the timer names
+    TIMERS_TO_START_COUNT=$(echo "$TIMERS_TO_START" | wc -l)
+
+    # Prepare the checklist body for the whiptail menu
+    TIMERS_TO_START_CHECKLIST_BODY=""
+    counter=1
+    for TIMER_NAME in $TIMERS_TO_START; do
+        TIMERS_TO_START_CHECKLIST_BODY+="$counter \"$TIMER_NAME\" off " # Format each timer for the checklist
+        ((counter++))
+    done
+
+    # Prompt the user with a checklist to select timers to start
+    CHOICES=$(whiptail --separate-output --fullbuttons --backtitle "DIR to systemd timers: /etc/systemd/system/" \
+        --title "Start Systemd Timer" --checklist "Select the Custom systemd timers to start:" 0 0 "$TIMERS_TO_START_COUNT" \
+        $TIMERS_TO_START_CHECKLIST_BODY 3>&1 1>&2 2>&3)
+
+    # Exit if no choices are selected (empty input)
+    if [ -z "$CHOICES" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Sanitize the input by trimming leading/trailing whitespace and removing extra newlines
+    CHOICES=$(echo "$CHOICES" | tr -s '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Create an array to store the sanitized timer names
+    TIMER_NAMES_ARRAY=()
+
+    # Collect the selected timer names into an array
+    for TIMER_SELECTION in $CHOICES; do
+        TIMER_NAME=$(echo "$TIMERS_TO_START" | sed -n "${TIMER_SELECTION}p") # Get the timer name by line number
+        TIMER_NAMES_ARRAY+=("$TIMER_NAME")                                   # Add the selected timer to the array
+    done
+
+    # Loop through each selected timer and start it
+    for TIMER_NAME in "${TIMER_NAMES_ARRAY[@]}"; do
+        # Confirm with the user before starting the timer
+        if ! whiptail --fullbuttons --yesno "Are you sure you want to start the timer ${TIMER_NAME}?" 0 0; then
+            echo "Starting aborted by the user for timer $TIMER_NAME."
+            continue
+        fi
+
+        # Enable and start the timer if it's not already enabled or active
+        if ! systemctl is-enabled --quiet "$TIMER_NAME"; then
+            echo "Enabling the timer: $TIMER_NAME"
+            systemctl enable "$TIMER_NAME"
+        fi
+        if ! systemctl is-active --quiet "$TIMER_NAME"; then
+            echo "Starting the timer: $TIMER_NAME"
+            systemctl start "$TIMER_NAME"
+        fi
+
+        # Start the associated unit
+        UNIT_NAME="${TIMER_NAME%.timer}.service"
+        if [ -z "$UNIT_NAME" ]; then
+            echo "Failed to resolve unit name. Exiting."
+            exit 1
+        fi
+
+        if ! systemctl is-active --quiet "$UNIT_NAME"; then
+            echo "Starting the unit: $UNIT_NAME"
+            systemctl start "$UNIT_NAME"
+        fi
+
+        # Provide feedback to the user
+        echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+
+        # Sanity check if the timer and its associated unit are active
+        if systemctl is-active --quiet "$TIMER_NAME"; then
+            echo -e "\e[1;32m Started timer: $TIMER_NAME\e[0m"
+        else
+            echo -e "\e[1;31m Failed to start timer: $TIMER_NAME\e[0m"
+        fi
+
+        if systemctl is-active --quiet "$UNIT_NAME"; then
+            echo -e "\e[1;32m Started unit: $UNIT_NAME\e[0m"
+        else
+            echo -e "\e[1;31m Failed to start unit: $UNIT_NAME\e[0m"
+        fi
+    done
+
+    # Reload systemd daemon to apply changes
+    systemctl daemon-reload
+
+    # Provide final feedback
+    echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+
+    # Exit the script
+    exit 0
+
+}
+
+fun_StopTimer() {
+
+    #function to stop a systemd timer
+
+    # Check if there are any existing Custom systemd timers
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" | grep -q ".timer"; then
+        # whiptail message box
+        whiptail --msgbox "No Custom systemd timers found. Exiting." 0 0
+        echo "No Custom systemd timers found. Exiting."
+        exit 1
+    fi
+
+    # List existing timers & prepare for whiptail checklist
+    TIMERS_TO_STOP=$(find /etc/systemd/system/ -maxdepth 1 -name "CUSTOM-*.timer" | sed 's|.*/||') # Get just the timer names
+    TIMERS_TO_STOP_COUNT=$(echo "$TIMERS_TO_STOP" | wc -l)
+
+    # Prepare the checklist body for the whiptail menu
+    TIMERS_TO_STOP_CHECKLIST_BODY=""
+    counter=1
+    for TIMER_NAME in $TIMERS_TO_STOP; do
+        TIMERS_TO_STOP_CHECKLIST_BODY+="$counter \"$TIMER_NAME\" off " # Format each timer for the checklist
+        ((counter++))
+    done
+
+    # Prompt the user with a checklist to select timers to stop
+    CHOICES=$(whiptail --separate-output --fullbuttons --backtitle "DIR to systemd timers: /etc/systemd/system/" \
+        --title "Stop Systemd Timer" --checklist "Select the Custom systemd timers to stop:" 0 0 "$TIMERS_TO_STOP_COUNT" \
+        $TIMERS_TO_STOP_CHECKLIST_BODY 3>&1 1>&2 2>&3)
+
+    # Exit if no choices are selected (empty input)
+    if [ -z "$CHOICES" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Sanitize the input by trimming leading/trailing whitespace and removing extra newlines
+    CHOICES=$(echo "$CHOICES" | tr -s '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Create an array to store the sanitized timer names
+    TIMER_NAMES_ARRAY=()
+
+    # Collect the selected timer names into an array
+    for TIMER_SELECTION in $CHOICES; do
+        TIMER_NAME=$(echo "$TIMERS_TO_STOP" | sed -n "${TIMER_SELECTION}p") # Get the timer name by line number
+        TIMER_NAMES_ARRAY+=("$TIMER_NAME")                                  # Add the selected timer to the array
+    done
+
+    # Loop through each selected timer and stop it
+    for TIMER_NAME in "${TIMER_NAMES_ARRAY[@]}"; do
+        # Confirm with the user before stopping the timer
+        if ! whiptail --fullbuttons --yesno "Are you sure you want to stop the timer ${TIMER_NAME}?" 0 0; then
+            echo "Stopping aborted by the user for timer $TIMER_NAME."
+            continue
+        fi
+
+        # Stop the timer
+        if systemctl is-active --quiet "$TIMER_NAME"; then
+            echo "Stopping the timer: $TIMER_NAME"
+            systemctl stop "$TIMER_NAME"
+        else
+            echo -e "\e[1;33m Timer $TIMER_NAME is not active. No action taken.\e[0m"
+        fi
+
+        # Stop the associated unit
+        UNIT_NAME="${TIMER_NAME%.timer}.service"
+        if systemctl is-active --quiet "$UNIT_NAME"; then
+            echo "Stopping the unit: $UNIT_NAME"
+            systemctl stop "$UNIT_NAME"
+        else
+            echo -e "\e[1;33m Unit $UNIT_NAME is not active. No action taken.\e[0m"
+        fi
+
+        # Provide feedback to the user
+        echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+
+        # Sanity check if the timer and its associated unit are inactive
+        if ! systemctl is-active --quiet "$TIMER_NAME"; then
+            echo -e "\e[1;32m Stopped timer: $TIMER_NAME\e[0m"
+        else
+            echo -e "\e[1;31m Failed to stop timer: $TIMER_NAME\e[0m"
+        fi
+
+        if ! systemctl is-active --quiet "$UNIT_NAME"; then
+            echo -e "\e[1;32m Stopped unit: $UNIT_NAME\e[0m"
+        else
+            echo -e "\e[1;31m Failed to stop unit: $UNIT_NAME\e[0m"
+        fi
+    done
+
+    # Reload systemd daemon to apply changes
+    systemctl daemon-reload
+
+    echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+    exit 0
+
+}
+
+fun_StatusTimer() {
+
+    if ! find /etc/systemd/system/ -maxdepth 1 -name "*.timer" | grep -q ".timer"; then
+        # Display a message box if no timers are found
+        whiptail --msgbox "No systemd timers found. Exiting." 0 0
+        echo "No systemd timers found. Exiting."
+        exit 1
+    fi
+
+    # List existing timers & display in a whiptail menu
+    TIMERS_TO_CHECK_COUNT=$(find /etc/systemd/system/ -maxdepth 1 -name "*.timer" | grep ".timer" | wc -l)
+    TIMERS_TO_CHECK_MENU_BODY=$(find /etc/systemd/system/ -maxdepth 1 -name "*.timer" | grep ".timer" | sed 's|.*/||' | cat -n | sed 's/^[[:space:]]*//g')
+
+    # Show the whiptail menu for selecting a timer
+    _CHOICE_TIMER_STATUS_NUM=$(whiptail --fullbuttons --backtitle "Directory to systemd timers: /etc/systemd/system/" --title "Check Systemd Timer Status" --menu "Select the systemd timer to check status:" 0 0 "$TIMERS_TO_CHECK_COUNT" \
+        $TIMERS_TO_CHECK_MENU_BODY 3>&1 1>&2 2>&3)
+
+    if [ -z "$_CHOICE_TIMER_STATUS_NUM" ]; then
+        echo "User aborted."
+        exit 1
+    fi
+
+    # Get the timer name from the selected choice
+    TIMER_NAME=$(find /etc/systemd/system/ -maxdepth 1 -name "*.timer" | grep ".timer" | cat -n | sed 's/^[[:space:]]*//g' | grep -w "^$_CHOICE_TIMER_STATUS_NUM" | sed "s/^$_CHOICE_TIMER_STATUS_NUM//1" | tr -d '[:space:]' | sed 's|.*/||')
+
+    if [ -z "$TIMER_NAME" ]; then
+        echo "Failed to resolve timer name. Exiting."
+        exit 1
+    fi
+
+    # Display the timer status using systemctl
+    TIMER_STATUS=$(systemctl show -p ActiveState "$TIMER_NAME" | cut -d '=' -f 2)
+    UNIT_NAME=$(echo "$TIMER_NAME" | sed 's/.timer$/.service/')
+
+    UNIT_STATUS=$(systemctl show -p ActiveState "$UNIT_NAME" | cut -d '=' -f 2)
+
+    # Display the statuses in a message box
+    whiptail --msgbox "Timer: $TIMER_NAME\nStatus: $TIMER_STATUS\nAssociated Unit: $UNIT_NAME\nUnit Status: $UNIT_STATUS" 0 0
+
+    # Output the status to the terminal as well
+    echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+    echo -e "\e[1;32mTimer Name: $TIMER_NAME\e[0m"
+    echo -e "\e[1;33mTimer Status: $TIMER_STATUS\e[0m"
+    echo -e "\e[1;32mUnit Name: $UNIT_NAME\e[0m"
+    echo -e "\e[1;33mUnit Status: $UNIT_STATUS\e[0m"
+    echo -e "\e[1;35m::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\e[0m \n"
+
+    exit 0
+
+}
+
+# Main menu loop
+while true; do
+    CHOICE=$(whiptail --fullbuttons --title "Systemd Unit and Timer Manager" \
+        --menu "Choose an option" 0 0 17 \
+        "1" " [UNIT CREATE]   Systemd Unit" \
+        "2" " [UNIT EDIT]     Systemd Unit" \
+        "3" " [UNIT DELETE]   Systemd Unit" \
+        "4" " [UNIT ENABLE]   Systemd Unit" \
+        "5" " [UNIT DISABLE]  Systemd Unit" \
+        "6" " [UNIT START]    Systemd Unit" \
+        "7" " [UNIT STOP]     Systemd Unit" \
+        "8" " [UNIT STATUS]   of Systemd Unit" \
+        "9" " [TIMER CREATE]  Systemd Timer" \
+        "10" " [TIMER EDIT]    Systemd Timer" \
+        "11" " [TIMER DELETE]  Systemd Timer" \
+        "12" " [TIMER ENABLE]  Systemd Timer" \
+        "13" " [TIMER DISABLE] Systemd Timer" \
+        "14" " [TIMER START]   Systemd Timer" \
+        "15" " [TIMER STOP]    Systemd Timer" \
+        "16" " [TIMER STATUS]  of Systemd Timer" \
+        "17" " Exit" \
+        3>&1 1>&2 2>&3)
+
+    case $? in
+    0)
+        case $CHOICE in
+        # UNIT options
+        1) fun_CreateUnit ;;  # Create
+        2) fun_EditUnit ;;    # Edit
+        3) fun_DeleteUnit ;;  # Delete
+        4) fun_EnableUnit ;;  # Enable
+        5) fun_DisableUnit ;; # Disable
+        6) fun_StartUnit ;;   # Start
+        7) fun_StopUnit ;;    # Stop
+        8) fun_StatusUnit ;;  # Status
+
+        # TIMER options
+        9) fun_CreateTimer ;;   # Create
+        10) fun_EditTimer ;;    # Edit
+        11) fun_DeleteTimer ;;  # Delete
+        12) fun_EnableTimer ;;  # Enable
+        13) fun_DisableTimer ;; # Disable
+        14) fun_StartTimer ;;   # Start
+        15) fun_StopTimer ;;    # Stop
+        16) fun_StatusTimer ;;  # Status
+
+        # Exit
+        17) exit 0 ;; # Exit
+        esac
+        ;;
+    1)
+        echo "User canceled."
+        exit 1
+        ;;
+    255)
+        echo "User Aborted / Exited / ESC ....."
+        echo "EXITING....."
+        exit 1
+        ;;
+    esac
+done

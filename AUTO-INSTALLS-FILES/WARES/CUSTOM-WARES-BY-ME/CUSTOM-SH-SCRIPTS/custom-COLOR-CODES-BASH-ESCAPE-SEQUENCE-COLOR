@@ -1,0 +1,153 @@
+#!/bin/bash
+
+# To use colors in Bash, you can utilize escape sequences with the syntax,
+# echo -e "\e[{colorCode}mSample Text\e[0m".
+# The -e enables backslash escapes interpretation,
+# the \e (or sometimes \033) denotes the start of color modifications,
+# {colorCode}m is where you will place the desired color code,
+# and \e[0m marks the end of color modifications. These sequences allow you to change the color of your text output in the terminal.
+
+#NOTE: in some cases (in many cases actually) If you have a custom .bashrc/ bash .profile ,,, you may want to set the color codes as a variable first before using
+# or else you can get weird output/ extra text.... things like that
+
+# https://www.shellhacks.com/bash-colors/
+
+#!/bin/bash
+
+# =====================================================
+# Bash Color Code Reference Script
+# =====================================================
+# Demonstrates ANSI escape codes for colors and styles.
+
+# Foreground Color Codes
+declare -r fLightRed="\e[91m"
+declare -r fLightGreen="\e[92m"
+declare -r fLightYellow="\e[93m"
+declare -r fLightBlue="\e[94m"
+declare -r fLightMagenta="\e[95m"
+declare -r fLightCyan="\e[96m"
+declare -r fRed="\e[31m"
+declare -r fGreen="\e[32m"
+declare -r fYellow="\e[33m"
+declare -r fBlue="\e[34m"
+declare -r fMagenta="\e[35m"
+declare -r fCyan="\e[36m"
+declare -r fOrange="\e[38;5;214m"
+
+# Style Codes
+declare -r fB="\e[1m" # Bold
+declare -r fI="\e[3m" # Italic
+declare -r fU="\e[4m" # Underline
+
+# Reset Attributes
+declare -r fEND="\e[0m"
+
+# =====================================================
+# Functions
+# =====================================================
+
+# Function to display predefined colors
+function display_colors() {
+    echo -e "${fLightRed}Light Red${fEND}"
+    echo -e "${fLightGreen}Light Green${fEND}"
+    echo -e "${fLightYellow}Light Yellow${fEND}"
+    echo -e "${fRed}Red${fEND}"
+    echo -e "${fGreen}Green${fEND}"
+    echo -e "${fYellow}Yellow${fEND}"
+    echo -e "${fBlue}Blue${fEND}"
+    echo -e "${fMagenta}Magenta${fEND}"
+    echo -e "${fCyan}Cyan${fEND}"
+}
+
+# Function to display a range of 256 colors
+function display_256_colors() {
+    local prefix=$1
+    for var in {0..255}; do
+        echo -e "${prefix}${var}m  example text here  [[ COLOR:: \\\e[${prefix}${var}m ]] ${fEND}"
+    done
+}
+
+# Function to display combined styles and colors
+function display_styles_and_colors() {
+    for style in {0..4}; do
+        for color in {0..255}; do
+            echo -e "\e[${style};${color}m  example text here  [[ STYLE ${style}; COLOR ${color} :: \\\e[${style};${color}m ]] ${fEND}"
+        done
+    done
+}
+
+# =====================================================
+# Script Execution
+# =====================================================
+echo "Displaying Predefined Colors:"
+display_colors
+
+echo -e "\nDisplaying 256 Foreground Colors:"
+display_256_colors "38;5;"
+
+echo -e "\nDisplaying 256 Background Colors:"
+display_256_colors "48;5;"
+
+echo -e "\nDisplaying Styles with Colors:"
+display_styles_and_colors
+
+# =====================================================
+# Style Attributes with Escape Codes
+# =====================================================
+echo -e "\nStyle Attributes with Escape Codes:"
+echo -e "Bold: [[ CODE:: \\\e[1m ]]"
+echo -e "Italic: [[ CODE:: \\\e[3m ]]"
+echo -e "Underline: [[ CODE:: \\\e[4m ]]"
+echo -e "Blinking: [[ CODE:: \\\e[5m ]]"
+echo -e "Hidden/Invisible: [[ CODE:: \\\e[8m ]]"
+echo -e "Strike-through: [[ CODE:: \\\e[9m ]]"
+echo -e "Reset all attributes: [[ CODE:: \\\e[0m ]]"
+
+
+read -p "press ENTER to continue ::"
+
+# A list of color codes
+# Color	Code
+# Black	0;30
+# Blue	0;34
+# Green	0;32
+# Cyan	0;36
+# Red	0;31
+# Purple	0;35
+# Brown	0;33
+# Blue	0;34
+# Green	0;32
+# Cyan	0;36
+# Red	0;31
+# Purple	0;35
+# Brown	0;33
+
+#####################################################################################
+#####################################################################################
+
+# Color	Foreground Code	Background Code
+# Black	        30	40
+# Red	        31	41
+# Green	        32	42
+# Yellow	    33	43
+# Blue	        34	44
+# Magenta	    35	45
+# Cyan	        36	46
+# Light Gray	37	47
+# Gray	        90	100
+# Light Red	    91	101
+# Light Green	92	102
+# Light Yellow	93	103
+# Light Blue	94	104
+# Light Magenta	95	105
+# Light Cyan	96	106
+# White	        97	107
+
+# To change the color of the text, what we want is the foreground code. There are also a few other non-color special codes that are relevant to us:
+
+# Code	Description
+# 0	Reset/Normal
+# 1	Bold text
+# 2	Faint text
+# 3	Italics
+# 4	Underlined text

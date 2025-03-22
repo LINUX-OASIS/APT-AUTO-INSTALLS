@@ -1,0 +1,196 @@
+#!/bin/bash
+
+FUN_PERFORMANCE_HIGH() {
+
+	### remember we can echo to a file name directly even if it doesnt exist, it will automatically create the file. and overwrite it if it does unless you append to it.
+	echo " Set to cstate 1  and mitigations=off kernel parameters::: "
+	echo -e " Running ::  \v echo 'GRUB_CMDLINE_LINUX_DEFAULT="intel_iommu=on mitigations=off intel_idle.max_cstate=1"' | sudo tee '/etc/default/grub.d/custom-KERNEL-BOOT-PARAMETERS.cfg'"
+	echo ""
+
+	echo 'GRUB_CMDLINE_LINUX_DEFAULT="intel_iommu=on mitigations=off intel_idle.max_cstate=1"' | sudo tee '/etc/default/grub.d/custom-KERNEL-BOOT-PARAMETERS.cfg'
+	sudo update-grub
+
+	#updated method for setting cpugovernors with cpufrequtils and systemd. for ubuntus 23.10 and above
+	echo 'GOVERNOR="performance"' | sudo tee /etc/default/cpufrequtils
+	sudo systemctl restart cpufrequtils.service
+
+	powerprofilesctl set performance
+
+}
+
+function FUN_PERFORMANCE_STOCK {
+
+	echo " Set cstate [STOCK]  ::: "
+
+	echo " remove changes to kernel parameters geared for performance (if any) "
+
+	echo -e " Running ::  \v 	echo 'GRUB_CMDLINE_LINUX_DEFAULT="intel_iommu=on"' | sudo tee /etc/default/grub.d/custom-KERNEL-BOOT-PARAMETERS.cfg"
+	echo ""
+
+	echo 'GRUB_CMDLINE_LINUX_DEFAULT="intel_iommu=on"' | sudo tee /etc/default/grub.d/custom-KERNEL-BOOT-PARAMETERS.cfg
+
+	sudo update-grub
+
+	## disable and then remove the systemd unit file .service for performance [if any] return to defaults
+	echo "remove modifications to cpu frequency scaling governor [IF ANY]  (return to defaults)"
+
+	#updated method for setting cpugovernors with cpufrequtils and systemd. for ubuntus 23.10 and above
+	echo 'GOVERNOR="powersave"' | sudo tee /etc/default/cpufrequtils
+	sudo systemctl restart cpufrequtils.service
+
+	powerprofilesctl set balanced
+
+}
+
+function FUN_SET_PERFORMANCE_GOVERNOR_ONLY {
+
+	echo "Set cpufrequency scaling to performance for all cores"
+	echo ""
+
+	echo 'GOVERNOR="performance"' | sudo tee /etc/default/cpufrequtils
+	sudo systemctl restart cpufrequtils.service
+
+	powerprofilesctl set performance
+
+}
+
+function SET_STOCK_GOVERNOR_ONLY {
+
+	echo "Set cpufrequency scaling to powersave for all cores"
+	echo ""
+
+	echo 'GOVERNOR="powersave"' | sudo tee /etc/default/cpufrequtils
+	sudo systemctl restart cpufrequtils.service
+
+	powerprofilesctl set balanced
+
+}
+
+function SYSTEM_STATUS_FULL_INFO {
+	tput setab 61
+	echo -e "\n ==============================================================================="
+	echo -e "\n ............................................................................."
+	tput sgr0
+##
+	echo " IO-SCHEDULER INFO ::"
+	echo ' Running :: grep "" /sys/block/*/queue/scheduler '
+	echo ""
+	grep "" /sys/block/*/queue/scheduler
+##
+	tput bold; tput smul
+	echo -en "\e[33m ....................................................................................";tput rmul
+	echo -e "\n \e[33m ___________________________________________________________________________________ \n \e[0m"
+	tput sgr0
+##
+	echo " powerprofilesctl get "
+	echo -e "RUNNING :: powerprofilesctl get  \n"
+
+	powerprofilesctl get
+##
+	tput bold; tput smul
+	echo -en "\e[33m ....................................................................................";tput rmul
+	echo -e "\n \e[33m ___________________________________________________________________________________ \n \e[0m"
+	tput sgr0
+##
+	echo " CPU SCALING GOVERNOR INFO ::"
+	echo -e " Running :: cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor  \n"
+	cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+##
+	tput bold; tput smul
+	echo -en "\e[33m ....................................................................................";tput rmul
+	echo -e "\n \e[33m ___________________________________________________________________________________ \n \e[0m"
+	tput sgr0
+##
+	echo " CSTATE INFO ::"
+	echo "Running :: cat /sys/module/intel_idle/parameters/max_cstate"
+	cat /sys/module/intel_idle/parameters/max_cstate
+
+	echo "MAX CSTATE :: $(cat /sys/module/intel_idle/parameters/max_cstate)"
+##
+	tput bold; tput smul
+	echo -en "\e[33m ....................................................................................";tput rmul
+	echo -e "\n \e[33m ___________________________________________________________________________________ \n \e[0m"
+	tput sgr0
+##
+	echo " KERNEL PARAMETERS INFO - VIA /proc/cmdline ::"
+	echo "Running :: cat /proc/cmdline"
+	cat /proc/cmdline
+##
+	tput setab 61
+	echo -e "\n ==============================================================================="
+	echo -e "\n ............................................................................."
+	tput sgr0
+}
+################################+++++++++++++++++++++++++++++++++++++++++++++++
+################################++++++++++++++++++++++++++++++++++++++++++++
+#############################+++++++++++++++++++++++++++++++++++++++++
+#########################++++++++++++++++++++++++++++++++++++++++
+#######################++++++++++++++++++++++++++++++++++++++
+#####################+++++++++++++++++++++++++++++++++++++
+###############+++++++++++++++++++++++++++
+##########++++++++++++++++++++++++
+########++++++++++++++++++
+######++++++++++++++
+#####+++++++++
+##+++++
+#+++
+
+CHOICE=$(whiptail --title "SELECT CHOICE" --menu "SELECT CHOICE" 0 0 5 \
+	1 "[MAX PERFORMANCE] POWER " \
+	2 "[STOCK] POWER SETTING" \
+	3 "[PERFORMANCE GOVERNOR ONLY]" \
+	4 "[STOCK GOVERNOR ONLY]" \
+	5 "[SYSTEM STATUS FULL INFO]" 3>&1 1>&2 2>&3)
+
+if [ -z $CHOICE ]; then
+	echo " EMPTY !	"
+	echo "		Exiting"
+	exit
+fi
+
+if [ $CHOICE -eq 1 ] || [ $CHOICE -eq 2 ]; then
+	whiptail --msgbox " [SELECTED $CHOICE] MUST REBOOT  FOR CHANGES TO FULLY TAKE EFFECT !!" 0 0
+fi
+
+case $CHOICE in
+
+1)
+	echo "Selected 1- PERFORMANCE :: High PERFORMANCE"
+	FUN_PERFORMANCE_HIGH
+	echo " MUST REBOOT  FOR ALL CHANGES TO FULLY TAKE EFFECT !!"
+	;;
+
+2)
+	echo "Selected 2- STOCK :: Normal STOCK performance"
+	FUN_PERFORMANCE_STOCK
+	echo " MUST REBOOT  FOR ALL CHANGES TO FULLY TAKE EFFECT !!"
+
+	;;
+
+3)
+
+	echo " selected 3- [PERFORMANCE GOVERNOR ONLY]"
+	FUN_SET_PERFORMANCE_GOVERNOR_ONLY
+
+	;;
+
+4)
+
+	echo "selected 4- [STOCK GOVERNOR ONLY]"
+	SET_STOCK_GOVERNOR_ONLY
+
+	;;
+
+5)
+
+	echo "selected 5- [SYSTEM STATUS FULL INFO]"
+	SYSTEM_STATUS_FULL_INFO
+
+	;;
+
+*)
+	echo " EXITING"
+	exit
+	;;
+
+esac

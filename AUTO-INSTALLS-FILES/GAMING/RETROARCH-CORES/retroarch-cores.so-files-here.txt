@@ -1,0 +1,1 @@
+just copy the desired retro-arch .so core files to this Directory

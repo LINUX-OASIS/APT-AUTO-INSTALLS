@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+
+sudo killall dnsmasq
+set -e
+
+cd /usr/share/airgeddon/
+exec ./airgeddon.sh "$@"

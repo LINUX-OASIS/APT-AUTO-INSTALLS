@@ -1,0 +1,62 @@
+#!/bin/bash
+
+########## dependencies::: nmap
+#check dependency nmap & netdiscover is installed and install if not already
+for PACKAGE in nmap netdiscover; do                                                    # the dependencies needed
+    if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
+        echo "dependency $PACKAGE is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y $PACKAGE
+
+        if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then #exits if package is not installed even after installation code was executed...something went wrong
+            echo "Posibly didn't install dependency $PACKAGE .. exiting"
+            exit
+        fi
+    fi
+done
+########################################################################
+
+__AVAILABLE_NETIFACE=$(ip addr show | grep "^[0-9]\|^[0-9][^0-9]" | cut -d: -f2 | nl | tr -d ' ')
+
+__AVAILABLE_NETIFACE_COUNT=$(ip addr show | grep "^[0-9]\|^[0-9][^0-9]" | cut -d: -f2 | wc -l)
+
+__CHOICE_NETIFACE=$(whiptail --title "SHOW NETWORK IP ADDRESSES UNDER/ASSOCIATED WITH NETIFACE:" --menu "" 0 0 $__AVAILABLE_NETIFACE_COUNT $__AVAILABLE_NETIFACE 3>&1 1>&2 2>&3)
+
+if [ -z "$__CHOICE_NETIFACE" ]; then
+
+    echo "USER ABORTED ....EXITING ..."
+    exit
+
+fi
+
+__SELECTED_NETIFACE_FINAL=$(ip addr show | grep "^[0-9]\|^[0-9][^0-9]" | cut -d: -f2 | nl | tr -d ' ' | grep -w "^$__CHOICE_NETIFACE" | sed "s/$__CHOICE_NETIFACE//1" | tr -d '[:space:]')
+
+__NETIFACE_IPADDR_SCAN_RANGE=$(ip addr show $__SELECTED_NETIFACE_FINAL | grep -w "inet" | sed 's/ /@/g' | tr -s @ | cut -d @ -f3 | tr -d '[:space:]')
+
+#removes the "/24" & the "/8"  from the IP address scan range from the target NETIFACE:: necessary to display all IP addresses different from the Parent/target NETIFACE's IP address
+__SANITIZED_IP_ADDR_SCAN_RANGE=$(echo $__NETIFACE_IPADDR_SCAN_RANGE | sed 's+/24++g' | sed 's+/8++g')
+
+echo "><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><"
+echo -e "><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><\n"
+
+echo -e "_____________________________________________________________________________\n"
+echo "Running::: sudo netdiscover -r $__NETIFACE_IPADDR_SCAN_RANGE -P"
+echo "_____________________________________________________________________________"
+
+# netdiscover's -P option is to run in printable mode (stops scanning after going through all IP addresses in the network range)
+sudo netdiscover -r $__NETIFACE_IPADDR_SCAN_RANGE -P
+
+#Display all IP addresses different from the Parent/target NETIFACE's IP address
+__ALL_IP_ADDRESSES_UNDER_NETIFACE=$(sudo nmap -sP $__NETIFACE_IPADDR_SCAN_RANGE | grep "Nmap scan report for" | sed 's/Nmap scan report for//g' | grep -v "$__SANITIZED_IP_ADDR_SCAN_RANGE")
+
+echo -e "\n################## IP ADDRESSES FOUND UNDER: $__NETIFACE_IPADDR_SCAN_RANGE ####################\n"
+
+for VAL in $__ALL_IP_ADDRESSES_UNDER_NETIFACE; do
+
+    echo -e "$VAL\n"
+
+done
+
+echo -e "###############################################################################\n"
+
+read -p "press ENTER to continue ::"

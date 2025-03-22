@@ -1,0 +1,30 @@
+#!/bin/bash
+
+CHOICE=$(whiptail --title "GNOME WORKSPACES - SET AS DYNAMIC OR STATIC WORKSPACES" --menu "GNOME WORKSPACES - SET AS STATIC OR DYNAMIC WORKSPACES" 0 0 2 1 "DYNAMIC WORKSPACES" \
+    2 "STATIC WORKSPACES" 3>&1 1>&2 2>&3)
+
+if [ -z $CHOICE ]; then
+    exit
+elif [ $CHOICE -eq 1 ]; then
+
+    gsettings set org.gnome.mutter dynamic-workspaces true
+
+    echo "  Done  :-]  Workspaces are now dynamic-workspaces"
+
+elif [ $CHOICE -eq 2 ]; then
+
+    NUM_DYNAMIC_WORKSPACES=$(whiptail --backtitle "SELECTED [DYNAMIC] WORSPACES" --title "COOSE NUMBER OF DYNAMIC WORKSPACES" --menu "COOSE NUMBER OF DYNAMIC WORKSPACES" 0 0 3 \
+        4 "[ 4 ] Workspaces" \
+        6 "[ 6 ] Workspaces" \
+        8 "[ 8 ] Workspaces" 3>&1 1>&2 2>&3)
+
+    if [ -z $NUM_DYNAMIC_WORKSPACES ]; then
+        exit
+    fi
+
+    gsettings set org.gnome.mutter dynamic-workspaces false
+    gsettings set org.gnome.desktop.wm.preferences num-workspaces $NUM_DYNAMIC_WORKSPACES
+
+    echo "  Done  :-]  Workspaces are now static-workspaces  with [$NUM_DYNAMIC_WORKSPACES] workspaces available"
+
+fi

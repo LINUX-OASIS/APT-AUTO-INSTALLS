@@ -1,0 +1,123 @@
+#!/bin/bash
+export NEWT_COLORS='
+root=white,brightmagenta
+border=yellow,black
+window=brightmagenta,brightblue
+shadow=green,yellow
+title=white,brightblue
+button=brightmagenta,black
+actbutton=black,lightgray
+checkbox=lightgray,black
+actcheckbox=brightgreen,green
+entry=black,white
+label=brightgreen,brightmagenta
+listbox=white,gray
+actlistbox=black,red
+textbox=black,yellow
+acttextbox=brightred,green
+helpline=lightgray,green
+roottext=green,lightgray
+emptyscale=green,brightmagenta
+fullscale=yellow,brightgreen
+disentry=brightblue,lightgray
+compactbutton=white,gray
+actsellistbox=black,yellow
+sellistbox=brightmagenta,lightgray'
+
+#By default, the server binds itself to all interfaces... (ip adresses of all interfaces)
+# python3 -m http.server 9000
+# python3 -m http.server --directory <dir> --port <port>
+# pyftpdlib (python3-pyftpdlib) is so you can have a user/password protected network directory share, amongst a few other functinalities
+
+#check dependencies
+for PACKAGE in "python3-pip" "python3-pyftpdlib" "net-tools"; do                                       # the dependencies needed
+    if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
+        echo "dependency $PACKAGE is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y $PACKAGE
+
+        if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then #exits if package is not installed even after installation code was executed...something went wrong
+            echo "Posibly didn't install dependency $PACKAGE .. exiting"
+            exit
+        fi
+        if ! pip list | grep python-ftp-server >/dev/null; then
+            sudo python3 -m pip install python-ftp-server
+
+            if ! pip list | grep python-ftp-server >/dev/null; then
+                echo "Posibly didn't install dependency [python pip]  python-ftp-server  .. exiting"
+                exit
+            fi
+        fi
+
+    fi
+done
+
+FUN_DIRECTORY() {
+
+    DIRECTORY=$(whiptail --backtitle "PYTHON HTTP SERVER" --title "Input Directory to Share [Will Use Current DIR By Default]" --inputbox "Input Directory to Share [Will Use Current DIR By Default]" 0 0 "$PWD" 3>&1 1>&2 2>&3)
+
+    if [ -z $DIRECTORY ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+}
+####################################################################
+####################################################################
+####################################################################
+####################################################################
+
+FUN_CHECK_FREE_PORT() {
+    #check next free ports after 9000 to assign as port number for python simple http server
+    netstat -tulpn 2>/dev/null >/tmp/custom-PYTHON-SIMPLE-HTTP-SERVER-FREE-PORTS-CHECK.tmp
+
+    #starting port number for python simple http server.. default is 9000
+    PORT_NUM=9000
+
+    while grep "$PORT_NUM" /tmp/custom-PYTHON-SIMPLE-HTTP-SERVER-FREE-PORTS-CHECK.tmp >/dev/null; do
+
+        PORT_NUM=$((PORT_NUM + 1))
+
+    done
+
+}
+
+####################################################################
+####################################################################
+####################################################################
+####################################################################
+
+function FUN_CONNECTION_DETAILS_INFO {
+    LIST_AVAILABLE_NET_INTERFACES=$(ip link show | grep -w "[0-9]:" | cut -d: -f2)
+
+    for VAL in $LIST_AVAILABLE_NET_INTERFACES; do
+
+        NET_IFACE_IP_ADDR=$(ip address show $VAL | grep -w inet | grep -o "^.*/.." | sed s/inet// | sed s+/..++ | tr -d '[:space:]')
+
+        if [[ -n $NET_IFACE_IP_ADDR ]]; then
+
+            echo "[NET-IFACE]: $VAL"
+            ip address show $VAL | grep -w inet
+            echo -e "\t[SHARING DIRECTORY]: $DIRECTORY"
+            echo -e "\tconnect to http server via  >>>>  ip address:port  >>>> >>> >> >"
+            echo -e "\t[CONNECT VIA] >>>>>>  [[ \e[3;7m $NET_IFACE_IP_ADDR:$PORT_NUM \e[0m ]] "
+            # echo -e "\t $NET_IFACE_IP_ADDR:$PORT_NUM"
+            echo ""
+
+        fi
+
+    done
+
+    echo ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+    echo ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+}
+
+FUN_DIRECTORY
+FUN_CHECK_FREE_PORT
+FUN_CONNECTION_DETAILS_INFO
+
+python3 -m http.server --directory "$DIRECTORY" $PORT_NUM
+
+
+
+unset NEWT_COLORS

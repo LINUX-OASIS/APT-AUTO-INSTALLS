@@ -1,0 +1,6 @@
+#!/bin/bash
+
+
+#echo custom WATCH CPU FREQUENCY INFO REALTIME
+
+watch -n 0.5 "grep \"^[c]pu MHz\" /proc/cpuinfo"

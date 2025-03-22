@@ -1,0 +1,1570 @@
+#!/bin/bash
+
+# MUST BE IN .IMG FILE !!!!!!!!!!!!!!!!!!!!!
+# use losetup --list ... or losetup -a  to list  loop devices and their associated back file/image file ..
+#$#$SDSDFS$#@$@#$@#$@#$@#$@#$@#$@#$@d "d    dddd    d   ddd ddddd   d   dd dddd dddd dddd dddd
+#$#$SDSDFS$#@$@#$@#$@#$@#$@#$@#$@#$@d "d    dddd    d   ddd ddddd   d   dd dddd dddd dddd dddd
+#$#$SDSDFS$#@$@#$@#$@#$@#$@#$@#$@#$@d "d    dddd    d   ddd ddddd   d   dd dddd dddd dddd dddd
+#$#$SDSDFS$#@$@#$@#$@#$@#$@#$@#$@#$@d "d    dddd    d   ddd ddddd   d   dd dddd dddd dddd dddd
+
+# Checks for package/dependencies installed status and installs them if not already installed
+for PACKAGE in parted dosfstools mtools exfatprogs; do                                 # the dependencies needed
+    if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
+        echo "dependency $PACKAGE is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y $PACKAGE
+
+        if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then #exits if package is not installed even after installation code was executed...something went wrong
+            echo "Posibly didn't install dependency $PACKAGE .. exiting"
+            exit
+        fi
+    fi
+done
+
+# date +%s%N Measures To NANOSECONDS... FROM Seconds to nanoseconds
+
+RRANDO_VAL=$(date +%s%N | base64 | md5sum | cut -c 1-3 | tr '[:lower:]' '[:upper:]')
+RRANDO_VAL_EXTENDED=$(date +%s%N | base64 | md5sum | cut -c 1-5 | tr '[:lower:]' '[:upper:]')
+
+# Function to create a custom sparse image file
+FUN_CREATE_CUSTOM_SPARSE_IMAGE_FILE() {
+
+    # Prompt user for sparse image file name
+    SPARSE_IMAGE_FILE_NAME=$(whiptail --title "CREATE custom SPARSE FILE [[NAME]] 🥞" \
+        --inputbox "Input NAME For Sparse File" 0 0 "" 3>&1 1>&2 2>&3)
+    if [ -z "$SPARSE_IMAGE_FILE_NAME" ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+    SPARSE_IMAGE_FILE_NAME_SANITIZED=$(echo "$SPARSE_IMAGE_FILE_NAME" | tr -d '[:space:]')
+
+    # Prompt user for size alignment: M, G, or T
+    SPARSE_FILE_ALIGN_TO_M_G_T=$(whiptail --scrolltext --title "🥞 CREATE custom SPARSE FILE [[SIZE]]" \
+        --menu "[ Align Size To: M, G, T ]" 0 0 3 \
+        1 "Align Size To [M] Megabytes = 1024 Kilobytes" \
+        2 "Align Size To [G] Gigabytes = 1024 Megabytes" \
+        3 "Align Size To [T] Terabytes = 1024 Gigabytes" 3>&1 1>&2 2>&3)
+    if [ -z "$SPARSE_FILE_ALIGN_TO_M_G_T" ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    # Map user choice to alignment character and message
+    case $SPARSE_FILE_ALIGN_TO_M_G_T in
+    1)
+        ALIGN_TO_CHAR=M
+        ALIGN_TO_MESSAGE="M = Megabytes"
+        ;;
+    2)
+        ALIGN_TO_CHAR=G
+        ALIGN_TO_MESSAGE="G = Gigabytes"
+        ;;
+    3)
+        ALIGN_TO_CHAR=T
+        ALIGN_TO_MESSAGE="T = Terabytes"
+        ;;
+    esac
+
+    # Prompt user for size input
+    SIZE_INPUT=$(whiptail --scrolltext --title "🥞 Input [SIZE] For SPARSE FILE in [$ALIGN_TO_MESSAGE] 🥞" \
+        --inputbox "🥞 SIZE ALIGNED TO [$ALIGN_TO_MESSAGE] 🥞" 0 0 "" 3>&1 1>&2 2>&3)
+    if [ -z "$SIZE_INPUT" ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    SIZE_INPUT_SANITIZED=$(echo "$SIZE_INPUT" | tr -d -c '[:digit:]')
+
+    # Confirmation dialog before creation
+    cat <<EOF >/tmp/custom-SPARSE-FINAL-CREATION-MESSAGE-CONFIRMATION.tmp
+Will Now CREATE SPARSE FILE
+
+FILE NAME: $SPARSE_IMAGE_FILE_NAME_SANITIZED.img
+FILE SIZE: $SIZE_INPUT_SANITIZED - $ALIGN_TO_MESSAGE
+EOF
+
+    if whiptail --title "🥞 Will Now CREATE SPARSE FILE" \
+        --yesno "$(cat /tmp/custom-SPARSE-FINAL-CREATION-MESSAGE-CONFIRMATION.tmp)" 0 0 3>&1 1>&2 2>&3; then
+        truncate -s ${SIZE_INPUT_SANITIZED}${ALIGN_TO_CHAR} "$SPARSE_IMAGE_FILE_NAME_SANITIZED.img"
+        sudo chmod 777 "$SPARSE_IMAGE_FILE_NAME_SANITIZED.img"
+    else
+        echo "USER ABORTED"
+        exit
+    fi
+
+    # Prompt user to format the sparse file
+    cat <<EOF >/tmp/custom-SPARSE-FINAL-CREATION-MESSAGE-CONFIRMATION-TO-FORMAT.tmp
+[FORMAT] NEWLY CREATED SPARSE FILE?
+
+FILE NAME: $SPARSE_IMAGE_FILE_NAME_SANITIZED.img
+EOF
+
+    if whiptail --title "[FORMAT] NEWLY CREATED SPARSE FILE??" \
+        --yesno "$(cat /tmp/custom-SPARSE-FINAL-CREATION-MESSAGE-CONFIRMATION-TO-FORMAT.tmp)" 0 0 3>&1 1>&2 2>&3; then
+        FUN_FORMAT_SPARSE_FILE_IMAGE_AT_CREATION_TIME "$SPARSE_IMAGE_FILE_NAME_SANITIZED.img"
+    else
+        echo "ALL DONE CREATING SPARSE FILE 🥞"
+    fi
+}
+
+# Function to format a sparse file at creation time
+FUN_FORMAT_SPARSE_FILE_IMAGE_AT_CREATION_TIME() {
+
+    # Random values for labels to ensure uniqueness
+    RRANDO_VAL=$(date +%s%N | base64 | md5sum | cut -c 1-3 | tr '[:lower:]' '[:upper:]')
+    RRANDO_VAL_EXTENDED=$(date +%s%N | base64 | md5sum | cut -c 1-5 | tr '[:lower:]' '[:upper:]')
+
+    local SPARSE_IMAGE_FILE_NAME=$1
+
+    # Prompt user to select a filesystem type
+    FORMAT_FILESYSTEM_TYPE=$(whiptail --title "Select Filesystem To 🍱 [FORMAT] 🍱 Sparse file With 🍱" \
+        --menu "Select Filesystem To Format Sparse file With" 0 0 5 \
+        1 "EXT4" \
+        2 "BTRFS" \
+        3 "FAT32" \
+        4 "exFAT" \
+        5 "NTFS" 3>&1 1>&2 2>&3)
+
+    if [ -z "$FORMAT_FILESYSTEM_TYPE" ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    case $FORMAT_FILESYSTEM_TYPE in
+    1)
+        # Create partition table and format the first partition with EXT4
+        whiptail --msgbox "Will Format Sparse Image File With EXT4 Filesystem :: Label :: SPRSXT4-$RRANDO_VAL_EXTENDED" 0 0
+        sudo wipefs --force -a $SPARSE_IMAGE_FILE_NAME
+        sudo parted -s $SPARSE_IMAGE_FILE_NAME mklabel gpt
+        sudo parted -s -a opt $SPARSE_IMAGE_FILE_NAME mkpart ext4 0% 100%
+        sudo chmod 777 $SPARSE_IMAGE_FILE_NAME
+        sleep 1
+
+        # Attach loop device
+        sudo losetup -fP $SPARSE_IMAGE_FILE_NAME
+
+        # Get loop device for the file
+        ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep $SPARSE_IMAGE_FILE_NAME | cut -d ' ' -f1)
+        ASSOCIATED_LOOPDEV_1STPART="/dev/$(echo $ASSOCIATED_LOOPDEV | sed 's+/dev/++g')p1"
+
+        # Sanity check that the first partition exists
+        if [ -b "$ASSOCIATED_LOOPDEV_1STPART" ]; then
+            echo "First partition found, formatting as EXT4."
+            sudo mkfs.ext4 -F -L SPRSXT4-$RRANDO_VAL_EXTENDED $ASSOCIATED_LOOPDEV_1STPART
+        else
+            echo "Error: First partition not found for $ASSOCIATED_LOOPDEV_1STPART. Exiting."
+            exit 1
+        fi
+
+        # Detach loop device and unmount
+        LOOPDEV_MOUNT_POINT=$(lsblk -f -n -o MOUNTPOINTS $ASSOCIATED_LOOPDEV | tr -d '[:space:]')
+        sudo umount $LOOPDEV_MOUNT_POINT 2>/dev/null
+        sudo losetup -d $ASSOCIATED_LOOPDEV 2>/dev/null
+        sudo losetup -D
+        ;;
+
+    2)
+        # Create partition table and format the first partition with BTRFS
+        whiptail --msgbox "Will Format Sparse Image File With BTRFS Filesystem :: Label :: SPRSBTRFS-$RRANDO_VAL_EXTENDED" 0 0
+        sudo wipefs --force -a $SPARSE_IMAGE_FILE_NAME
+        sudo parted -s $SPARSE_IMAGE_FILE_NAME mklabel gpt
+        sudo parted -s -a opt $SPARSE_IMAGE_FILE_NAME mkpart btrfs 0% 100%
+        sudo chmod 777 $SPARSE_IMAGE_FILE_NAME
+        sleep 1
+
+        # Attach loop device
+        sudo losetup -fP $SPARSE_IMAGE_FILE_NAME
+
+        # Get loop device for the file
+        ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep $SPARSE_IMAGE_FILE_NAME | cut -d ' ' -f1)
+        ASSOCIATED_LOOPDEV_1STPART="/dev/$(echo $ASSOCIATED_LOOPDEV | sed 's+/dev/++g')p1"
+
+        # Sanity check that the first partition exists
+        if [ -b "$ASSOCIATED_LOOPDEV_1STPART" ]; then
+            echo "First partition found, formatting as BTRFS."
+            sudo mkfs.btrfs -f -L SPRSBTRFS-$RRANDO_VAL_EXTENDED $ASSOCIATED_LOOPDEV_1STPART
+        else
+            echo "Error: First partition not found for $ASSOCIATED_LOOPDEV_1STPART. Exiting."
+            exit 1
+        fi
+
+        # Detach loop device and unmount
+        LOOPDEV_MOUNT_POINT=$(lsblk -f -n -o MOUNTPOINTS $ASSOCIATED_LOOPDEV | tr -d '[:space:]')
+        sudo umount $LOOPDEV_MOUNT_POINT 2>/dev/null
+        sudo losetup -d $ASSOCIATED_LOOPDEV 2>/dev/null
+        sudo losetup -D
+        ;;
+
+    3)
+        # Create partition table and format the first partition with FAT32
+        whiptail --msgbox "Will Format Sparse Image File With FAT32 Filesystem :: Label :: SPRSFAT32-${RRANDO_VAL_EXTENDED:0:1}" 0 0
+        sudo wipefs --force -a $SPARSE_IMAGE_FILE_NAME
+        sudo parted -s $SPARSE_IMAGE_FILE_NAME mklabel gpt
+        sudo parted -s -a opt $SPARSE_IMAGE_FILE_NAME mkpart fat32 0% 100%
+        sudo chmod 777 $SPARSE_IMAGE_FILE_NAME
+        sleep 1
+
+        # Attach loop device
+        sudo losetup -fP $SPARSE_IMAGE_FILE_NAME
+
+        # Get loop device for the file
+        ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep $SPARSE_IMAGE_FILE_NAME | cut -d ' ' -f1)
+        ASSOCIATED_LOOPDEV_1STPART="/dev/$(echo $ASSOCIATED_LOOPDEV | sed 's+/dev/++g')p1"
+
+        # Sanity check that the first partition exists
+        if [ -b "$ASSOCIATED_LOOPDEV_1STPART" ]; then
+            # Formatting Sparse Image File With FAT32 Filesystem
+            LABEL="SPRSFAT32-$(echo $RRANDO_VAL | cut -c1 | tr -d '[:space:]')"
+            # mkfs.fat can handle formatting an image file directly (not neccessary to mount into loop device)
+            echo "First partition found, formatting as FAT32."
+            sudo mkfs.fat -F 32 -n "$LABEL" "$SPARSE_IMAGE_FILE_NAME"
+            # here for documentation purposes, example of mkfs.fat command with loop device: /dev/loop0p1
+            # sudo mkfs.fat -F 32 -n "$LABEL" "$ASSOCIATED_LOOPDEV_1STPART"
+        else
+            echo "Error: First partition not found for $ASSOCIATED_LOOPDEV_1STPART. Exiting."
+            exit 1
+        fi
+
+        # Detach loop device and unmount
+        LOOPDEV_MOUNT_POINT=$(lsblk -f -n -o MOUNTPOINTS $ASSOCIATED_LOOPDEV | tr -d '[:space:]')
+        sudo umount $LOOPDEV_MOUNT_POINT 2>/dev/null
+        sudo losetup -d $ASSOCIATED_LOOPDEV 2>/dev/null
+        sudo losetup -D
+        ;;
+
+    4)
+        # Create partition table and format the first partition with exFAT
+        whiptail --msgbox "Will Format Sparse Image File With exFAT Filesystem :: Label :: SPRSEXFAT-${RRANDO_VAL_EXTENDED:0:1}" 0 0
+        sudo wipefs --force -a $SPARSE_IMAGE_FILE_NAME
+        sudo parted -s $SPARSE_IMAGE_FILE_NAME mklabel gpt
+        sudo parted -s -a opt $SPARSE_IMAGE_FILE_NAME mkpart exfat 0% 100%
+        sudo chmod 777 $SPARSE_IMAGE_FILE_NAME
+        sleep 1
+
+        # Attach loop device
+        sudo losetup -fP $SPARSE_IMAGE_FILE_NAME
+
+        # Get loop device for the file
+        ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep $SPARSE_IMAGE_FILE_NAME | cut -d ' ' -f1)
+        ASSOCIATED_LOOPDEV_1STPART="/dev/$(echo $ASSOCIATED_LOOPDEV | sed 's+/dev/++g')p1"
+
+        # Sanity check that the first partition exists
+        if [ -b "$ASSOCIATED_LOOPDEV_1STPART" ]; then
+            # Formatting Sparse Image File With exFAT Filesystem
+            LABEL="SPRSEXFAT-$(echo $RRANDO_VAL | cut -c1 | tr -d '[:space:]')"
+            echo "First partition found, formatting as exFAT."
+            sudo mkfs.exfat -n "$LABEL" $ASSOCIATED_LOOPDEV_1STPART
+        else
+            echo "Error: First partition not found for $ASSOCIATED_LOOPDEV_1STPART. Exiting."
+            exit 1
+        fi
+
+        # Detach loop device and unmount
+        LOOPDEV_MOUNT_POINT=$(lsblk -f -n -o MOUNTPOINTS $ASSOCIATED_LOOPDEV | tr -d '[:space:]')
+        sudo umount $LOOPDEV_MOUNT_POINT 2>/dev/null
+        sudo losetup -d $ASSOCIATED_LOOPDEV 2>/dev/null
+        sudo losetup -D
+        ;;
+
+    5)
+        # Create partition table and format the first partition with NTFS
+        whiptail --msgbox "Will Format Sparse Image File With NTFS Filesystem :: Label :: SPRSNTFS-$RRANDO_VAL_EXTENDED" 0 0
+        sudo wipefs --force -a $SPARSE_IMAGE_FILE_NAME
+        sudo parted -s $SPARSE_IMAGE_FILE_NAME mklabel gpt
+        sudo parted -s -a opt $SPARSE_IMAGE_FILE_NAME mkpart ntfs 0% 100%
+        sudo chmod 777 $SPARSE_IMAGE_FILE_NAME
+        sleep 1
+
+        # Attach loop device
+        sudo losetup -fP $SPARSE_IMAGE_FILE_NAME
+
+        # Get loop device for the file
+        ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep $SPARSE_IMAGE_FILE_NAME | cut -d ' ' -f1)
+        ASSOCIATED_LOOPDEV_1STPART="/dev/$(echo $ASSOCIATED_LOOPDEV | sed 's+/dev/++g')p1"
+
+        # Sanity check that the first partition exists
+        if [ -b "$ASSOCIATED_LOOPDEV_1STPART" ]; then
+            echo "First partition found, formatting as NTFS."
+            sudo mkfs.ntfs --quick --force --label SPRSNTFS-$RRANDO_VAL $ASSOCIATED_LOOPDEV_1STPART
+        else
+            echo "Error: First partition not found for $ASSOCIATED_LOOPDEV_1STPART. Exiting."
+            exit 1
+        fi
+
+        # Detach loop device and unmount
+        LOOPDEV_MOUNT_POINT=$(lsblk -f -n -o MOUNTPOINTS $ASSOCIATED_LOOPDEV | tr -d '[:space:]')
+        sudo umount $LOOPDEV_MOUNT_POINT 2>/dev/null
+        sudo losetup -d $ASSOCIATED_LOOPDEV 2>/dev/null
+        sudo losetup -D
+        ;;
+    esac
+}
+
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+
+# Function to format a sparse .img or .bin file image with various filesystems
+FUN_FORMAT_SPARSE_FILE_IMAGE() {
+    # Set whiptail color scheme for UI elements
+    export NEWT_COLORS='button=black,green textbox=yellow,black'
+
+    # Generate a list of .img and .bin files in the current directory with their real and apparent sizes
+    IMG_BIN_FILES_IN_PWD=$(
+        printf "RealSize :: ApparentSize\n++++++++++++++++++++++++++++\n"
+        for _VAL in $(find $PWD -maxdepth 1 -name "*.img" -o -name "*.bin" | sed s+$PWD/++g); do
+            printf "%-8s %-8s %-8s\n" "$(du -h $_VAL | cut -f1)" "$(du --apparent-size -h $_VAL | cut -f1)" "$_VAL"
+        done
+    )
+
+    # Prompt the user to select the image file to format
+    IMAGE_FILE_PATH=$(whiptail --scrolltext --title "[FORMAT] 🍱 Input Sparse Image File [.IMG / .BIN] Absolute Path" --inputbox "$IMG_BIN_FILES_IN_PWD" 0 0 3>&1 1>&2 2>&3)
+
+    # Exit if the user aborts the selection
+    if [ -z "$IMAGE_FILE_PATH" ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    # Prompt the user to select the filesystem type
+    FORMAT_FILESYSTEM_TYPE=$(whiptail --title "Select Filesystem To 🍱 [FORMAT] 🍱 Sparse file With 🍱" --menu "Select Filesystem To Format Sparse file With" 0 0 5 \
+        1 "EXT4" \
+        2 "BTRFS" \
+        3 "FAT32" \
+        4 "exFAT" \
+        5 "NTFS" 3>&1 1>&2 2>&3)
+
+    # Exit if the user aborts the selection
+    if [ -z "$FORMAT_FILESYSTEM_TYPE" ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    # Functionality to ensure loop device is detached if mounted & unmount mount points associated with the loop device
+    if losetup --all --noheadings --output NAME,BACK-FILE | grep -q "$IMAGE_FILE_PATH"; then
+        echo "🍣 Loop device is currently associated with the image file. Cleaning up..."
+        ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$IMAGE_FILE_PATH" | cut -d ' ' -f1)
+
+        # Unmount any mounted partitions associated with the loop device
+        MOUNT_POINTS=$(lsblk -no MOUNTPOINT "$ASSOCIATED_LOOPDEV"*)
+        for MOUNT_POINT in $MOUNT_POINTS; do
+            if [ -n "$MOUNT_POINT" ]; then
+                echo "Unmounting partition mounted at $MOUNT_POINT..."
+                sudo umount "$MOUNT_POINT" || echo "Failed to unmount $MOUNT_POINT"
+            fi
+        done
+
+        # Detach the loop device
+        echo "Detaching loop device $ASSOCIATED_LOOPDEV..."
+        sudo losetup -d "$ASSOCIATED_LOOPDEV" || echo "Failed to detach $ASSOCIATED_LOOPDEV"
+    else
+        echo "🍣 No loop device is currently associated with $IMAGE_FILE_PATH"
+    fi
+
+    # Generate a random value for the label to ensure uniqueness
+    RRANDO_VAL=$(date +%s%N | base64 | md5sum | cut -c 1-3 | tr '[:lower:]' '[:upper:]')
+    RRANDO_VAL_EXTENDED=$(date +%s%N | base64 | md5sum | cut -c 1-5 | tr '[:lower:]' '[:upper:]')
+
+    # Process based on the selected filesystem type
+    case $FORMAT_FILESYSTEM_TYPE in
+    1) # EXT4
+        if whiptail --fullbuttons --yesno "Format Sparse Image File with EXT4 Filesystem? Label: SPRSXT4-$RRANDO_VAL_EXTENDED" 0 0; then
+            sudo wipefs --force -a $IMAGE_FILE_PATH
+            sudo parted -s $IMAGE_FILE_PATH mklabel gpt
+            sudo parted -s -a opt $IMAGE_FILE_PATH mkpart ext4 0% 100%
+            sudo chmod 777 $IMAGE_FILE_PATH
+            sleep 1
+            sudo losetup -fP $IMAGE_FILE_PATH
+            ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep $IMAGE_FILE_PATH | cut -d ' ' -f1)
+            ASSOCIATED_LOOPDEV_1STPART="/dev/$(echo $ASSOCIATED_LOOPDEV | sed 's+/dev/++g')p1"
+            sudo mkfs.ext4 -F -L SPRSXT4-$RRANDO_VAL_EXTENDED $ASSOCIATED_LOOPDEV_1STPART
+            sudo losetup -d $ASSOCIATED_LOOPDEV
+
+        else
+            echo "USER ABORTED"
+        fi
+        ;;
+    2) # BTRFS
+        if whiptail --fullbuttons --yesno "Format Sparse Image File with BTRFS Filesystem? Label: SPRSBTRFS-$RRANDO_VAL_EXTENDED" 0 0; then
+            sudo wipefs --force -a $IMAGE_FILE_PATH
+            sudo parted -s $IMAGE_FILE_PATH mklabel gpt
+            sudo parted -s -a opt $IMAGE_FILE_PATH mkpart btrfs 0% 100%
+            sudo chmod 777 $IMAGE_FILE_PATH
+            sleep 1
+            sudo losetup -fP $IMAGE_FILE_PATH
+            ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep $IMAGE_FILE_PATH | cut -d ' ' -f1)
+            ASSOCIATED_LOOPDEV_1STPART="/dev/$(echo $ASSOCIATED_LOOPDEV | sed 's+/dev/++g')p1"
+            sudo mkfs.btrfs -f -L SPRSBTRFS-$RRANDO_VAL_EXTENDED $ASSOCIATED_LOOPDEV_1STPART
+            sudo losetup -d $ASSOCIATED_LOOPDEV
+
+        else
+            echo "USER ABORTED"
+        fi
+        ;;
+    3) # FAT32
+        if whiptail --fullbuttons --yesno "Format Sparse Image File with FAT32 Filesystem? Label: SPRSFAT32-${RRANDO_VAL_EXTENDED:0:1}" 0 0; then
+            sudo wipefs --force -a $IMAGE_FILE_PATH
+            sudo parted -s $IMAGE_FILE_PATH mklabel gpt
+            sudo parted -s -a opt $IMAGE_FILE_PATH mkpart fat32 0% 100%
+            sudo chmod 777 $IMAGE_FILE_PATH
+            sleep 1
+            sudo losetup -fP $IMAGE_FILE_PATH
+            ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep $IMAGE_FILE_PATH | cut -d ' ' -f1)
+            ASSOCIATED_LOOPDEV_1STPART="/dev/$(echo $ASSOCIATED_LOOPDEV | sed 's+/dev/++g')p1"
+            LABEL="SPRSFAT32-$(echo $RRANDO_VAL | cut -c1 | tr -d '[:space:]')"
+            sudo mkfs.fat -F 32 -n "$LABEL" $ASSOCIATED_LOOPDEV_1STPART
+            sudo losetup -d $ASSOCIATED_LOOPDEV
+
+        else
+            echo "USER ABORTED"
+
+        fi
+        ;;
+    4) # exFAT
+        if whiptail --fullbuttons --yesno "Format Sparse Image File with exFAT Filesystem? Label: SPRSEXFAT-${RRANDO_VAL_EXTENDED:0:1}" 0 0; then
+            sudo wipefs --force -a $IMAGE_FILE_PATH
+            sudo parted -s $IMAGE_FILE_PATH mklabel gpt
+            sudo parted -s -a opt $IMAGE_FILE_PATH mkpart exfat 0% 100%
+            sudo chmod 777 $IMAGE_FILE_PATH
+            sleep 1
+            sudo losetup -fP $IMAGE_FILE_PATH
+            ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep $IMAGE_FILE_PATH | cut -d ' ' -f1)
+            ASSOCIATED_LOOPDEV_1STPART="/dev/$(echo $ASSOCIATED_LOOPDEV | sed 's+/dev/++g')p1"
+            LABEL="SPRSEXFAT-$(echo $RRANDO_VAL | cut -c1 | tr -d '[:space:]')"
+            sudo mkfs.exfat -n "$LABEL" $ASSOCIATED_LOOPDEV_1STPART
+            sudo losetup -d $ASSOCIATED_LOOPDEV
+
+        else
+            echo "USER ABORTED"
+        fi
+        ;;
+    5) # NTFS
+        if whiptail --fullbuttons --yesno "Format Sparse Image File with NTFS Filesystem? Label: SPRSNTFS-$RRANDO_VAL_EXTENDED" 0 0; then
+            sudo wipefs --force -a $IMAGE_FILE_PATH
+            sudo parted -s $IMAGE_FILE_PATH mklabel gpt
+            sudo parted -s -a opt $IMAGE_FILE_PATH mkpart ntfs 0% 100%
+            sudo chmod 777 $IMAGE_FILE_PATH
+            sleep 1
+            sudo losetup -fP $IMAGE_FILE_PATH
+            ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep $IMAGE_FILE_PATH | cut -d ' ' -f1)
+            ASSOCIATED_LOOPDEV_1STPART="/dev/$(echo $ASSOCIATED_LOOPDEV | sed 's+/dev/++g')p1"
+            sudo mkfs.ntfs --quick --force --label "SPRSNTFS-$RRANDO_VAL_EXTENDED" $ASSOCIATED_LOOPDEV_1STPART
+            sudo losetup -d $ASSOCIATED_LOOPDEV
+
+        else
+            echo "USER ABORTED"
+        fi
+        ;;
+    esac
+}
+
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+
+FUN_MAKE_EXISTING_FILE_SPARSE() {
+
+    export NEWT_COLORS='
+    button=black,green
+    textbox=yellow,black'
+
+    _FILES_IN_PWD_HIDDEN_FILES_EXCLUDED_FIND=$(
+        #exclude hidden files with find command using -not -path '*/.*' options ..or better solution use -iname option:: -not -iname ".*"
+        printf "%s\n %s\n %s\n" "FILES IN CURRENT DIR [${PWD}]" "RealSize :: ApparentSize" "+++++++++++++++++++++++++++++++++++++++++++++++"
+        for _VAL in $(find $PWD -maxdepth 1 -not -iname '.*' | sed s+$PWD/++g); do if [ -f $_VAL ]; then printf "%-8s %-8s %-8s \n" "$(du -h $_VAL | sed s/$_VAL//g)" "$(du --apparent-size -h $_VAL | sed s/$_VAL//g)" "$_VAL"; fi; done
+    )
+
+    IMAGE_FILE_PATH=$(whiptail --scrolltext --title "[MAKE] 🫙 Existing File Sparse :: Input File's [.IMG / .BIN] Absolute Path " --inputbox "$_FILES_IN_PWD_HIDDEN_FILES_EXCLUDED_FIND" 0 0 3>&1 1>&2 2>&3)
+
+    if [ -z $IMAGE_FILE_PATH ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    sudo fallocate -d $IMAGE_FILE_PATH
+    sudo chmod 777 $IMAGE_FILE_PATH
+
+    echo "🫙 🫙🫙  🫙🫙🫙 ALL DONE [MAKING] Existing File Sparse 🫙🫙🫙 🫙🫙 🫙"
+}
+
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+
+FUN_MOUNT_IMG_BIN_FILE_IN_PWD() {
+    # Add Check and refuse to mount image file if already mounted ^^^^^^^^^^^^^^^^^!!! ADDD THE losetup -d  ...to auto detach when you eject drive !!
+    export NEWT_COLORS='
+    button=black,green
+    textbox=yellow,black'
+
+    # # we substituted spaces for no-break caracter ---- UNICODE: U+00A0
+    rm /tmp/IMG-IN-PWD-FILE-LIST.tmp 2>/dev/null
+    touch /tmp/IMG-IN-PWD-FILE-LIST.tmp
+
+    # OBTAIN .IMG/.BIN image files in $PWD
+    for _VAL in $(find $PWD -maxdepth 1 -name "*.img" -o -name "*.bin" | sed s+$PWD/++g); do if [ -f $_VAL ]; then printf "%-22s %-8s %-8s \n" "$_VAL    " "REAL_SIZE:[$(du -h $_VAL | tr -d '[:space:]' | sed s/$_VAL//g)]" "APPARENT_SIZE:[$(du --apparent-size -h $_VAL | tr -d '[:space:]' | sed s/$_VAL//g)]" | sed 's/ / /g' >>/tmp/IMG-IN-PWD-FILE-LIST.tmp; fi; done
+
+    # delete empty lines
+    sed -i '/^$/d' /tmp/IMG-IN-PWD-FILE-LIST.tmp
+    #exits program if theres no [.IMG/.BIN/.VDI] in current directory
+    if [[ $(cat /tmp/IMG-IN-PWD-FILE-LIST.tmp | wc -l) == 0 ]]; then
+
+        echo "!!! NO [.IMG/.BIN] FILES in Current directory [[ $PWD ]] ...... EXITING"
+        exit
+
+    fi
+    # # we substituted spaces for no-break caracter ---- UNICODE: U+00A0
+    sed -i 's/ / /g' /tmp/IMG-IN-PWD-FILE-LIST.tmp
+
+    IMG_BIN_FILES_IN_PWD_TMP_FILE_COUNT=$(cat /tmp/IMG-IN-PWD-FILE-LIST.tmp | wc -l)
+    IMG_BIN_FILES_IN_PWD_TMP_FILE_TAGS=$(cat -n /tmp/IMG-IN-PWD-FILE-LIST.tmp)
+
+    IMAGE_FILE_CHOICE=$(whiptail --scrolltext --backtitle "🥭🥭[MOUNT]🥭🥭(.IMG/.BIN) FILE CORRECTLY ::RUNS:: losetup -fP <.img/.bin>" --title "🥭[MOUNT]🥭 (.IMG/.BIN) FILE CORRECTLY [.IMG/.BIN]" \
+        --menu "Select [*.img/*.bin] File" 0 0 "$IMG_BIN_FILES_IN_PWD_TMP_FILE_COUNT" $IMG_BIN_FILES_IN_PWD_TMP_FILE_TAGS 3>&1 1>&2 2>&3)
+
+    if [ -z $IMAGE_FILE_CHOICE ]; then
+        echo "USER ABORTED . . . Nothing Done 🥭"
+        exit
+    fi
+
+    _FINAL_IMAGE_FILE=$(cat -n /tmp/IMG-IN-PWD-FILE-LIST.tmp | sed 's/ //g' | grep -w "^$IMAGE_FILE_CHOICE" | sed 's/ /@/g' | tr -s @ | cut -d@ -f1 | sed "s/$IMAGE_FILE_CHOICE//1" | tr -d '[:space:]')
+
+    _FINAL_IMAGE_FILE_ABSOLUTE_PATH=$(find $PWD -type f -name $_FINAL_IMAGE_FILE | tr -d '[:space:]')
+
+    ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So aso to not double mount the same image file to another loopdev
+    if losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH >/dev/null; then
+        #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+        ALL_MOUNT_POINTS_LOOPDEV_BACKFILE=$(losetup --all --noheadings --output BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH)
+        for MOUNTED in $ALL_MOUNT_POINTS_LOOPDEV_BACKFILE; do
+            sudo umount $MOUNTED 2>/dev/null
+            sudo losetup -d "$(losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH | cut -d ' ' -f1 | tr -d '[:space:]')" 2>/dev/null
+            #Commenting this line since it auto-destroys/ fully removes loop devices that arent active/mounted/in use by OS: what if we need to mount various devices at once before we open them?
+            # sudo losetup -D
+        done
+    fi
+    #########
+
+    # Trap signal interrupt...  trap <commands to run if signal is sent...like CTRL+C> <signal> # place it befor the command you want to have a fail safe over or something...etc
+    trap "echo NOTHING DONE ...🥭🥭The script is terminated..USER ABORTED .Nothing Done; exit" SIGINT #SIGINT is CTRL+C .. signal interrupt
+
+    sudo losetup -fP $_FINAL_IMAGE_FILE_ABSOLUTE_PATH
+
+    echo "ALL DONE ...🥭🥭 RAN ... sudo losetup -fP $_FINAL_IMAGE_FILE_ABSOLUTE_PATH"
+
+    unset NEWT_COLORS
+
+}
+
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+
+FUN_MOUNT_IMG_BIN_FILE_BY_INPUTTING_ABSOLUTE_PATH() {
+
+    # Add Check and refuse to mount image file if already mounted ^^^^^^^^^^^^^^^^^!!! ADDD THE losetup -d  ...to auto detach when you eject drive !!
+    export NEWT_COLORS='
+    button=black,green
+    textbox=yellow,black'
+
+    IMG_BIN_FILES_IN_PWD=$(
+        printf %s "RealSize :: ApparentSize\n" "++++++++++++++++++++++++++++++\n"
+        for _VAL in $(find $PWD -maxdepth 1 -name "*.img" -o -name "*.bin" | sed s+$PWD/++g); do if [ -f $_VAL ]; then printf "%-8s %-8s %-8s \n" "$(du -h $_VAL | sed s/$_VAL//g)" "$(du --apparent-size -h $_VAL | sed s/$_VAL//g)" "$_VAL"; fi; done
+    )
+
+    IMAGE_FILE_PATH=$(whiptail --scrolltext --backtitle "🥭🥭[MOUNT]🥭🥭(.IMG/.BIN) FILE CORRECTLY ::RUNS:: losetup -fP <.img/.bin>" --title "🥭[MOUNT]🥭 (.IMG/.BIN) FILE CORRECTLY-Input [.IMG/.BIN] file Absolute Path" \
+        --inputbox "$IMG_BIN_FILES_IN_PWD" 0 0 3>&1 1>&2 2>&3)
+
+    if [ -z $IMAGE_FILE_PATH ]; then
+        echo "USER ABORTED . . . Nothing Done 🥭"
+        exit
+    fi
+
+    ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So aso to not double mount the same image file to another loopdev
+    if losetup --all --noheadings --output NAME,BACK-FILE | grep $IMAGE_FILE_PATH >/dev/null; then
+        #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+        ALL_MOUNT_POINTS_LOOPDEV_BACKFILE=$(losetup --all --noheadings --output BACK-FILE | grep $IMAGE_FILE_PATH)
+        for MOUNTED in $ALL_MOUNT_POINTS_LOOPDEV_BACKFILE; do
+            sudo umount $MOUNTED 2>/dev/null
+            sudo losetup -d "$(losetup --all --noheadings --output NAME,BACK-FILE | grep $IMAGE_FILE_PATH | cut -d ' ' -f1)" 2>/dev/null
+            #Commenting this line since it auto-destroys/ fully removes loop devices that arent active/mounted/in use by OS: what if we need to mount various devices at once before we open them?
+            # sudo losetup -D
+        done
+    fi
+    #########
+
+    # Trap signal interrupt...  trap <commands to run if signal is sent...like CTRL+C> <signal> # place it befor the command you want to have a fail safe over or something...etc
+    trap "echo NOTHING DONE ...🥭🥭The script is terminated..USER ABORTED .Nothing Done; exit" SIGINT #SIGINT is CTRL+C .. signal interrupt
+
+    sudo losetup -fP $IMAGE_FILE_PATH
+
+    echo "ALL DONE ...🥭🥭 RAN ... sudo losetup -fP $IMAGE_FILE_PATH"
+
+    unset NEWT_COLORS
+
+}
+
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+
+# based on mountpoints...but if theres no mount point ???? the loop wont run..so i added losetup -D at the very end...this code is working..but need optimization,,, for later releases..for now its all goood
+
+FUN_UNMOUNT_IMG_BIN_FILE() {
+    # based on mountpoints...but if theres no mount point ???? the loop wont run..so i added losetup -D at the very end...this code is working..but need optimization,,, for later releases..for now its all goood
+    echo "[UNMOUNT] 🦞 UNMOUNT (.IMG/.BIN) FILE CORRECTLY 🦞"
+
+    #####++++++++++++++++++++++++++++
+    ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So as to not double mount the same image file to another loopdev
+    if losetup --all --noheadings --output NAME,BACK-FILE | grep ".img\|.bin" >/dev/null; then
+        #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+
+        LOOPDEVICES_WITH_IMG_BINIMAGE_BACKFILE_TO_GREP=$(losetup --list --noheadings --output NAME,BACK-FILE | grep "img\|.bin" | cut -d' ' -f1 | sed "s+/dev/++g" | sort | sed 's+$+\\|+g' | tr -d '\n' | sed 's+\\|$++g')
+
+        LIST_LOOPS_MOUNTED_IMG_BIN=$(lsblk -f -n -o NAME,FSTYPE,LABEL,MOUNTPOINTS | grep "$LOOPDEVICES_WITH_IMG_BINIMAGE_BACKFILE_TO_GREP" | sed 's/ /⬞/g' | sed 's/$/ off/g' | cat -n)
+        COUNT_LOOPS_MOUNTED_IMG_BIN=$(lsblk -f -n -o NAME,FSTYPE,LABEL,MOUNTPOINTS | grep "$LOOPDEVICES_WITH_IMG_BINIMAGE_BACKFILE_TO_GREP" | sed 's/ /⬞/g' | wc -l)
+
+        CHECKLISTED_LOOPS_TO_UNMOUNT_CHOICES=$(whiptail --title "🦞 Will Completely Unmount & Detach Anything Associated With Chosen Loop Device 🦞" \
+            --checklist "Select Loop Dev To [Unmount🦞Detach🦞Autoclear]" 0 0 $COUNT_LOOPS_MOUNTED_IMG_BIN $LIST_LOOPS_MOUNTED_IMG_BIN 3>&1 1>&2 2>&3)
+        CHECKLISTED_LOOPS_TO_UNMOUNT_CHOICES_FINAL=$(echo $CHECKLISTED_LOOPS_TO_UNMOUNT_CHOICES | sed 's/"//g')
+
+        if [ -z "$CHECKLISTED_LOOPS_TO_UNMOUNT_CHOICES" ]; then
+            echo "USER ABORTED"
+            exit
+        fi
+
+        for CHOSEN in $CHECKLISTED_LOOPS_TO_UNMOUNT_CHOICES_FINAL; do
+            FINAL_LOOPDEV_TO_UNMOUNT=$(lsblk -f -n -o NAME,FSTYPE,LABEL,MOUNTPOINTS | grep "$LOOPDEVICES_WITH_IMG_BINIMAGE_BACKFILE_TO_GREP" | sed 's/ /@/g' | cat -n | grep -w $CHOSEN | sed s/└─//g | sed s/├─//g | sed s/$CHOSEN//1 | cut -d'@' -f1 | tr -d '[:space:]' | sed 's+^+/dev/+g')
+
+            ##obtain the root loop device and unmount all mountpoints associated with root loop device....aka remove the partition section of loop dev name...loop#p# > loop#
+            #LOOPDEVICE LOOP[#]
+            if echo $FINAL_LOOPDEV_TO_UNMOUNT | grep -w -o "/dev/loop[0-9]" >/dev/null; then
+                for MOUNTPOINT in $(lsblk -f -n -o MOUNTPOINTS $FINAL_LOOPDEV_TO_UNMOUNT); do
+                    sudo umount $MOUNTPOINT
+                    sudo losetup -d $FINAL_LOOPDEV_TO_UNMOUNT 2>/dev/null
+                    sudo losetup -D
+                done
+            fi
+
+            #LOOPDEVICE LOOP[#]p[#]
+            if echo $FINAL_LOOPDEV_TO_UNMOUNT | grep -w -o "/dev/loop[0-9]p[0-9]" >/dev/null; then
+                ROOT_LOOPDEV=$(echo $FINAL_LOOPDEV_TO_UNMOUNT | sed s/p[0-9]$//g)
+                for MOUNTPOINT in $(lsblk -f -n -o MOUNTPOINTS $ROOT_LOOPDEV); do
+                    sudo umount $MOUNTPOINT
+                    sudo losetup -d $ROOT_LOOPDEV 2>/dev/null
+                    sudo losetup -D
+                done
+            fi
+
+            #LOOPDEVICE LOOP[#][#]
+            if echo $FINAL_LOOPDEV_TO_UNMOUNT | grep -w -o "/dev/loop[0-9][0-9]" >/dev/null; then
+                for MOUNTPOINT in $(lsblk -f -n -o MOUNTPOINTS $FINAL_LOOPDEV_TO_UNMOUNT); do
+                    sudo umount $MOUNTPOINT
+                    sudo losetup -d $FINAL_LOOPDEV_TO_UNMOUNT 2>/dev/null
+                    sudo losetup -D
+                done
+            fi
+            #LOOPDEVICE LOOP[#][#]p[#]
+            if echo $FINAL_LOOPDEV_TO_UNMOUNT | grep -w -o "/dev/loop[0-9][0-9]p[0-9]" >/dev/null; then
+                ROOT_LOOPDEV=$(echo $FINAL_LOOPDEV_TO_UNMOUNT | sed s/p[0-9]$//g)
+                for MOUNTPOINT in $(lsblk -f -n -o MOUNTPOINTS $ROOT_LOOPDEV); do
+                    sudo umount $MOUNTPOINT
+                    sudo losetup -d $ROOT_LOOPDEV 2>/dev/null
+                    sudo losetup -D
+                done
+            fi
+
+            #LOOPDEVICE LOOP[#][#]p[#][#]
+            if echo $FINAL_LOOPDEV_TO_UNMOUNT | grep -w -o "/dev/loop[0-9][0-9]p[0-9][0-9]" >/dev/null; then
+                ROOT_LOOPDEV=$(echo $FINAL_LOOPDEV_TO_UNMOUNT | sed s/p[0-9][0-9]$//g)
+                for MOUNTPOINT in $(lsblk -f -n -o MOUNTPOINTS $ROOT_LOOPDEV); do
+                    sudo umount $MOUNTPOINT
+                    sudo losetup -d $ROOT_LOOPDEV 2>/dev/null
+                    sudo losetup -D
+                done
+            fi
+
+            #LOOPDEVICE LOOP[#][#][#]
+            if echo $FINAL_LOOPDEV_TO_UNMOUNT | grep -w -o "/dev/loop[0-9][0-9][0-9]" >/dev/null; then
+                for MOUNTPOINT in $(lsblk -f -n -o MOUNTPOINTS $FINAL_LOOPDEV_TO_UNMOUNT); do
+                    sudo umount $MOUNTPOINT
+                    sudo losetup -d $FINAL_LOOPDEV_TO_UNMOUNT 2>/dev/null
+                    sudo losetup -D
+                done
+            fi
+
+            #LOOPDEVICE LOOP[#][#][#]p[#]
+            if echo $FINAL_LOOPDEV_TO_UNMOUNT | grep -w -o "/dev/loop[0-9][0-9][0-9]p[0-9]" >/dev/null; then
+                ROOT_LOOPDEV=$(echo $FINAL_LOOPDEV_TO_UNMOUNT | sed s/p[0-9]$//g)
+                for MOUNTPOINT in $(lsblk -f -n -o MOUNTPOINTS $ROOT_LOOPDEV); do
+                    sudo umount $MOUNTPOINT
+                    sudo losetup -d $ROOT_LOOPDEV 2>/dev/null
+                    sudo losetup -D
+                done
+            fi
+
+            #LOOPDEVICE LOOP[#][#][#]p[#][#]
+            if echo $FINAL_LOOPDEV_TO_UNMOUNT | grep -w -o "/dev/loop[0-9][0-9][0-9]p[0-9][0-9]" >/dev/null; then
+                ROOT_LOOPDEV=$(echo $FINAL_LOOPDEV_TO_UNMOUNT | sed s/p[0-9][0-9]$//g)
+                for MOUNTPOINT in $(lsblk -f -n -o MOUNTPOINTS $ROOT_LOOPDEV); do
+                    sudo umount $MOUNTPOINT
+                    sudo losetup -d $ROOT_LOOPDEV 2>/dev/null
+                    sudo losetup -D
+                done
+            fi
+
+            #LOOPDEVICE LOOP[#][#][#]p[#][#][#]
+            if echo $FINAL_LOOPDEV_TO_UNMOUNT | grep -w -o "/dev/loop[0-9][0-9][0-9]p[0-9][0-9][0-9]" >/dev/null; then
+                ROOT_LOOPDEV=$(echo $FINAL_LOOPDEV_TO_UNMOUNT | sed s/p[0-9][0-9][0-9]$//g)
+                for MOUNTPOINT in $(lsblk -f -n -o MOUNTPOINTS $ROOT_LOOPDEV); do
+                    sudo umount $MOUNTPOINT
+                    sudo losetup -d $ROOT_LOOPDEV 2>/dev/null
+                    sudo losetup -D
+                done
+            fi
+
+        done
+
+    elif ! losetup --all --noheadings --output NAME,BACK-FILE | grep ".img\|.bin" >/dev/null; then
+        echo "NO .IMG .BIN files With Mount Points Found On The System"
+        echo -e "Still Will Run :: losetup -D :: To detach all loop devices without mountpoints 🦞\n"
+        sudo losetup -D
+    fi
+    sudo losetup -D
+    echo "🦞🦞🦞🦞"
+
+}
+
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+
+FUN_PARTITIONATE_IMG_BIN_FILE_IN_PWD() {
+    ## 🍣🍣🍣🍣 :) :) this function was originally created/finished by me - LINIX LINING - AKA.. LINUX OASIS - on 3-FEB-2025
+
+    export NEWT_COLORS='
+    button=black,green
+    textbox=yellow,black'
+
+    # # we substituted spaces for no-break caracter ---- UNICODE: U+00A0
+    rm -rf /tmp/IMG-IN-PWD-FILE-LIST.tmp 2>/dev/null
+    touch /tmp/IMG-IN-PWD-FILE-LIST.tmp
+
+    # OBTAIN .IMG/.BIN image files in $PWD
+    for _VAL in $(find $PWD -maxdepth 1 -name "*.img" -o -name "*.bin" | sed s+$PWD/++g); do if [ -f $_VAL ]; then printf "%-22s %-8s %-8s \n" "$_VAL    " "REAL_SIZE:[$(du -h $_VAL | tr -d '[:space:]' | sed s/$_VAL//g)]" "APPARENT_SIZE:[$(du --apparent-size -h $_VAL | tr -d '[:space:]' | sed s/$_VAL//g)]" | sed 's/ / /g' >>/tmp/IMG-IN-PWD-FILE-LIST.tmp; fi; done
+
+    # delete empty lines
+    sed -i '/^$/d' /tmp/IMG-IN-PWD-FILE-LIST.tmp
+    #exits program if theres no [.IMG/.BIN/.VDI] in current directory
+    if [[ $(cat /tmp/IMG-IN-PWD-FILE-LIST.tmp | wc -l) == 0 ]]; then
+
+        echo "!!! NO [.IMG/.BIN] FILES in Current directory [[ $PWD ]] ...... EXITING"
+        exit
+
+    fi
+    # # we substituted spaces for no-break caracter ---- UNICODE: U+00A0
+    sed -i 's/ / /g' /tmp/IMG-IN-PWD-FILE-LIST.tmp
+
+    IMG_BIN_FILES_IN_PWD_TMP_FILE_COUNT=$(cat /tmp/IMG-IN-PWD-FILE-LIST.tmp | wc -l)
+    IMG_BIN_FILES_IN_PWD_TMP_FILE_TAGS=$(cat -n /tmp/IMG-IN-PWD-FILE-LIST.tmp)
+
+    IMAGE_FILE_CHOICE=$(whiptail --scrolltext --backtitle "🍣🍣[PARTITION]🍣🍣(.IMG/.BIN) FILE CORRECTLY " --title "🍣🍣[PARTITION]🍣🍣(.IMG/.BIN) FILE CORRECTLY" \
+        --menu "Select [*.img/*.bin] File" 0 0 "$IMG_BIN_FILES_IN_PWD_TMP_FILE_COUNT" $IMG_BIN_FILES_IN_PWD_TMP_FILE_TAGS 5>&1 1>&2 2>&5)
+
+    if [ -z $IMAGE_FILE_CHOICE ]; then
+        echo "USER ABORTED . . . Nothing Done 🍣"
+        exit
+    fi
+
+    # # we substituted spaces for no-break caracter ---- ' ' UNICODE: U+00A0
+    # here we just have the selected .img/.bin file name (IMG/BIN_FILE.img) in $PWD
+    _FINAL_IMAGE_FILE=$(cat -n /tmp/IMG-IN-PWD-FILE-LIST.tmp | sed 's/ //g' | grep -w "^$IMAGE_FILE_CHOICE" | sed 's/ /@/g' | tr -s @ | cut -d@ -f1 | sed "s/$IMAGE_FILE_CHOICE//1" | tr -d '[:space:]')
+
+    #here we have the actual absolute path of the image file in $PWD
+    _FINAL_IMAGE_FILE_ABSOLUTE_PATH=$(find $PWD -type f -name $_FINAL_IMAGE_FILE | tr -d '[:space:]')
+
+    ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So aso to not double mount the same image file to another loopdev
+    if losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH >/dev/null; then
+        #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+        ALL_MOUNT_POINTS_LOOPDEV_BACKFILE=$(losetup --all --noheadings --output BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH)
+        for MOUNTED in $ALL_MOUNT_POINTS_LOOPDEV_BACKFILE; do
+            sudo umount $MOUNTED 2>/dev/null
+            sudo losetup -d "$(losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH | cut -d ' ' -f1 | tr -d '[:space:]')" 2>/dev/null
+            #Commenting this line since it auto-destroys/ fully removes loop devices that arent active/mounted/in use by OS: what if we need to mount various devices at once before we open them?
+            sudo losetup -D
+        done
+    fi
+    #########
+
+    echo -e "\e[94m ::::::::#####################::::::::::::::::::::############################# \e[0m"
+    tput setab 243
+    tput setaf 192
+    echo -e "🍣 [IMAGE_FILE] ::::::: $(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+    tput sgr0
+    echo -e "\e[94m ::::::::#####################::::::::::::::::::::############################# \e[0m"
+
+    # Trap signal interrupt...  trap <commands to run if signal is sent...like CTRL+C> <signal> # place it befor the command you want to have a fail safe over or something...etc
+    trap "echo NOTHING DONE ...The script is terminated..USER ABORTED .Nothing Done; exit" SIGINT #SIGINT is CTRL+C .. signal interrupt
+
+    #[DISPLAY] this line for display info only
+    tput setab 23
+    echo "🍣 RUNNING :::::" sudo cgdisk "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+    tput sgr0
+
+    sudo cgdisk "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+
+    #[DISPLAY] this line for display info only
+    tput setab 235
+    echo "Done with :=>:=>:=>:=>   sudo cgdisk $(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+    tput sgr0
+
+    #[DISPLAY] this line for display info only
+    tput setab 235
+    echo "🍣 Running :::::  sudo losetup -fP $(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+    tput sgr0
+
+    # now we loop mount the image, to see its information
+    sudo losetup -fP "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+    sleep 0.5
+    #loopdev associated with file /dev/loop** .img/.bin ..with the preceding /dev/ included..to match pattern in umount section,when unmounting associated mountpoint
+    ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")" | cut -d ' ' -f1 | tr -d '[:space:]')
+
+    _LOOPS_DEV_DRIVE_INFO=$(lsblk -f -o NAME,SIZE,FSTYPE,LABEL,UUID "${ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV}" | sed s/├─//g | sed s/└─//g)
+
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+
+    #FORMAT with a specific FS-type partition created in previous step?????
+    if whiptail --scrolltext --backtitle "🍣 [FORMAT] ANY OF THE PARTITION(s) with a specific FS-TYPE ???" \
+        --title "🍣 [FORMAT] ANY OF THE PARTITION(s) with a specific FS-TYPE ???" \
+        --yes-button "[FORMAT] Partition(s)[FS]" --no-button "[EXIT]" \
+        --yesno "   [FORMAT] ANY OF THE PARTITION(s) with a specific FS-TYPE ??? \n \n
+    $_LOOPS_DEV_DRIVE_INFO " 0 0 3>&1 1>&2 2>&3; then
+        _GREP_ONLY_LOOPS_PARTITIONS=$(lsblk --noheadings -f -o NAME,SIZE,FSTYPE,LABEL,UUID "${ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV}"p*)
+
+        # # we substituted spaces for no-break caracter ---- ' ' UNICODE: U+00A0
+        # HERE the variable _LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT ... results in e.g.::  1       loop21p1    4G   off
+        #                                                                                     2       loop21p2    4G   off
+        #                                                                                             .... ETC
+        ## ^^PRO TIP*** :: TO directly & correctly print variable _LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT in stacked format\
+        #  echo it as as an array with the * subscript ::: e.g. :: echo "${_LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT[*]}"
+
+        _LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT=$(lsblk --noheadings -f -o NAME,SIZE,FSTYPE,LABEL,UUID "${ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV}"p* | sed 's/ / /g' | cat -n | sed 's/$/ off/g' | sed 's/ /@/g' | tr -s @ | sed 's/@/ /g' | sed 's/^ //g')
+        LIST_HEIGHT_PARTITIONS=$(echo "${_GREP_ONLY_LOOPS_PARTITIONS[@]}" | wc -w)
+
+        #@#@#@#@#@ HERE WE CHOSE WHICH LOOP PARTITIONS ARE TO BE FORMATTED
+        PARTITIONS_TO_FORMAT_CHOICE=$(whiptail --separate-output --checklist "🍣 FORMAT WHICH PARTITION(s) ??" 0 0 "$LIST_HEIGHT_PARTITIONS" $_LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT 3>&1 1>&2 2>&3)
+
+        ### Sanity CHECK if no partition(s) to format are selected then, unmount & detach the loop device  associated with the backing file (the actual .img/.bin file)
+        if [[ -z $PARTITIONS_TO_FORMAT_CHOICE ]]; then
+            tput setab 101
+            echo "🍣🍣🍣🍣 no partition(s) to format are selected... cleaning up & exiting 🍣🍣🍣🍣"
+            tput sgr0
+
+            ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So aso to not double mount the same image file to another loopdev
+            if losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH >/dev/null; then
+                #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+                ALL_MOUNT_POINTS_LOOPDEV_BACKFILE=$(losetup --all --noheadings --output BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH)
+                for MOUNTED in $ALL_MOUNT_POINTS_LOOPDEV_BACKFILE; do
+                    sudo umount $MOUNTED 2>/dev/null
+                    sudo losetup -d "$(losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH | cut -d ' ' -f1 | tr -d '[:space:]')" 2>/dev/null
+                    #(EDIT: I uncommented it "losetup -D")Commenting this line since it auto-destroys/ fully removes loop devices that arent active/mounted/in use by OS: what if we need to mount various devices at once before we open them?
+                    sudo losetup -D
+                done
+
+            fi
+            exit
+        fi
+
+        ################################################################
+        #
+        # select what type of FS to FORMAT PARTITION with HERE EXACTLY
+        #
+        ################################################################
+
+        for _CHOSEN_LOOP_PART_NUM in $PARTITIONS_TO_FORMAT_CHOICE; do
+
+            # verify that chosen partitions coincide with the loop devs partition & format if true; all is being done in memory.
+
+            ## This var outputs ($_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV) the /dev/loopXXpX partition number.. in that format preceded by /dev/
+            ## outputs [only] partition in the format... /dev/loop22p3
+            _CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV=$(echo "${_LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT[*]}" | grep -w "^${_CHOSEN_LOOP_PART_NUM}" | grep -o -w "loop.p.\|loop.p..\|loop..p.\|loop..p.." | tr -d '[:space:]' | sed 's+^+/dev/+g' | sed 's/ //g' | tr -d '[:space:]')
+
+            ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")" | cut -d ' ' -f1 | tr -d '[:space:]')
+            ## for [DISPLAYING ONLY] this var outputs [all] the partitions under the loop device and presedents them with /dev/ ... for displaying purposes in the following whiptail menu
+            _GREP_ONLY_LOOPS_PARTITIONS_PRESEDENTED_W_DEV_DEV=$(lsblk --noheadings -f -o NAME,SIZE,FSTYPE,LABEL,UUID "${ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV}"p* | sed 's+^+/dev/+g')
+            ##--------------
+
+            ## for [DISPLAYING ONLY]
+            _MARKED_GREP_ONLY_LOOPS_PARTITIONS_PRESEDENTED_W_DEV_DEV=$(echo "${_GREP_ONLY_LOOPS_PARTITIONS_PRESEDENTED_W_DEV_DEV}" | sed "s+$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV+$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV [!] +g")
+            ##--------------
+
+            #################################
+            #..>
+            #..>     here is the actual formatting for /dev/loopXpXX
+            #..>
+            #################################
+
+            FORMAT_FILESYSTEM_TYPE=$(whiptail --title "🍣 Select FS-TYPE to [FORMAT] [$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV]  ????" \
+                --menu "🍣 Select FS-TYPE to [FORMAT] [$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV] \n\n${_MARKED_GREP_ONLY_LOOPS_PARTITIONS_PRESEDENTED_W_DEV_DEV[*]}" 0 0 5 \
+                1 "EXT4" \
+                2 "BTRFS" \
+                3 "FAT32" \
+                4 "exFAT" \
+                5 "NTFS" 3>&1 1>&2 2>&3)
+
+            if [ -z "$FORMAT_FILESYSTEM_TYPE" ]; then
+                echo "USER ABORTED ..... exiting ... nothing done..."
+                exit
+            fi
+
+            # Here date +%s%N Measures To NANOSECONDS... FROM Seconds to nanoseconds
+            _HASHED_RANDOM_VAL=$(date +%s%N | b2sum | cut -c 1-5 | tr -d -c '[:alnum:]' | tr '[:lower:]' '[:upper:]')
+            case $FORMAT_FILESYSTEM_TYPE in
+            1)
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo wipefs --force -a $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo mkfs.ext4 -F -L EXT4-$_HASHED_RANDOM_VAL $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo mkfs.ext4 -F -L "EXT4-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+                ;;
+            2)
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo wipefs --force -a $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo mkfs.btrfs -f -L BTRFS-$_HASHED_RANDOM_VAL $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo mkfs.btrfs -f -L "BTRFS-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+                ;;
+            3)
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo wipefs --force -a $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo mkfs.fat -F 32 -n FAT32-$_HASHED_RANDOM_VAL $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo mkfs.fat -F 32 -n "FAT32-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+                ;;
+            4)
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo wipefs --force -a $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo mkfs.exfat --boundary-align 32K -L EXFAT-$_HASHED_RANDOM_VAL $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo mkfs.exfat --boundary-align 32K -L "EXFAT-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+                ;;
+            5)
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo wipefs --force -a $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo mkfs.ntfs --force --quick --label NTFS-$_HASHED_RANDOM_VAL $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo mkfs.ntfs --force --quick --label "NTFS-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+                ;;
+            esac
+        done
+
+        ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So aso to not double mount the same image file to another loopdev
+        sleep 0.5
+        if losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH >/dev/null; then
+            #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+            ALL_MOUNT_POINTS_LOOPDEV_BACKFILE=$(losetup --all --noheadings --output BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH)
+            for MOUNTED in $ALL_MOUNT_POINTS_LOOPDEV_BACKFILE; do
+                sudo umount $MOUNTED 2>/dev/null
+                sudo losetup -d "$(losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH | cut -d ' ' -f1 | tr -d '[:space:]')" 2>/dev/null
+                #(EDIT: I uncommented it "losetup -D")Commenting this line since it auto-destroys/ fully removes loop devices that arent active/mounted/in use by OS: what if we need to mount various devices at once before we open them?
+                sudo losetup -D
+            done
+        fi
+
+        echo "🍣🍣🍣🍣 :-) ::::: ALL DONE [FORMATTING PARTITIONS] IN .IMG/.BIN file :-) :-)  🍣🍣🍣🍣"
+        echo "🍣🍣🍣🍣 :-) ::::: ALL DONE [FORMATTING PARTITIONS] IN .IMG/.BIN file :-) :-)  🍣🍣🍣🍣"
+
+    #########
+    else
+
+        echo "CHOSEN TO NOT FORMAT ANY PARTITIONS.... CLEANING ALL & EXITING"
+        ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So aso to not double mount the same image file to another loopdev
+        if losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH >/dev/null; then
+            #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+            ALL_MOUNT_POINTS_LOOPDEV_BACKFILE=$(losetup --all --noheadings --output BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH)
+            for MOUNTED in $ALL_MOUNT_POINTS_LOOPDEV_BACKFILE; do
+                sudo umount $MOUNTED 2>/dev/null
+                sudo losetup -d "$(losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH | cut -d ' ' -f1 | tr -d '[:space:]')" 2>/dev/null
+                # (EDIT: I uncommented it "losetup -D")Commenting this line since it auto-destroys/ fully removes loop devices that arent active/mounted/in use by OS: what if we need to mount various devices at once before we open them?
+                sudo losetup -D
+            done
+        fi
+        #########
+        echo "🍣🍣🍣🍣 USER ABORTED :: PARTITIONS NOT FORMATTED .. ALL DONE 🍣🍣🍣🍣"
+        echo "🍣🍣🍣🍣 USER ABORTED :: PARTITIONS NOT FORMATTED .. ALL DONE 🍣🍣🍣🍣"
+
+    fi
+    unset NEWT_COLORS
+
+}
+
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+
+FUN_PARTITIONATE_IMG_BIN_FILE_ABSOLUTE_PATH() {
+    ## 🍣🍣🍣🍣 :) :) this function was originally created/finished by me - LINIX LINING - AKA.. LINUX OASIS - on 17-FEB-2025 - in about 10minutes,, since all the good code was already done in the # FUN_PARTITIONATE_IMG_BIN_FILE_IN_PWD - function
+
+    export NEWT_COLORS='
+    button=black,green
+    textbox=yellow,black'
+
+    # # we substituted spaces for no-break caracter ---- UNICODE: U+00A0
+
+    IMAGE_FILE_ABSOLUTE_PATH=$(whiptail --scrolltext --backtitle "🍣🍣[PARTITION]🍣🍣(.IMG/.BIN) FILE : INPUT (by Absoolute PATH of file)" --title "🍣🍣[PARTITION]🍣🍣(.IMG/.BIN) INPUT FILE PATH" \
+        --inputbox "INPUT [*.img/*.bin] File ABSOLUTE PATH " 0 0 5>&1 1>&2 2>&5)
+
+    IMAGE_FILE_ABSOLUTE_PATH_SANITIZED=$(echo "$IMAGE_FILE_ABSOLUTE_PATH" | tr -d '[:space:]')
+
+    if [ -z "$IMAGE_FILE_ABSOLUTE_PATH_SANITIZED" ]; then
+        echo "USER ABORTED . . . Nothing Done 🍣"
+        exit
+    fi
+
+    #here we have the actual absolute path of the image file in $PWD
+    _FINAL_IMAGE_FILE_ABSOLUTE_PATH=$(realpath "$IMAGE_FILE_ABSOLUTE_PATH_SANITIZED" | tr -d '[:space:]')
+
+    ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So aso to not double mount the same image file to another loopdev
+    if losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH >/dev/null; then
+        #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+        ALL_MOUNT_POINTS_LOOPDEV_BACKFILE=$(losetup --all --noheadings --output BACK-FILE | grep "$_FINAL_IMAGE_FILE_ABSOLUTE_PATH")
+        for MOUNTED in $ALL_MOUNT_POINTS_LOOPDEV_BACKFILE; do
+            sudo umount "$MOUNTED" 2>/dev/null
+            sudo losetup -d "$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$_FINAL_IMAGE_FILE_ABSOLUTE_PATH" | cut -d ' ' -f1 | tr -d '[:space:]')" 2>/dev/null
+            #Commenting this line (sudo losetup -D) since it auto-destroys/ fully removes loop devices that arent active/mounted/in use by OS: what if we need to mount various devices at once before we open them?
+            sudo losetup -D
+        done
+    fi
+    #########
+
+    echo -e "\e[94m ::::::::#####################::::::::::::::::::::############################# \e[0m"
+    tput setab 243
+    tput setaf 192
+    echo -e "🍣 [IMAGE_FILE] ::::::: $(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+    tput sgr0
+    echo -e "\e[94m ::::::::#####################::::::::::::::::::::############################# \e[0m"
+
+    # Trap signal interrupt...  trap <commands to run if signal is sent...like CTRL+C> <signal> # place it befor the command you want to have a fail safe over or something...etc
+    trap "echo NOTHING DONE ...The script is terminated..USER ABORTED .Nothing Done; exit" SIGINT #SIGINT is CTRL+C .. signal interrupt
+
+    #[DISPLAY] this line for display info only
+    tput setab 23
+    echo "🍣 RUNNING :::::" sudo cgdisk "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+    tput sgr0
+
+    sudo cgdisk "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+
+    #[DISPLAY] this line for display info only
+    tput setab 235
+    echo "Done with :=>:=>:=>:=>   sudo cgdisk $(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+    tput sgr0
+
+    #[DISPLAY] this line for display info only
+    tput setab 235
+    echo "🍣 Running :::::  sudo losetup -fP $(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+    tput sgr0
+
+    # now we loop mount the image, to see its information
+    sudo losetup -fP "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+    sleep 0.5
+    #loopdev associated with file /dev/loop** .img/.bin ..with the preceding /dev/ included..to match pattern in umount section,when unmounting associated mountpoint
+    ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")" | cut -d ' ' -f1 | tr -d '[:space:]')
+
+    _LOOPS_DEV_DRIVE_INFO=$(lsblk -f -o NAME,SIZE,FSTYPE,LABEL,UUID "${ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV}" | sed s/├─//g | sed s/└─//g)
+
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+    ##>>##>>##>>##>>##>>##>>##>>##>>##>> FORMAT PARTITIONS AT CREATION TIME ???? FORMAT PARTITIONS AT CREATION TIME  ???? ##>>##>>##>>##>>##>>##>>##>>##>>##>>
+
+    #FORMAT with a specific FS-type partition created in previous step?????
+    if whiptail --scrolltext --backtitle "🍣 [FORMAT] ANY OF THE PARTITION(s) with a specific FS-TYPE ???" \
+        --title "🍣 [FORMAT] ANY OF THE PARTITION(s) with a specific FS-TYPE ???" \
+        --yes-button "[FORMAT] Partition(s)[FS]" --no-button "[EXIT]" \
+        --yesno "   [FORMAT] ANY OF THE PARTITION(s) with a specific FS-TYPE ??? \n \n
+    $_LOOPS_DEV_DRIVE_INFO " 0 0 3>&1 1>&2 2>&3; then
+        _GREP_ONLY_LOOPS_PARTITIONS=$(lsblk --noheadings -f -o NAME,SIZE,FSTYPE,LABEL,UUID "${ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV}"p*)
+
+        # # we substituted spaces for no-break caracter ---- ' ' UNICODE: U+00A0
+        # HERE the variable _LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT ... results in e.g.::  1       loop21p1    4G   off
+        #                                                                                     2       loop21p2    4G   off
+        #                                                                                             .... ETC
+        ## ^^PRO TIP*** :: TO directly & correctly print variable _LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT in stacked format\
+        #  echo it as as an array with the * subscript ::: e.g. :: echo "${_LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT[*]}"
+
+        _LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT=$(lsblk --noheadings -f -o NAME,SIZE,FSTYPE,LABEL,UUID "${ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV}"p* | sed 's/ / /g' | cat -n | sed 's/$/ off/g' | sed 's/ /@/g' | tr -s @ | sed 's/@/ /g' | sed 's/^ //g')
+        LIST_HEIGHT_PARTITIONS=$(echo "${_GREP_ONLY_LOOPS_PARTITIONS[@]}" | wc -w)
+
+        #@#@#@#@#@ HERE WE CHOSE WHICH LOOP PARTITIONS ARE TO BE FORMATTED
+        PARTITIONS_TO_FORMAT_CHOICE=$(whiptail --separate-output --checklist "🍣 FORMAT WHICH PARTITION(s) ??" 0 0 "$LIST_HEIGHT_PARTITIONS" $_LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT 3>&1 1>&2 2>&3)
+
+        ### Sanity CHECK if no partition(s) to format are selected then, unmount & detach the loop device  associated with the backing file (the actual .img/.bin file)
+        if [[ -z $PARTITIONS_TO_FORMAT_CHOICE ]]; then
+            tput setab 101
+            echo "🍣🍣🍣🍣 no partition(s) to format are selected... cleaning up & exiting 🍣🍣🍣🍣"
+            tput sgr0
+
+            ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So aso to not double mount the same image file to another loopdev
+            if losetup --all --noheadings --output NAME,BACK-FILE | grep "$_FINAL_IMAGE_FILE_ABSOLUTE_PATH" >/dev/null; then
+                #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+                ALL_MOUNT_POINTS_LOOPDEV_BACKFILE=$(losetup --all --noheadings --output BACK-FILE | grep "$_FINAL_IMAGE_FILE_ABSOLUTE_PATH")
+                for MOUNTED in $ALL_MOUNT_POINTS_LOOPDEV_BACKFILE; do
+                    sudo umount "$MOUNTED" 2>/dev/null
+                    sudo losetup -d "$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$_FINAL_IMAGE_FILE_ABSOLUTE_PATH" | cut -d ' ' -f1 | tr -d '[:space:]')" 2>/dev/null
+                    #(EDIT: I uncommented it "losetup -D")Commenting this line since it auto-destroys/ fully removes loop devices that arent active/mounted/in use by OS: what if we need to mount various devices at once before we open them?
+                    sudo losetup -D
+                done
+
+            fi
+            exit
+        fi
+
+        ################################################################
+        #
+        # select what type of FS to FORMAT PARTITION with HERE EXACTLY
+        #
+        ################################################################
+
+        for _CHOSEN_LOOP_PART_NUM in $PARTITIONS_TO_FORMAT_CHOICE; do
+
+            # verify that chosen partitions coincide with the loop devs partition & format if true; all is being done in memory.
+
+            ## This var outputs ($_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV) the /dev/loopXXpX partition number.. in that format preceded by /dev/
+            ## outputs [only] partition in the format... /dev/loop22p3
+            _CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV=$(echo "${_LOOPS_DEV_DRIVE_INFO_FOR_CHECKLIST_FORMAT[*]}" | grep -w "^${_CHOSEN_LOOP_PART_NUM}" | grep -o -w "loop.p.\|loop.p..\|loop..p.\|loop..p.." | tr -d '[:space:]' | sed 's+^+/dev/+g' | sed 's/ //g' | tr -d '[:space:]')
+
+            ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")" | cut -d ' ' -f1 | tr -d '[:space:]')
+            ## for [DISPLAYING ONLY] this var outputs [all] the partitions under the loop device and presedents them with /dev/ ... for displaying purposes in the following whiptail menu
+            _GREP_ONLY_LOOPS_PARTITIONS_PRESEDENTED_W_DEV_DEV=$(lsblk --noheadings -f -o NAME,SIZE,FSTYPE,LABEL,UUID "${ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV}"p* | sed 's+^+/dev/+g')
+            ##--------------
+
+            ## for [DISPLAYING ONLY]
+            _MARKED_GREP_ONLY_LOOPS_PARTITIONS_PRESEDENTED_W_DEV_DEV=$(echo "${_GREP_ONLY_LOOPS_PARTITIONS_PRESEDENTED_W_DEV_DEV}" | sed "s+$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV+$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV [!] +g")
+            ##--------------
+
+            #################################
+            #..>
+            #..>     here is the actual formatting for /dev/loopXpXX
+            #..>
+            #################################
+
+            FORMAT_FILESYSTEM_TYPE=$(whiptail --title "🍣 Select FS-TYPE to [FORMAT] [$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV]  ????" \
+                --menu "🍣 Select FS-TYPE to [FORMAT] [$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV] \n\n${_MARKED_GREP_ONLY_LOOPS_PARTITIONS_PRESEDENTED_W_DEV_DEV[*]}" 0 0 5 \
+                1 "EXT4" \
+                2 "BTRFS" \
+                3 "FAT32" \
+                4 "exFAT" \
+                5 "NTFS" 3>&1 1>&2 2>&3)
+
+            if [ -z "$FORMAT_FILESYSTEM_TYPE" ]; then
+                echo "USER ABORTED ..... exiting ... nothing done..."
+                exit
+            fi
+
+            # Here date +%s%N Measures To NANOSECONDS... FROM Seconds to nanoseconds
+            _HASHED_RANDOM_VAL=$(date +%s%N | b2sum | cut -c 1-5 | tr -d -c '[:alnum:]' | tr '[:lower:]' '[:upper:]')
+            case $FORMAT_FILESYSTEM_TYPE in
+            1)
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo wipefs --force -a $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo mkfs.ext4 -F -L EXT4-$_HASHED_RANDOM_VAL $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo mkfs.ext4 -F -L "EXT4-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+                ;;
+            2)
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo wipefs --force -a $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo mkfs.btrfs -f -L BTRFS-$_HASHED_RANDOM_VAL $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo mkfs.btrfs -f -L "BTRFS-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+                ;;
+            3)
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo wipefs --force -a $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo mkfs.fat -F 32 -n FAT32-$_HASHED_RANDOM_VAL $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo mkfs.fat -F 32 -n "FAT32-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+                ;;
+            4)
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo wipefs --force -a $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo mkfs.exfat --boundary-align 32K -L EXFAT-$_HASHED_RANDOM_VAL $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo mkfs.exfat --boundary-align 32K -L "EXFAT-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+                ;;
+            5)
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo wipefs --force -a $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+
+                echo -e "\e[94m 🍣 RUNNING :=>> :=>> sudo mkfs.ntfs --force --quick --label NTFS-$_HASHED_RANDOM_VAL $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV \e[0m"
+                sudo mkfs.ntfs --force --quick --label "NTFS-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+                ;;
+            esac
+        done
+
+        ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So aso to not double mount the same image file to another loopdev
+        sleep 0.5
+        if losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH >/dev/null; then
+            #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+            ALL_MOUNT_POINTS_LOOPDEV_BACKFILE=$(losetup --all --noheadings --output BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH)
+            for MOUNTED in $ALL_MOUNT_POINTS_LOOPDEV_BACKFILE; do
+                sudo umount $MOUNTED 2>/dev/null
+                sudo losetup -d "$(losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH | cut -d ' ' -f1 | tr -d '[:space:]')" 2>/dev/null
+                #(EDIT: I uncommented it "losetup -D")Commenting this line since it auto-destroys/ fully removes loop devices that arent active/mounted/in use by OS: what if we need to mount various devices at once before we open them?
+                sudo losetup -D
+            done
+        fi
+
+        echo "🍣🍣🍣🍣 :-) ::::: ALL DONE [FORMATTING PARTITIONS] IN .IMG/.BIN file :-) :-)  🍣🍣🍣🍣"
+        echo "🍣🍣🍣🍣 :-) ::::: ALL DONE [FORMATTING PARTITIONS] IN .IMG/.BIN file :-) :-)  🍣🍣🍣🍣"
+
+    #########
+    else
+
+        echo "CHOSEN TO NOT FORMAT ANY PARTITIONS.... CLEANING ALL & EXITING"
+        ## UNMOUNT ANY MOUNTPOINT ASSOCIATED TO TARGET FILE IF ANY... So aso to not double mount the same image file to another loopdev
+        if losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH >/dev/null; then
+            #obtain only mountpoints of loop device's target file- BACK-FILE...If Any
+            ALL_MOUNT_POINTS_LOOPDEV_BACKFILE=$(losetup --all --noheadings --output BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH)
+            for MOUNTED in $ALL_MOUNT_POINTS_LOOPDEV_BACKFILE; do
+                sudo umount $MOUNTED 2>/dev/null
+                sudo losetup -d "$(losetup --all --noheadings --output NAME,BACK-FILE | grep $_FINAL_IMAGE_FILE_ABSOLUTE_PATH | cut -d ' ' -f1 | tr -d '[:space:]')" 2>/dev/null
+                # (EDIT: I uncommented it "losetup -D")Commenting this line since it auto-destroys/ fully removes loop devices that arent active/mounted/in use by OS: what if we need to mount various devices at once before we open them?
+                sudo losetup -D
+            done
+        fi
+        #########
+        echo "🍣🍣🍣🍣 USER ABORTED :: PARTITIONS NOT FORMATTED .. ALL DONE 🍣🍣🍣🍣"
+        echo "🍣🍣🍣🍣 USER ABORTED :: PARTITIONS NOT FORMATTED .. ALL DONE 🍣🍣🍣🍣"
+
+    fi
+    unset NEWT_COLORS
+
+}
+
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&&&&&&/////////////(((((((((((((())))))))))))))#################$$$$$$$$$$%%%%%%%%%%%%&&&&&&&&^^^^^^^^%%%%%%%%%%%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^
+
+while true; do
+
+    export NEWT_COLORS='
+root=,cyan
+listbox=,brightgreen
+acttextbox=,blue
+actsellistbox=,brightblue
+sellistbox=,brightcyan
+'
+
+    MAIN_CHOICEEEE=$(whiptail --title "◉ SPARSE FILE ◉ MANAGER ◉ CREATOR ◉ EDITOR ◉" --menu "Select Option" 0 0 8 \
+        1 "[CREATE]🥞  🥞 CREATE custom SPARSE FILE" \
+        2 "[MAKE]🫙    🫙 MAKE AN EXISTING FILE SPARSE" \
+        3 "[FORMAT]🍱  🍱 FORMAT AN IMAGE FILE WITH A FILESYSTEM (.IMG/.BIN)" \
+        4 "[MOUNT \$PWD]🥭   🥭 MOUNT (.IMG/.BIN) FILE CORRECTLY in \$PWD" \
+        5 "[MOUNT]🥭   🥭 MOUNT (.IMG/.BIN) FILE CORRECTLY BY INPUTING ABSOLUTE PATH" \
+        6 "[PARTITIONS \$PWD]🍣 🍣 CREATE / MODIFY / FORMAT PARTITIONS OF .IMG/.BIN FILE in \$PWD" \
+        7 "[PARTITIONS]🍣 🍣 (absolute PATH) CREATE / MODIFY / FORMAT PARTITIONS OF .IMG/.BIN FILE in \$PWD" \
+        8 "[UNMOUNT]🦞 🦞 UNMOUNT (.IMG/.BIN) FILE CORRECTLY" 3>&1 1>&2 2>&3)
+
+    if [ -z $MAIN_CHOICEEEE ]; then
+        echo "USER ABORTED"
+        exit
+    elif [ $MAIN_CHOICEEEE -eq 1 ]; then
+        FUN_CREATE_CUSTOM_SPARSE_IMAGE_FILE
+
+    elif [ $MAIN_CHOICEEEE -eq 2 ]; then
+        FUN_MAKE_EXISTING_FILE_SPARSE
+
+    elif [ $MAIN_CHOICEEEE -eq 3 ]; then
+        FUN_FORMAT_SPARSE_FILE_IMAGE
+
+    elif [ $MAIN_CHOICEEEE -eq 4 ]; then
+        FUN_MOUNT_IMG_BIN_FILE_IN_PWD
+
+    elif [ $MAIN_CHOICEEEE -eq 5 ]; then
+        FUN_MOUNT_IMG_BIN_FILE_BY_INPUTTING_ABSOLUTE_PATH
+
+    elif [ $MAIN_CHOICEEEE -eq 6 ]; then
+        FUN_PARTITIONATE_IMG_BIN_FILE_IN_PWD
+
+    elif [ $MAIN_CHOICEEEE -eq 7 ]; then
+        FUN_PARTITIONATE_IMG_BIN_FILE_ABSOLUTE_PATH
+
+    elif [ $MAIN_CHOICEEEE -eq 8 ]; then
+        FUN_UNMOUNT_IMG_BIN_FILE
+
+    fi
+
+    unset NEWT_COLORS
+done

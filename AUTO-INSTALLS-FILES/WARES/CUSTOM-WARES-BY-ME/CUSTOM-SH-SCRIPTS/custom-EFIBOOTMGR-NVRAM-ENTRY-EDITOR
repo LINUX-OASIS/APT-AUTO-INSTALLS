@@ -1,0 +1,392 @@
+#!/bin/bash
+
+USER=$(whoami)
+if [ "$USER" != "root" ]; then
+    echo -e "\e[31m Please run this script as root or use sudo \e[0m"
+    echo "Please run this script as root or use sudo"
+    echo "RUN ::: sudo $(realpath "$0")"
+
+    echo -e "\e[31m Please run this script as root or use sudo \e[0m"
+    echo "Please run this script as root or use sudo"
+    echo "RUN ::: sudo $(realpath "$0")"
+
+    echo -e "\e[31m Please run this script as root or use sudo \e[0m"
+    echo "Please run this script as root or use sudo"
+    echo "RUN ::: sudo $(realpath "$0")"
+
+    echo -e "\e[31m Please run this script as root or use sudo \e[0m"
+    echo "Please run this script as root or use sudo"
+    echo -e "\e[31m Please run this script as root or use sudo \e[0m"
+    echo "RUN ::: sudo $(realpath "$0")"
+
+    read -p "PRESS [ ENTER ] TO CONTINUE :"
+
+    sudo "$0"
+
+    echo ""
+    exit 1
+fi
+
+#check dependency efibootmgr is installed and install if not already
+# Checks for package/dependencies installed status and installs them if not already installed
+for PACKAGE in efibootmgr; do                                                          # the dependencies needed
+    if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
+        echo "dependency $PACKAGE is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y $PACKAGE
+
+        if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then #exits if package is not installed even after installation code was executed...something went wrong
+            echo "Posibly didn't install dependency $PACKAGE .. exiting"
+            exit
+        fi
+    fi
+done
+
+NEWT_COLORS='
+    root=,blue
+    shadow=,green
+    checkbox=,blue
+    entry=,blue
+    label=blue,
+    actlistbox=,blue
+    helpline=,blue
+    roottext=,blue
+    emptyscale=blue
+    disabledentry=blue,
+    button=black,green
+    textbox=yellow,black
+'
+export NEWT_COLORS
+
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+
+function FUN_CREATE_EFI_NVRAM_BOOT_ENTRY_EFIBOOTMGR {
+
+    VFAT_ISO9660_PARTITIONS_LIST=$(lsblk -f -o NAME,FSTYPE,FSVER,LABEL,SIZE | grep "vfat\|iso9660" | sed 's/├─//g' | sed 's/└─//g' | sed 's/ /⬞/g')
+
+    LABEL=$(whiptail --scrolltext --title ":: INPUT [LABEL/NAME] DESCRIPTOR FOR THE NVRAM EFI BOOT ENTRY ::" --inputbox "$VFAT_ISO9660_PARTITIONS_LIST" 0 0 3>&1 1>&2 2>&3)
+
+    if [ -z $LABEL ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    lsblk -f -o NAME,FSTYPE,FSVER,LABEL,SIZE | grep "vfat\|iso9660" | sed 's/├─//g' | sed 's/└─//g' | sed 's/ /⬞/g' >/tmp/custom-VFAT-PARTITION-LIST.tmp
+
+    NL_VFAT_PARTITION_LIST=$(cat -n /tmp/custom-VFAT-PARTITION-LIST.tmp)
+    DEV_ITEMS_COUNT=$(cat /tmp/custom-VFAT-PARTITION-LIST.tmp | wc -l)
+
+    SELECTION=$(whiptail --scrolltext --title "SELECT PARTITION CONTAINING THE *.efi loader file" --menu "Select Partition" 0 0 $DEV_ITEMS_COUNT $NL_VFAT_PARTITION_LIST 3>&1 1>&2 2>&3)
+
+    if [ -z $SELECTION ]; then
+        echo "USER ABORTED"
+        exit
+    fi
+
+    #OBTAIN EFI PARTITION DEV FROM PREVIOUS MENU`S SELECTION
+    cat -n /tmp/custom-VFAT-PARTITION-LIST.tmp | sed 's/ //g' | grep -w "^$SELECTION" | head -n 1 | sed s/$SELECTION//1 | sed s/⬞/@/g | cut -d@ -f1 | tr -d '[:space:]' | sed s+^+/dev/+ >/tmp/custom-VFAT-PARTITION-LIST-FINALS-SELECTION.tmp
+
+    ##########################################################
+    # get partition number ... minor num ..via partx & by its last digit(s)
+
+    EFI_PARTITION_RESULT_DEV=$(cat /tmp/custom-VFAT-PARTITION-LIST-FINALS-SELECTION.tmp)
+
+    #check partition minor number via partx
+    PARTX_MINOR_NUM=$(partx -g $EFI_PARTITION_RESULT_DEV | sed "s/^[[:space:]]//1" | cut -d " " -f1 | tr -d '[:space:]')
+    #check partition minor number via last digit(s) of partition /dev/partition descriptor .....
+    LAST_DIGIT_MINOR_NUM=$(cat /tmp/custom-VFAT-PARTITION-LIST-FINALS-SELECTION.tmp | grep -o "..$" | tr -d '[:alpha:]' | tr -d '[:space:]')
+
+    if [ "$PARTX_MINOR_NUM" -eq "$LAST_DIGIT_MINOR_NUM" ]; then
+        echo "both Partiton minor numbers are same __ okkk"
+    else
+
+        echo "NOT OK __ PARTITION MINOR NUMBERS ARE DIFFERENT __ FIX DRIVE PARTITION ORDER !"
+        echo "NOT OK __ PARTITION MINOR NUMBERS ARE DIFFERENT __ FIX DRIVE PARTITION ORDER !"
+        echo "NOT OK __ PARTITION MINOR NUMBERS ARE DIFFERENT __ FIX DRIVE PARTITION ORDER !"
+        echo "NOT OK __ PARTITION MINOR NUMBERS ARE DIFFERENT __ FIX DRIVE PARTITION ORDER !"
+        echo "NOT OK __ PARTITION MINOR NUMBERS ARE DIFFERENT __ FIX DRIVE PARTITION ORDER !"
+
+        exit
+    fi
+
+    # Remove the preceding /dev/<efi Partition> .. to create its mount point location
+    EFI_PARTITION_RESULT_NO_DEV=$(cat /tmp/custom-VFAT-PARTITION-LIST-FINALS-SELECTION.tmp | sed s+/dev/++)
+
+    sudo umount $EFI_PARTITION_RESULT_DEV
+    sudo umount /tmp/MOUNT-"$EFI_PARTITION_RESULT_NO_DEV"
+
+    mkdir -p /tmp/MOUNT-"$EFI_PARTITION_RESULT_NO_DEV"
+    sudo mount $EFI_PARTITION_RESULT_DEV /tmp/MOUNT-"$EFI_PARTITION_RESULT_NO_DEV"
+
+    find /tmp/MOUNT-"$EFI_PARTITION_RESULT_NO_DEV"/ -maxdepth 4 -name "*.efi" >/tmp/custom-EFI-FILES-LIST.tmp
+
+    NL_EFI_LOADER_FILES_LIST=$(cat -n /tmp/custom-EFI-FILES-LIST.tmp | sed s+/tmp/MOUNT-$EFI_PARTITION_RESULT_NO_DEV++)
+    EFI_LOADER_ITEMS_COUNT=$(cat /tmp/custom-EFI-FILES-LIST.tmp | wc -l)
+
+    LOADER_SELECTION=$(whiptail --title ":: SELECT $EFI_PARTITION_RESULT_DEV [LOADER/.EFI] TO BOOT FROM ::" --menu " SELECT $EFI_PARTITION_RESULT_DEV [LOADER/.EFI] TO BOOT FROM " 0 0 $EFI_LOADER_ITEMS_COUNT $NL_EFI_LOADER_FILES_LIST 3>&1 1>&2 2>&3)
+
+    if [ -z $LOADER_SELECTION ]; then
+        echo "USER ABORTED"
+        sudo umount /tmp/MOUNT-"$EFI_PARTITION_RESULT_NO_DEV"
+        exit
+    fi
+
+    EFI_LOADER_FILE=$(cat -n /tmp/custom-EFI-FILES-LIST.tmp | grep -w $LOADER_SELECTION | head -n 1 | sed s/$LOADER_SELECTION//1 | sed "s+/tmp/MOUNT-$EFI_PARTITION_RESULT_NO_DEV++g" | tr -d '[:space:]')
+
+    #sudo efibootmgr --create --disk /dev/nvme0n1p6 --part 0fc36e27-f860-49f4-bb61-23c992047cd2 --label LINUX-DISTRO-IN --loader /EFI/boot/bootx64.efi
+
+    cat <<EOF >/tmp/custom-SANITY-CHECK-MSG-FOR-EFI-NVRAM-ENTRY.tmp
+    ::: {SANITY CHECK} :::
+
+Will Create NVRAM EFI BOOT ENTRY
+        [$LABEL]
+
+Partition
+        [$EFI_PARTITION_RESULT_DEV]
+
+Partition Number
+        [$PARTX_MINOR_NUM]
+
+.EFI Loader File
+        [$EFI_LOADER_FILE]
+
+EOF
+
+    ##  SANITY CHECK HEREEEEEEEEEEEEE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    whiptail --scrolltext --textbox /tmp/custom-SANITY-CHECK-MSG-FOR-EFI-NVRAM-ENTRY.tmp 0 0
+
+    if whiptail --title "{SANITY CHECK} :: PROCEED ?? " --yesno "sudo efibootmgr --create --disk $EFI_PARTITION_RESULT_DEV --part $PARTX_MINOR_NUM --label $LABEL --loader $EFI_LOADER_FILE" 0 0; then
+
+        echo " RUNNING :::: sudo efibootmgr --create --disk $EFI_PARTITION_RESULT_DEV --part $PARTX_MINOR_NUM --label $LABEL --loader $EFI_LOADER_FILE"
+
+        sudo efibootmgr --create --disk $EFI_PARTITION_RESULT_DEV --part $PARTX_MINOR_NUM --label $LABEL --loader $EFI_LOADER_FILE
+
+    fi
+
+    sudo umount /tmp/MOUNT-"$EFI_PARTITION_RESULT_NO_DEV"
+
+    tput setab 242
+    tput setaf 15
+    tput bold
+    efibootmgr -v
+    tput sgr0
+
+    SHOW_EFI_NVRAM_BOOT_ORDER_ONLY
+} ####### END OF FUNCTION  FUN_CREATE_EFI_NVRAM_BOOT_ENTRY_EFIBOOTMGR
+
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+
+function FUN_SET_BOOTNEXT_ONETIME {
+
+    # create a list of NVRAM EFI boot options for grep matching multiple patterns (XXX\|XXX\|XXX\|etc..) for the whiptail selection menu
+    # Output looks like: Boot0002\|Boot0001\|Boot0000\|Boot0004\|Boot0017\|etc........
+    CAT_EFIBOOTMGR_BOOT_ORDER=$(efibootmgr | grep BootOrder | cut -d: -f2 | tr , '\n' | sed 's/ //g' | sed 's/^/Boot/g' | tr '\n' ',' | sed 's+,+\\|+g' | sed 's+\\|$++' | tr -d '[:space:]')
+
+    # format EFI boot options for display
+    NL_EFI_NVRAM_CURRENT_OPTIONS_MENU_BODY=$(efibootmgr | grep -w "$CAT_EFIBOOTMGR_BOOT_ORDER" | sed 's/ /⬞/g' | sed 's/\t/@/g' | cut -d @ -f 1 | sed 's/^/"/g' | sed 's/$/"/g' | cat -n | sed 's/^[[:space:]]*//g')
+
+    # get the count of EFI boot options
+    EFI_NVRAM_CURRENT_OPTIONS_COUNT=$(efibootmgr | grep -w "$CAT_EFIBOOTMGR_BOOT_ORDER" | sed 's/ /⬞/g' | wc -l)
+
+    # output is just the whiptail tag number: e.g. "3"
+    SELECTION_TO_BOOTNEXT=$(whiptail --separate-output --backtitle "$(efibootmgr -v | grep BootOrder)" --title "[BOOT NEXT] Select EFI NVRAM BOOT ENTRY TO [BOOT NEXT]" \
+        --menu "[BOOT NEXT] Select EFI NVRAM BOOT ENTRY TO [BOOT NEXT]" 0 0 $EFI_NVRAM_CURRENT_OPTIONS_COUNT $NL_EFI_NVRAM_CURRENT_OPTIONS_MENU_BODY 3>&1 1>&2 2>&3)
+
+    # Check if the user aborted the selection
+    if [ -z "$SELECTION_TO_BOOTNEXT" ]; then
+        echo USER ABORTED
+        exit
+    fi
+
+    # Display the whiptail menu for selecting the EFI NVRAM boot entry to boot next
+
+    # Obtain the boot number(s) to boot next, e.g., 0003
+    __BOOTNUM_TO_BOOTNEXT_ONLY=$(efibootmgr | grep -w "$CAT_EFIBOOTMGR_BOOT_ORDER" | cat -n | sed 's/^[[:space:]]*//g' | grep -w "^$SELECTION_TO_BOOTNEXT" | grep -w -o "Boot...." | tr -d '[:space:]')
+
+    __BOOTNUM_TO_BOOTNEXT_ONLY_SANITIZED=$(echo "$__BOOTNUM_TO_BOOTNEXT_ONLY" | sed 's/Boot//' | tr -d '[:space:]')
+
+    #Just for Display Purposes..shows the line corresponding to the bootnum to BOOTNEXT..from efibootmgr output
+    touch /tmp/CUSTOM-EFI-NVRAM-BOOTNEXT-FINALMSG-BANNER.tmp
+    sudo chmod 777 /tmp/CUSTOM-EFI-NVRAM-BOOTNEXT-FINALMSG-BANNER.tmp
+
+    printf "%s" ":::::::::: [BOOT NEXT] ::::::::::\n" >/tmp/CUSTOM-EFI-NVRAM-BOOTNEXT-FINALMSG-BANNER.tmp
+    efibootmgr | grep -w "$CAT_EFIBOOTMGR_BOOT_ORDER" | cat -n | sed 's/^[[:space:]]*//g' | grep -w "^$SELECTION_TO_BOOTNEXT" | sed "s/^$SELECTION_TO_BOOTNEXT//1" | sed 's/\t//1' >>/tmp/CUSTOM-EFI-NVRAM-BOOTNEXT-FINALMSG-BANNER.tmp
+    sed -i 's/\tHD/\nHD/1' /tmp/CUSTOM-EFI-NVRAM-BOOTNEXT-FINALMSG-BANNER.tmp
+    sed -i 's+/File+\n/File+1' /tmp/CUSTOM-EFI-NVRAM-BOOTNEXT-FINALMSG-BANNER.tmp
+    printf "%s" ":::::::::::::::::::\n" >>/tmp/CUSTOM-EFI-NVRAM-BOOTNEXT-FINALMSG-BANNER.tmp
+
+    # printf "%s" "Boot number :: $__BOOTNUM_TO_BOOTNEXT_ONLY \n" >/tmp/CUSTOM-EFI-NVRAM-BOOTNEXT-FINALMSG-BANNER.tmp
+    # printf "%s" "::: $BOOTNUM_TO_BOOTNEXT_EFIBOOTMGR_LINE_INFO :::" >>/tmp/CUSTOM-EFI-NVRAM-BOOTNEXT-FINALMSG-BANNER.tmp
+
+    if whiptail --scrolltext --backtitle "$(efibootmgr -v | grep BootOrder)" --title "!! Will [BOOTNEXT] ::: Proceed? !" --yesno "$(cat /tmp/CUSTOM-EFI-NVRAM-BOOTNEXT-FINALMSG-BANNER.tmp)" 0 0 3>&1 1>&2 2>&3; then
+
+        sudo efibootmgr --bootnext "$__BOOTNUM_TO_BOOTNEXT_ONLY_SANITIZED"
+
+        SHOW_EFI_NVRAM_BOOT_ORDER_ONLY
+
+    else
+        echo USER ABORTED
+    fi
+
+}
+
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+##ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ ʕ•ᴥ•ʔ
+
+function DELETE_EFI_NVRAM_BOOT_ENTRY {
+
+    #create entries list of nvram efi boot options ti display in the whiptail selection menu
+    CAT_EFIBOOTMGR_BOOT_ORDER=$(efibootmgr | grep BootOrder | cut -d: -f2 | tr , '\n' | sed 's/ //g' | sed 's/^/Boot/g' | tr '\n' ',' | sed 's+,+\\|+g' | sed 's+\\|$++' | tr -d '[:space:]')
+
+    NL_EFI_NVRAM_CURRENT_OPTIONS=$(efibootmgr | grep -w "$CAT_EFIBOOTMGR_BOOT_ORDER" | sed 's/ /⬞/g' | sed 's/\t/@/g' | cut -d @ -f 1 | sed 's/^/"/g' | sed 's/$/"/g' | sed 's/$/ off/g' | cat -n | sed 's/^[[:space:]]*//g')
+
+    EFI_NVRAM_CURRENT_OPTIONS_COUNT=$(efibootmgr | grep -w "$CAT_EFIBOOTMGR_BOOT_ORDER" | sed 's/ /⬞/g' | wc -l)
+
+    SELECTION_TO_DELETE=$(whiptail --backtitle "$(efibootmgr -v | grep BootOrder)" --title "Select EFI NVRAM BOOT ENTRY TO [DELETE]" --checklist "Select EFI NVRAM BOOT ENTRY TO [DELETE]" 0 0 $EFI_NVRAM_CURRENT_OPTIONS_COUNT $NL_EFI_NVRAM_CURRENT_OPTIONS 3>&1 1>&2 2>&3)
+
+    if [ -z "$SELECTION_TO_DELETE" ]; then
+        echo USER ABORTED
+        exit
+    fi
+
+    _SELECTION_TO_DELETE_SANITIZED=$(echo $SELECTION_TO_DELETE | sed 's/"//g')
+
+    # OBTAIN BOOTNUM(s) TO DELETE ONLY  eg. 0003
+    __BOOTNUMS_TO_DEL_ONLY=$(efibootmgr | grep -w "$CAT_EFIBOOTMGR_BOOT_ORDER" | cat -n | grep -w "$(echo $_SELECTION_TO_DELETE_SANITIZED | sed 's/ /\\|/g')" | grep -w -o "Boot...." | sed s/Boot//g | sed s/$/@/ | tr -d '[:space:]' | sed "s/@/ /g")
+
+    for _VAR_BOOTNUM_DEL_ONLY in $__BOOTNUMS_TO_DEL_ONLY; do
+
+        #Just for Display Purposes..shows the line corresponding to the bootnum to delete..from efibootmgr output
+        BOOTNUM_TO_DEL_EFIBOOTMGR_LINE_INFO=$(efibootmgr | grep -w "$(echo $_VAR_BOOTNUM_DEL_ONLY | sed s/^/Boot/g)" | sed 's/ /⬞/g' | tr -d '[:space:]')
+
+        if whiptail --backtitle "$(efibootmgr -v | grep BootOrder)" --title "!! Will [DELETE] ::: Proceed? !" \
+            --yesno "::: $BOOTNUM_TO_DEL_EFIBOOTMGR_LINE_INFO ::: Boot number :: $_VAR_BOOTNUM_DEL_ONLY" 0 0 3>&1 1>&2 2>&3; then
+
+            sudo efibootmgr --bootnum $_VAR_BOOTNUM_DEL_ONLY --delete-bootnum
+
+            SHOW_EFI_NVRAM_BOOT_ORDER_ONLY
+
+        else
+            echo USER ABORTED
+        fi
+
+    done
+
+}
+
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+
+function SHOW_EFI_NVRAM_BOOT_ORDER_ONLY {
+
+    CAT_EFIBOOTMGR_BOOT_ORDER=$(efibootmgr | grep BootOrder | cut -d: -f2 | tr , '\n' | sed 's/ //g' | sed 's/^/Boot/g' | tr '\n' ',' | sed 's+,+\\|+g' | sed 's+\\|$++' | tr -d '[:space:]')
+
+    efibootmgr -v | grep "BootOrder\|$CAT_EFIBOOTMGR_BOOT_ORDER\|BootNext:\|BootCurrent:"
+
+    whiptail --backtitle "$(efibootmgr -v | grep BootOrder)" --title "CURRENT EFI NVRAM BOOT ORDER" --scrolltext --msgbox "$(efibootmgr -v | grep "BootOrder\|$CAT_EFIBOOTMGR_BOOT_ORDER\|BootNext:\|BootCurrent:")" 0 0
+
+}
+
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+
+function SHOW_ALL_EFI_NVRAM_BOOT_INFO {
+
+    whiptail --backtitle "$(efibootmgr -v | grep BootOrder)" --title "ALL CURRENT EFI NVRAM BOOT INFO" --scrolltext --msgbox "$(efibootmgr -v)" 0 0
+
+    unset NEWT_COLORS
+
+}
+
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+
+function REORDER_EFI_BOOT_ORDER {
+
+    SET_BOOT_ORDER=$(whiptail --title "INPUT NEW BOOT ORDER [BY BOOT NUMBER] Seperated by commas" --inputbox "$(efibootmgr -v)" 0 0 "$(efibootmgr -v | grep BootOrder | sed 's/BootOrder: //' | tr -d '[:space:]')" 3>&1 1>&2 2>&3)
+
+    if [ -z $SET_BOOT_ORDER ]; then
+        exit
+    fi
+
+    sudo efibootmgr --bootorder $SET_BOOT_ORDER
+
+    SHOW_EFI_NVRAM_BOOT_ORDER_ONLY
+
+    unset NEWT_COLORS
+}
+
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+####--+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||-+--*-///*--+-\-///--*--///--%-\-///--^--///---^*%---\--///-%---///--+-%-///---*-///-^-*--||||
+
+MAIN_CHOICE=$(
+    whiptail --title "SELECT OPTION" --menu "SELECT OPTION" 0 0 6 \
+        1 "[CREATE] EFI NVRAM BOOT ENTRY" \
+        2 "[BOOT NEXT] SET EFI BOOT NEXT (one time after reboot)" \
+        3 "![DELETE]! EFI NVRAM BOOT ENTRY" \
+        4 "[SHOW] EFI NVRAM BOOT ORDER ONLY" \
+        5 "[SHOW] ALL EFI NVRAM BOOT INFO" \
+        6 "[REORDER] EFI BOOT ORDER" 3>&1 1>&2 2>&3
+)
+
+if [ -z $MAIN_CHOICE ]; then
+    echo "USER ABORTED"
+    exit
+fi
+
+if [ $MAIN_CHOICE -eq 1 ]; then
+    FUN_CREATE_EFI_NVRAM_BOOT_ENTRY_EFIBOOTMGR
+elif [ $MAIN_CHOICE -eq 2 ]; then
+    FUN_SET_BOOTNEXT_ONETIME
+elif [ $MAIN_CHOICE -eq 3 ]; then
+    DELETE_EFI_NVRAM_BOOT_ENTRY
+elif [ $MAIN_CHOICE -eq 4 ]; then
+    SHOW_EFI_NVRAM_BOOT_ORDER_ONLY
+elif [ $MAIN_CHOICE -eq 5 ]; then
+    SHOW_ALL_EFI_NVRAM_BOOT_INFO
+elif [ $MAIN_CHOICE -eq 6 ]; then
+    REORDER_EFI_BOOT_ORDER
+fi
+
+unset NEWT_COLORS

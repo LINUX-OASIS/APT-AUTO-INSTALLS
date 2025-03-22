@@ -1,0 +1,192 @@
+#!/bin/bash
+
+## tput color displayer, for adding tput color to terminal outputs bash (helps with develping bash programs)
+
+#  TODOOO ADD ATTRIBUTESS ...... (smso) start standout mode.....(rev) - reverse attribute.......blinking text (blink)....,,,, also learn printf formmatting,, it would be very useful for this some day
+# ............... (bold) ........... .(smul) start underline text........(rmul) end underlined text ............. (rmso) end standout
+
+FUN_STOCK_SYNCED() {
+    whiptail --title "selected {STOCK SYNCED}" --msgbox "!! NOTICE !! \n if both \n tput setab _VAL & tput setaf _VAL \n have the same value, then text will blend with background and appear invisible" 0 0
+
+
+
+    for value in {0..255}; do
+
+        tput setab $value
+        tput setaf $value
+
+        echo "tput setab $value"
+        echo "tput setaf $value"
+        tput sgr0
+        tput setab $value
+        echo "tput setab $value"
+        tput sgr0
+
+        tput setaf $value
+        echo "tput setaf $value"
+        tput sgr0
+
+        echo "bkgrnd $value"
+        echo "frgrnd $value"
+
+    done
+
+  #print tput colors using printf formatting
+    for fg_color in {0..255}; do
+        set_foreground=$(tput setaf $fg_color)
+        for bg_color in {0..7}; do
+            set_background=$(tput setab $bg_color)
+            echo -n $set_background$set_foreground
+            printf ' F:%s B:%s ' $fg_color $bg_color
+        done
+        tput sgr0
+    done
+ # End of tput colors using printf formatting
+
+    tput sgr0 ###tput sgr0 disables all changes made with tput
+    echo "ALL DONE"
+
+}
+
+FUN_MANUALLY_UNSYNC_BACKGROUND() {
+    BACKGROUND_VAL_INPUT=$(whiptail --title "Input value to UN-SYNC Background from Font by [! RANGE 0-255] " --inputbox "Enter value [! Range 0 - 255]" 0 0 3>&1 1>&2 2>&3)
+
+    for value in {0..255}; do
+
+        tput setab $BACKGROUND_VAL_INPUT
+        tput setaf $value
+
+        #tput smso  #standout mode (smso)
+        tput bold
+        echo "tput setab $BACKGROUND_VAL_INPUT"
+        echo "tput setaf $value"
+
+        tput sgr0
+        echo ""
+
+        echo "tput setab $BACKGROUND_VAL_INPUT"
+        echo "tput setaf $value"
+
+        echo "bkgrnd $BACKGROUND_VAL_INPUT"
+        echo "frgrnd $value"
+
+    done
+
+    tput sgr0 ###tput sgr0 disables all changes made with tput
+    echo "ALL DONE"
+
+}
+
+FUN_MANUALLY_UNSYNC_FOREGROUND() {
+    FOREGROUND_VAL_INPUT=$(whiptail --title "Input value to UN-SYNC Font from Background by [! RANGE 0-255] " --inputbox "Enter value [! Range 0 - 255]" 0 0 3>&1 1>&2 2>&3)
+
+    for value in {0..255}; do
+
+        tput setab $value
+        tput setaf $FOREGROUND_VAL_INPUT
+
+        #tput smso  #standout mode (smso)
+        tput bold
+        echo "tput setab $value"
+        echo "tput setaf $FOREGROUND_VAL_INPUT"
+
+        tput sgr0
+        echo ""
+
+        echo "tput setab $value"
+        echo "tput setaf $FOREGROUND_VAL_INPUT"
+
+        echo "bkgrnd $value"
+        echo "frgrnd $FOREGROUND_VAL_INPUT"
+
+    done
+
+    tput sgr0 ###tput sgr0 disables all changes made with tput
+    echo "ALL DONE"
+}
+
+FUN_RANDOM_UNSYNC() {
+
+    for value in {0..255}; do
+
+        RAND_NUM1=$(($RANDOM % 254 + 1))
+        RAND_NUM2=$(($RANDOM % 254 + 1))
+
+        tput setab $RAND_NUM1
+        tput setaf $RAND_NUM2
+
+        echo "tput setab $RAND_NUM1"
+        echo "tput setaf $RAND_NUM2"
+        tput sgr0
+        tput setab $RAND_NUM1
+        echo "tput setab $RAND_NUM1"
+        tput sgr0
+        tput setaf $RAND_NUM2
+        echo "tput setaf $RAND_NUM2"
+        tput sgr0
+
+        echo "bkgrnd $RAND_NUM1"
+        echo "frgrnd $RAND_NUM2"
+
+    done
+
+    tput sgr0 ###tput sgr0 disables all changes made with tput
+    echo "ALL DONE"
+
+}
+
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%########################################$$$$$$$$$$$$$
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%########################################$$$$$$$$$$$$$
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%########################################$$$$$$$$$$$$$
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%################
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%################
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%
+########################$$$$$$$$$$$$$$$$$$$%%%
+########################$$$$$$$$$$$$$$
+########################$$$$$$$$$$$$$$|||||||||||||||||||||||||||||||||||||\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\/////////////////////////////// TPUT STUFF
+########################$$$$$$$$$$$$$$
+########################$$$$$$$$$$$$$$$$$$$%%%
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%################
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%################
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%########################################$$$$$$$$$$$$$
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%########################################$$$$$$$$$$$$$
+########################$$$$$$$$$$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%########################################$$$$$$$$$$$$$
+
+CHOICE=$(whiptail --backtitle "tput color displayer, for adding tput color to terminal outputs bash (helps with develping bash programs)" --title "TPUT Colors (combinations) Displayer" \
+    --menu "TPUT Colors (combinations) Displayer" 0 0 3 \
+    1 "{STOCK SYNCED} display same tput colors for bkgrn & frgrnd 0-255  " \
+    2 "{ MANUALLY UN-SYNC } input a value [0-255] to asynchronously display [DIFF. bkgrnd frgrnd value] tput colors combinations " \
+    3 "{ RANDOM UN-SYNC } display randomized asynchronous [DIFF. RANDOM bkgrnd frgrnd value] tput color combinations " 3>&1 1>&2 2>&3)
+
+if [ -z $CHOICE ]; then
+    exit
+elif [ $CHOICE -eq 1 ]; then
+
+    FUN_STOCK_SYNCED
+
+elif [ $CHOICE -eq 2 ]; then
+
+    UNSYNC_BACKGROUND_OR_FOREGROUND=$(whiptail --title "selected { MANUALLY UN-SYNC }" --menu "UN-SYNC BACKGROUND OR FOREGROUND ??" 0 0 2 \
+        1 "UN-SYNC BACKGROUND" 2 "UN-SYNC FOREGROUNG" 3>&1 1>&2 2>&3)
+
+    if [ -z $UNSYNC_BACKGROUND_OR_FOREGROUND ]; then
+        exit
+    elif [ $UNSYNC_BACKGROUND_OR_FOREGROUND -eq 1 ]; then
+        FUN_MANUALLY_UNSYNC_BACKGROUND
+
+    elif [ $UNSYNC_BACKGROUND_OR_FOREGROUND -eq 2 ]; then
+        FUN_MANUALLY_UNSYNC_FOREGROUND
+    fi
+
+elif [ $CHOICE -eq 3 ]; then
+    FUN_RANDOM_UNSYNC
+fi

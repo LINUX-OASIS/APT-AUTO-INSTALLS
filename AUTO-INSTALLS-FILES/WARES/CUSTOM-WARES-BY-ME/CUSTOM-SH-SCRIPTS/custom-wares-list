@@ -1,0 +1,77 @@
+#!/bin/bash
+
+
+export NEWT_COLORS='
+ root=white,red
+window=white,gray
+border=lightgray,gray
+shadow=white,black
+button=black,green
+actbutton=black,red
+compactbutton=lightgray,black
+title=yellow,gray
+roottext=red,black
+textbox=lightgray,gray
+acttextbox=gray,white
+entry=black,lightgray
+disentry=gray,black
+checkbox=black,lightgray
+actcheckbox=black,green
+emptyscale=,lightgray
+fullscale=,brown
+listbox=black,lightgray
+actlistbox=lightgray,black
+actsellistbox=black,green
+' 
+# to reset the color back to default use:
+# unset NEWT_COLORS
+
+#this code is kept here for documentation purposes "legacy" code .... 
+: '
+echo ""
+echo -e "		Running :: \v tree /bin/CUSTOM-SH-SCRIPTS | grep custom \n"
+echo "-------------------------------------------------------------------"
+echo ""
+tree /bin/CUSTOM-SH-SCRIPTS | grep custom
+echo "____________________________________________________________________"
+echo "--------------------------------------------------------------------"
+
+
+echo ""
+read -p "	Input [Command to run]  :: " RUN
+
+$RUN
+'
+
+
+#############################################################################################################################
+
+#files_list_count=$(ls /bin/CUSTOM-SH-SCRIPTS/custom* -1 | wc -l)
+
+
+ls /bin/CUSTOM-SH-SCRIPTS/custom* -1 > /tmp/custom-CWLS-FILES-NUM.tmp
+
+sed -i 's+/bin/CUSTOM-SH-SCRIPTS/++g' /tmp/custom-CWLS-FILES-NUM.tmp
+
+
+nl_tmp_list=$(nl -s ".   " /tmp/custom-CWLS-FILES-NUM.tmp)
+
+
+selection=$(whiptail --title "cwls  Custom Wares List" --inputbox "$nl_tmp_list" 0 0 3>&1 1>&2 2>&3)
+
+
+if [ -z $selection ]; then
+exit
+fi
+
+unset NEWT_COLORS
+
+
+echo "Running   $selection"
+echo "Running   $selection"
+echo "Running   $selection"
+echo "Running   $selection"
+echo "Running   $selection"
+echo -e "\n\n\n\n\n"
+
+$selection

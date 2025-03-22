@@ -1,0 +1,628 @@
+#!/bin/bash
+
+## FSTAB FIXER FOR EXT4/BTRFS OS Filesystems
+
+export NEWT_COLORS='
+root=brightblue,gray
+border=gray,red
+window=brown,blue
+shadow=green,brightred
+title=white,brightred
+button=cyan,lightray
+actbutton=black,yellow
+checkbox=brightred,black
+actcheckbox=gray,white
+entry=white,gray
+label=black,magenta
+listbox=white,gray
+actlistbox=black,yellow
+textbox=brightred,black
+acttextbox=black,yellow
+helpline=brightblue,cyan
+roottext=brightmagenta,black
+emptyscale=magenta,gray
+fullscale=brightgreen,green
+disentry=brightmagenta,magenta
+compactbutton=magenta,gray
+actsellistbox=brightred,black
+sellistbox=green,gray'
+
+FUN_SELECT_TARGET_PARTITIONS() {
+
+    # # we substituted spaces for no-break caracter ---- UNICODE: U+00A0
+    # sed 's/ / /g'
+
+    _NL_VFAT_PARTITION_LIST_MENU_BODY=$(lsblk -f -o NAME,FSTYPE,FSVER,LABEL,SIZE | sed 's/├─//g' | sed 's/└─//g' | grep -w "vfat" | sed 's/ / /g' | cat -n)
+    _VFAT_PARTITION_LIST_MENU_COUNT=$(lsblk -f -o NAME,FSTYPE,FSVER,LABEL,SIZE | sed 's/├─//g' | sed 's/└─//g' | grep -w "vfat" | sed 's/ / /g' | cat -n | sed 's/ //g' | sed 's/\t/ /g' | wc -l | tr -d '[:space:]')
+
+    _CHOSEN_EFI_PARTITION=$(whiptail --fb --scrolltext --backtitle "FSTAB FIXER :: SELECT EFI/UEFI PARTITION" --title "SELECT EFI/UEFI PARTITION" --menu "SELECT EFI/UEFI PARTITION" 0 0 "$_VFAT_PARTITION_LIST_MENU_COUNT" $_NL_VFAT_PARTITION_LIST_MENU_BODY 3>&1 1>&2 2>&3)
+    if [ -z $_CHOSEN_EFI_PARTITION ]; then
+        echo "USER ABORTED ... EXITING ..."
+        exit
+    fi
+    _CHOSEN_EFI_PARTITION_DEV=$(lsblk -f -o NAME,FSTYPE,FSVER,LABEL,SIZE | sed 's/├─//g' | sed 's/└─//g' | grep -w "vfat" | sed 's/ / /g' | cat -n | sed 's/ //g' | grep -w "^$_CHOSEN_EFI_PARTITION" | sed 's/ / /g' | tr '[:space:]' '@' | cut -d@ -f2 | tr -d '[:space:]' | sed 's+^+/dev/+1')
+
+    #sanity check for chosen EFI partition is FAT32
+    _IS_CHOSEN_EFI_PARTITION_FAT32_SANITY_CHECK=$(lsblk -f -noheaders -o FSVER "$_CHOSEN_EFI_PARTITION_DEV" | tr -d '[:space:]')
+    if [[ $_IS_CHOSEN_EFI_PARTITION_FAT32_SANITY_CHECK != "FAT32" ]]; then
+        echo "CHOSEN  UEFI/EFI PARTITION is NOT [FAT32] ........ ...... EXITING ..."
+        exit
+    fi
+
+    _NL_OS_EXT4_BTRFS_PARTITION_LIST_MENU_BODY=$(lsblk -f -o NAME,FSTYPE,FSVER,LABEL,SIZE | sed 's/├─//g' | sed 's/└─//g' | grep -w "ext4\|btrfs" | sed 's/ / /g' | cat -n)
+    _OS_EXT4_BTRFS_PARTITION_LIST_MENU_COUNT=$(lsblk -f -o NAME,FSTYPE,FSVER,LABEL,SIZE | sed 's/├─//g' | sed 's/└─//g' | grep -w "ext4\|btrfs" | sed 's/ / /g' | cat -n | sed 's/ //g' | sed 's/\t/ /g' | wc -l | tr -d '[:space:]')
+
+    _CHOSEN_OS_EXT4_BTRFS_PARTITION=$(whiptail --fb --scrolltext --backtitle "FSTAB FIXER :: SELECT [ OS ] PARTITION" --title "SELECT [ OS ] PARTITION" --menu "SELECT [ OS ] PARTITION" 0 0 "$_OS_EXT4_BTRFS_PARTITION_LIST_MENU_COUNT" $_NL_OS_EXT4_BTRFS_PARTITION_LIST_MENU_BODY 3>&1 1>&2 2>&3)
+    if [ -z $_CHOSEN_OS_EXT4_BTRFS_PARTITION ]; then
+        echo "USER ABORTED ... EXITING ..."
+        exit
+    fi
+    _CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV=$(lsblk -f -o NAME,FSTYPE,FSVER,LABEL,SIZE | sed 's/├─//g' | sed 's/└─//g' | grep -w "ext4\|btrfs" | sed 's/ / /g' | cat -n | sed 's/ //g' | grep -w "^$_CHOSEN_OS_EXT4_BTRFS_PARTITION" | sed 's/ / /g' | tr '[:space:]' '@' | cut -d@ -f2 | tr -d '[:space:]' | sed 's+^+/dev/+1')
+
+    #sanity check for chosen OS partition is EXT4 or BTRFS
+    _IS_CHOSEN_OS_PARTITION_EXT4_BTRFS_SANITY_CHECK_FSTYPE=$(lsblk -f -noheaders -o FSTYPE "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | tr -d '[:space:]')
+
+    if [[ "$_IS_CHOSEN_OS_PARTITION_EXT4_BTRFS_SANITY_CHECK_FSTYPE" != "ext4" ]] && [[ "$_IS_CHOSEN_OS_PARTITION_EXT4_BTRFS_SANITY_CHECK_FSTYPE" != "btrfs" ]]; then
+        echo "CHOSEN  [ OS ] PARTITION is NOT [EXT4 or BTRFS] ........ ...... EXITING ..."
+        exit
+    fi
+
+    # OBTAIN UUID for thechosen partitions /dev/XXXX ...
+    EFI_ESP_PARTITION_UUID=$(lsblk -n -o UUID $_CHOSEN_EFI_PARTITION_DEV | tr -d '[:space:]')
+    OS_PARTITION_UUID=$(lsblk -n -o UUID $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV | tr -d '[:space:]')
+
+    # Action/Function to take basen on the FSTYPE of OS partiton
+
+    if [[ "$_IS_CHOSEN_OS_PARTITION_EXT4_BTRFS_SANITY_CHECK_FSTYPE" == "ext4" ]]; then
+        echo " OS PARTITION ::: [ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV ] FSTYPE is ext4"
+        echo " :::::::::::::::: [ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV ] $OS_PARTITION_UUID"
+        FUN_FIX_FSTAB_EXT4
+    elif [[ "$_IS_CHOSEN_OS_PARTITION_EXT4_BTRFS_SANITY_CHECK_FSTYPE" == "btrfs" ]]; then
+        echo " OS PARTITION ::: [ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV ] FSTYPE is btrfs"
+        echo " :::::::::::::::: [ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV ] $OS_PARTITION_UUID"
+        FUN_FIX_FSTAB_BTRFS
+    fi
+
+}
+
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+FUN_FIX_FSTAB_BTRFS() {
+
+    #create directory for the target os partition to be mounted at
+    mkdir -p /tmp/CUSTOM-FSTAB-FIXER-BTRFS-OS-PARTION-MOUNT-DIR-$(printf $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV | sed s+/dev/+dev-+)
+    OS_PARTITION_MOUNT_LOCATION=/tmp/CUSTOM-FSTAB-FIXER-BTRFS-OS-PARTION-MOUNT-DIR-$(printf $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV | sed s+/dev/+dev-+ | tr -d '[:space:]')
+
+    _CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT=$(lsblk -noheadings -f -o MOUNTPOINTS $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV | tr -d '[:space:]')
+
+    #mount the target OS Partition To find root Subvolume(s)
+    if [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT == "/" ]]; then
+        echo "sudo mount --bind $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT $OS_PARTITION_MOUNT_LOCATION"
+        sudo mount --bind "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT" "$OS_PARTITION_MOUNT_LOCATION"
+    elif [[ -z $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT ]]; then
+        echo "sudo mount $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV $OS_PARTITION_MOUNT_LOCATION"
+        sudo mount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" "$OS_PARTITION_MOUNT_LOCATION"
+    elif [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT != "/" ]]; then
+        echo "Warning: target [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV] [OS] Partition must be unmounted .... Trying to unmount & exiting ..."
+        echo "Run this script again"
+        sudo umount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT"
+        exit
+    fi
+
+    # sudo btrfs subvolume list </dev/mountpoint> |  sed -n 's+^.*path ++p'  ###-n means not to print anything by default to the terminal . ##the final p means to print the transformed line.
+    #sudo btrfs subvolume list /media/osimage/MSTROS-OSIMGPART :::: #### outputs something like (if theres a subvolume):::: ID 256 gen 1022 top level 5 path ext2_saved
+
+    COUNT_TOTAL_BTRFS_SUBVOLUMES=$(sudo btrfs subvolume list "$OS_PARTITION_MOUNT_LOCATION" | wc -l | tr -d '[:space:]')
+    NL_BTRFS_SUBVOLUMES=$(sudo btrfs subvolume list "$OS_PARTITION_MOUNT_LOCATION" | sed -n 's+^.*path ++p' | cat -n | sed 's/ //g')
+
+    if [ "$COUNT_TOTAL_BTRFS_SUBVOLUMES" -eq 0 ]; then
+
+        whiptail --title "Selected [ BTRFS FILESYSTEM HAS NO SUBVOLUMES] " --msgbox "Selected [ BTRFS FILESYSTEM HAS NO SUBVOLUMES]" 0 0 3>&1 1>&2 2>&3
+        sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+
+        ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   BTRFS W/o Subvolume  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   BTRFS W/o Subvolume  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   BTRFS W/o Subvolume  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        cat <<EOF >/tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp
+
+OS PARTITION           :: [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV] ::  $(lsblk -o FSTYPE "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/FSTYPE//g | tr -d '[:space:]') :: $(lsblk -o LABEL "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/SIZE//g | tr -d '[:space:]')
+OS PARTITION UUID      :: [$OS_PARTITION_UUID]
+BTRFS ROOT SUBVOLUME   :: [NO SUBVOLUME(S) FOR SELECTED BTRFS FS]
+EFI/ESP PARTITION      :: [$_CHOSEN_EFI_PARTITION_DEV] ::  $(lsblk -o FSTYPE "$_CHOSEN_EFI_PARTITION_DEV" | sed s/FSTYPE//g | tr -d '[:space:]') ::  $(lsblk -o LABEL "$_CHOSEN_EFI_PARTITION_DEV" | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE "$_CHOSEN_EFI_PARTITION_DEV" | sed s/SIZE//g | tr -d '[:space:]')
+EFI/ESP PARTITION UUID :: [$EFI_ESP_PARTITION_UUID]
+
+EOF
+
+        #Sanity Check
+        if whiptail --title "! Sanity Check 1 !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+            echo ""
+        else
+            echo "USER ABORTED"
+            sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+            exit
+        fi
+
+        #Sanity Check 2
+        if whiptail --title "! Sanity check 2 !! ?? [Check Partitions Carefully]  !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+            echo ""
+        else
+            echo "USER ABORTED"
+            sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+            exit
+        fi
+
+        #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EFI/ESP PARTITION UUID BTRFS W/o Subvolume #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+        #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EFI/ESP PARTITION UUID BTRFS W/o Subvolume #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+        # mount the target linux system OS partition to it's mount directory ##BTRFS W/o Subvolume
+        if [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT == "/" ]]; then
+            echo "sudo mount --bind $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT $OS_PARTITION_MOUNT_LOCATION"
+            sudo mount --bind "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT" "$OS_PARTITION_MOUNT_LOCATION"
+        elif [[ -z $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT ]]; then
+            echo "sudo mount $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV $OS_PARTITION_MOUNT_LOCATION"
+            sudo mount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" "$OS_PARTITION_MOUNT_LOCATION"
+        elif [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT != "/" ]]; then
+            echo "Warning: target [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV] [OS] Partition must be unmounted .... Trying to unmount & exiting ..."
+            echo "Run this script again"
+            sudo umount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT"
+            exit
+        fi
+
+        ### Fix the target linux systems FSTAB file: /etc/fstab ### BTRFS W/o Subvolume
+
+        # for tab delimiters we use cut -d$'\t'
+        #obtain uuid of old EFI partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default, Debian)
+        UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | head -1 | tr -d '[:space:]')
+        #obtain uuid of old EFI partition from the /etc/fstab: Modern method :: only outputs the uuid by itself :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+        UUID_OLD_EFI_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /boot/efi" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+        #obtain uuid of old OS partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default, Debian)
+        UUID_OLD_OS_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+        #obtain uuid of old OS partition from the /etc/fstab: Modern method :: only outputs the uuid by itself :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+        UUID_OLD_OS_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+        #obtain uuid of new efi partition, directly from the target efi partition to use: older UUID=value method
+        UUID_NEW_EFI_PART=$(blkid "$_CHOSEN_EFI_PARTITION_DEV" | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]')
+        #obtain uuid of new efi partition, directly from the target efi partition to use: modern method;;; only outputs the uuid value by itself, nothing more
+        UUID_NEW_EFI_PART_MODERN=$(blkid "$_CHOSEN_EFI_PARTITION_DEV" | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]' | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  HERE WE REPLACE THE OLD UUID VALUES WITHE THE NEW UUID VALUES IN THE TARGET /ETC/FSTAB FILE ##BTRFS W/o Subvolume~~~~~~
+        #replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; older UUID=value method
+        sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID+$UUID_NEW_EFI_PART+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+        #replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+        sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_MODERN_UUID+$UUID_NEW_EFI_PART_MODERN+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+        #replace old OS partition uuid with new OS partition uuid   in /etc/fstab file;; older UUID=value method
+        sudo sed -i "s+$UUID_OLD_OS_PART_FSTAB_LEGACY_UUID+$OS_PARTITION_UUID+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+        #replace old OS partition uuid with new OS partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+        sudo sed -i "s+$UUID_OLD_OS_PART_FSTAB_MODERN_UUID+$OS_PARTITION_UUID+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+        sleep 0.1
+        sudo umount "$OS_PARTITION_MOUNT_LOCATION" # !! HIGHLY !! recommend to nor auto unmount the partition [if its the current running os] ... ill leave it commented out
+        return
+    fi
+
+    #@@@@@@@@@@@ for btrfs filesystem with a root subvolume
+
+    if [ "$COUNT_TOTAL_BTRFS_SUBVOLUMES" -ge 1 ]; then
+
+        CHOICE_FOR_BTRFS_SUBVOLUME=$(whiptail --fullbuttons --cancel-button "Procede w/no Subvol" --backtitle "Procede w/o Subvol [maybe target under the FS root?]" --title "Select [ BTRFS ROOT SUBVOLUME ] (default is @ on most systems)" --menu "Select [ BTRFS ROOT SUBVOLUME ] for [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV]" 0 65 "$COUNT_TOTAL_BTRFS_SUBVOLUMES" $NL_BTRFS_SUBVOLUMES 3>&1 1>&2 2>&3)
+
+        if [ -z "$CHOICE_FOR_BTRFS_SUBVOLUME" ]; then
+
+            if $(whiptail --fullbuttons --title "Will Continue w/o Subvolume [ MAYBE TARGET IS Directly IN THE BTRFS FS ROOT ]" --yesno " Continue w/o Subvolume [ MAYBE TARGET IS Directly IN THE BTRFS FS ROOT ] ??" 0 0 3>&1 1>&2 2>&3); then
+                sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+
+                ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   BTRFS With Subvolume [But targetting root FS] (no subvolume selected) %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   BTRFS With Subvolume [But targetting root FS] (no subvolume selected) %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   BTRFS With Subvolume [But targetting root FS] (no subvolume selected) %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+                cat <<EOF >/tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp
+
+OS PARTITION           :: [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV] ::  $(lsblk -o FSTYPE "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/FSTYPE//g | tr -d '[:space:]') :: $(lsblk -o LABEL "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/SIZE//g | tr -d '[:space:]')
+OS PARTITION UUID      :: [$OS_PARTITION_UUID]
+BTRFS ROOT SUBVOLUME   :: [ NONE - - TARGETING THE ROOT FS]
+EFI/ESP PARTITION      :: [$_CHOSEN_EFI_PARTITION_DEV] ::  $(lsblk -o FSTYPE "$_CHOSEN_EFI_PARTITION_DEV" | sed s/FSTYPE//g | tr -d '[:space:]') ::  $(lsblk -o LABEL "$_CHOSEN_EFI_PARTITION_DEV" | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE "$_CHOSEN_EFI_PARTITION_DEV" | sed s/SIZE//g | tr -d '[:space:]')
+EFI/ESP PARTITION UUID :: [$EFI_ESP_PARTITION_UUID]
+
+EOF
+
+                #Sanity Check
+                if whiptail --title "! Sanity Check 1 !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+                    echo ""
+                else
+                    echo "USER ABORTED"
+                    sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+                    exit
+                fi
+
+                #Sanity Check 2
+                if whiptail --title "! Sanity check 2 !! ?? [Check Partitions Carefully]  !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+                    echo ""
+                else
+                    echo "USER ABORTED"
+                    sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+                    exit
+                fi
+
+                #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EFI/ESP PARTITION UUID BTRFS [But targetting root FS] (no subvolume selected) #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+                #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EFI/ESP PARTITION UUID BTRFS [But targetting root FS] (no subvolume selected) #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+                # mount the target linux system OS partition to it's mount directory ##BTRFS [But targetting root FS] (no subvolume selected)
+                if [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT == "/" ]]; then
+                    echo "sudo mount --bind $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT $OS_PARTITION_MOUNT_LOCATION"
+                    sudo mount --bind "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT" "$OS_PARTITION_MOUNT_LOCATION"
+                elif [[ -z $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT ]]; then
+                    echo "sudo mount $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV $OS_PARTITION_MOUNT_LOCATION"
+                    sudo mount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" "$OS_PARTITION_MOUNT_LOCATION"
+                elif [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT != "/" ]]; then
+                    echo "Warning: target [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV] [OS] Partition must be unmounted .... Trying to unmount & exiting ..."
+                    echo "Run this script again"
+                    sudo umount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT"
+                    exit
+                fi
+
+                ### Fix the target linux systems FSTAB file: /etc/fstab ### BTRFS [But targetting root FS] (no subvolume selected)
+
+                # for tab delimiters we use cut -d$'\t'
+                #obtain uuid of old EFI partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default, Debian)
+                UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | head -1 | tr -d '[:space:]')
+                #obtain uuid of old EFI partition from the /etc/fstab: Modern method :: only outputs the uuid by itself :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+                UUID_OLD_EFI_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /boot/efi" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+                #obtain uuid of old OS partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default, Debian)
+                UUID_OLD_OS_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+                #obtain uuid of old OS partition from the /etc/fstab: Modern method :: only outputs the uuid by itself :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+                UUID_OLD_OS_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+                #obtain uuid of new efi partition, directly from the target efi partition to use: older UUID=value method
+                UUID_NEW_EFI_PART=$(blkid "$_CHOSEN_EFI_PARTITION_DEV" | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]')
+                #obtain uuid of new efi partition, directly from the target efi partition to use: modern method;;; only outputs the uuid value by itself, nothing more
+                UUID_NEW_EFI_PART_MODERN=$(blkid "$_CHOSEN_EFI_PARTITION_DEV" | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]' | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+                #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  HERE WE REPLACE THE OLD UUID VALUES WITHE THE NEW UUID VALUES IN THE TARGET /ETC/FSTAB FILE ##BTRFS [But targetting root FS] (no subvolume selected) ~~~~~~
+                #replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; older UUID=value method
+                sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID+$UUID_NEW_EFI_PART+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+                #replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+                sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_MODERN_UUID+$UUID_NEW_EFI_PART_MODERN+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+                #replace old OS partition uuid with new OS partition uuid   in /etc/fstab file;; older UUID=value method
+                sudo sed -i "s+$UUID_OLD_OS_PART_FSTAB_LEGACY_UUID+$OS_PARTITION_UUID+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+                #replace old OS partition uuid with new OS partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+                sudo sed -i "s+$UUID_OLD_OS_PART_FSTAB_MODERN_UUID+$OS_PARTITION_UUID+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+                sleep 0.1
+                sudo umount "$OS_PARTITION_MOUNT_LOCATION" # !! HIGHLY !! recommend to nor auto unmount the partition [if its the current running os] ... ill leave it commented out
+
+                return
+            else
+                echo "USER ABORTED"
+                sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+                exit
+
+            fi
+        fi
+
+        #░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓  SELECTED BTRFS SUBVOLUME ▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+        #░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓  SELECTED BTRFS SUBVOLUME ▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+        ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   BTRFS With Subvolume  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   BTRFS With Subvolume  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   BTRFS With Subvolume  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        JUST_BTRFS_ROOT_SUBVOLUME=$(sudo btrfs subvolume list "$OS_PARTITION_MOUNT_LOCATION" | sed -n 's+^.*path ++p' | cat -n | sed 's/ //g' | grep -w "^$CHOICE_FOR_BTRFS_SUBVOLUME" | sed "s/$CHOICE_FOR_BTRFS_SUBVOLUME//1" | tr -d '[:space:]')
+
+        sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+
+        cat <<EOF >/tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp
+
+        OS PARTITION           :: [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV] ::  $(lsblk -o FSTYPE "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/FSTYPE//g | tr -d '[:space:]') :: $(lsblk -o LABEL "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/SIZE//g | tr -d '[:space:]')
+        OS PARTITION UUID      :: [$OS_PARTITION_UUID]
+        BTRFS ROOT SUBVOLUME   :: [ $JUST_BTRFS_ROOT_SUBVOLUME ]
+        EFI/ESP PARTITION      :: [$_CHOSEN_EFI_PARTITION_DEV] ::  $(lsblk -o FSTYPE "$_CHOSEN_EFI_PARTITION_DEV" | sed s/FSTYPE//g | tr -d '[:space:]') ::  $(lsblk -o LABEL "$_CHOSEN_EFI_PARTITION_DEV" | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE "$_CHOSEN_EFI_PARTITION_DEV" | sed s/SIZE//g | tr -d '[:space:]')
+        EFI/ESP PARTITION UUID :: [$EFI_ESP_PARTITION_UUID]
+
+EOF
+
+        #Sanity Check
+        if whiptail --title "! Sanity Check 1 !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+            echo ""
+        else
+            echo "USER ABORTED"
+            sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+            exit
+        fi
+
+        #Sanity Check 2
+        if whiptail --title "! Sanity check 2 !! ?? [Check Partitions Carefully]  !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+            echo ""
+        else
+            echo "USER ABORTED"
+            sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+            exit
+        fi
+
+        #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EFI/ESP PARTITION UUID BTRFS [But targetting root FS] (no subvolume selected) #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+        #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EFI/ESP PARTITION UUID BTRFS [But targetting root FS] (no subvolume selected) #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+        # mount the target linux system OS partition to it's mount directory ##BTRFS [But targetting root FS] (no subvolume selected)
+        if [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT == "/" ]]; then
+            echo "sudo mount --bind $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT $OS_PARTITION_MOUNT_LOCATION"
+            sudo mount --bind "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT" "$OS_PARTITION_MOUNT_LOCATION"
+        elif [[ -z $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT ]]; then
+            echo "sudo mount $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV -o subvol=$JUST_BTRFS_ROOT_SUBVOLUME $OS_PARTITION_MOUNT_LOCATION"
+            sudo mount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" -o subvol="$JUST_BTRFS_ROOT_SUBVOLUME" "$OS_PARTITION_MOUNT_LOCATION"
+        elif [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT != "/" ]]; then
+            echo "Warning: target [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV] [OS] Partition must be unmounted .... Trying to unmount & exiting ..."
+            echo "Run this script again"
+            sudo umount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT"
+            exit
+        fi
+
+        ### Fix the target linux systems FSTAB file: /etc/fstab ### BTRFS [But targetting root FS] (no subvolume selected)
+
+        # for tab delimiters we use cut -d$'\t'
+        #obtain uuid of old EFI partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default, Debian)
+        UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | head -1 | tr -d '[:space:]')
+        #obtain uuid of old EFI partition from the /etc/fstab: Modern method :: only outputs the uuid by itself :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+        UUID_OLD_EFI_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /boot/efi" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+        #obtain uuid of old OS partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default, Debian)
+        UUID_OLD_OS_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+        #obtain uuid of old OS partition from the /etc/fstab: Modern method :: only outputs the uuid by itself :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+        UUID_OLD_OS_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+        #obtain uuid of new efi partition, directly from the target efi partition to use: older UUID=value method
+        UUID_NEW_EFI_PART=$(blkid "$_CHOSEN_EFI_PARTITION_DEV" | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]')
+        #obtain uuid of new efi partition, directly from the target efi partition to use: modern method;;; only outputs the uuid value by itself, nothing more
+        UUID_NEW_EFI_PART_MODERN=$(blkid "$_CHOSEN_EFI_PARTITION_DEV" | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]' | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  HERE WE REPLACE THE OLD UUID VALUES WITHE THE NEW UUID VALUES IN THE TARGET /ETC/FSTAB FILE ##BTRFS [But targetting root FS] (no subvolume selected) ~~~~~~
+        #replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; older UUID=value method
+        sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID+$UUID_NEW_EFI_PART+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+        #replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+        sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_MODERN_UUID+$UUID_NEW_EFI_PART_MODERN+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+        #replace old OS partition uuid with new OS partition uuid   in /etc/fstab file;; older UUID=value method
+        sudo sed -i "s+$UUID_OLD_OS_PART_FSTAB_LEGACY_UUID+$OS_PARTITION_UUID+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+        #replace old OS partition uuid with new OS partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+        sudo sed -i "s+$UUID_OLD_OS_PART_FSTAB_MODERN_UUID+$OS_PARTITION_UUID+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+        sleep 0.1
+        sudo umount "$OS_PARTITION_MOUNT_LOCATION" # !! HIGHLY !! recommend to nor auto unmount the partition [if its the current running os] ... ill leave it commented out
+        return
+    fi
+
+}
+
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+FUN_FIX_FSTAB_EXT4() {
+
+    #create directory for the target os partition to be mounted at
+    mkdir -p /tmp/CUSTOM-FSTAB-FIXER-EXT4-OS-PARTION-MOUNT-DIR-$(printf $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV | sed s+/dev/+dev-+)
+
+    OS_PARTITION_MOUNT_LOCATION=/tmp/CUSTOM-FSTAB-FIXER-EXT4-OS-PARTION-MOUNT-DIR-$(printf $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV | sed s+/dev/+dev-+ | tr -d '[:space:]')
+
+    _CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT=$(lsblk -noheadings -f -o MOUNTPOINTS $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV | tr -d '[:space:]')
+
+    #mount the target OS Partition To find root Subvolume(s)
+    if [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT == "/" ]]; then
+        sudo mount --bind "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT" "$OS_PARTITION_MOUNT_LOCATION"
+    elif [[ -z $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT ]]; then
+        sudo mount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" "$OS_PARTITION_MOUNT_LOCATION"
+
+    elif [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT != "/" ]]; then
+        echo "Warning: target [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV] [OS] Partition must be unmounted .... Trying to unmount & exiting ..."
+        echo "Run this script again"
+        sudo umount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT"
+        exit
+    fi
+    sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+
+    ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   EXT4  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   EXT4  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    ######@@@@@@@@@#############$$$$$$$@$@$@%%%%%%%%%%%%   SANITY CHECK   EXT4  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    cat <<EOF >/tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp
+
+OS PARTITION           :: [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV] ::  $(lsblk -o FSTYPE "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/FSTYPE//g | tr -d '[:space:]') :: $(lsblk -o LABEL "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" | sed s/SIZE//g | tr -d '[:space:]')
+OS PARTITION UUID      :: [$OS_PARTITION_UUID]
+EFI/ESP PARTITION      :: [$_CHOSEN_EFI_PARTITION_DEV] ::  $(lsblk -o FSTYPE "$_CHOSEN_EFI_PARTITION_DEV" | sed s/FSTYPE//g | tr -d '[:space:]') ::  $(lsblk -o LABEL "$_CHOSEN_EFI_PARTITION_DEV" | sed s/LABEL//g | tr -d '[:space:]') :: $(lsblk -o SIZE "$_CHOSEN_EFI_PARTITION_DEV" | sed s/SIZE//g | tr -d '[:space:]')
+EFI/ESP PARTITION UUID :: [$EFI_ESP_PARTITION_UUID]
+
+EOF
+
+    #Sanity Check
+    if whiptail --title "! Sanity Check 1 !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+        echo ""
+    else
+        echo "USER ABORTED"
+        sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+        exit
+    fi
+
+    #Sanity Check 2
+    if whiptail --title "! Sanity check 2 !! ?? [Check Partitions Carefully]  !! GRUB-REINSTALL ! Proceed ! ? " --yesno "$(cat /tmp/CUSTOM-FSTAB-FIXER-SANITY-PARTITIONS-MESSAGE.tmp)" 0 0 3>&1 1>&2 2>&3; then
+        echo ""
+    else
+        echo "USER ABORTED"
+        sudo umount "$OS_PARTITION_MOUNT_LOCATION"
+        exit
+    fi
+
+    #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EFI/ESP PARTITION UUID EXT4 #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+    #######@@@@@@@@@@@@@@@@@@@@@@@@@@@@@######## FIX /ETC/FSTAB  EFI/ESP PARTITION UUID EXT4 #######################################@@@@@@@@@@@@@@@@@@@@@@@@@@#########
+
+    # mount the target linux system OS partition to it's mount directory ##EXT4
+    if [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT == "/" ]]; then
+        echo "sudo mount --bind $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT $OS_PARTITION_MOUNT_LOCATION"
+        sudo mount --bind "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT" "$OS_PARTITION_MOUNT_LOCATION"
+    elif [[ -z $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT ]]; then
+        echo "sudo mount $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV $OS_PARTITION_MOUNT_LOCATION"
+        sudo mount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV" "$OS_PARTITION_MOUNT_LOCATION"
+    elif [[ $_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT != "/" ]]; then
+        echo "Warning: target [$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV] [OS] Partition must be unmounted .... Trying to unmount & exiting ..."
+        echo "Run this script again"
+        sudo umount "$_CHOSEN_OS_EXT4_BTRFS_PARTITION_DEV_MOUNT_POINT"
+        exit
+    fi
+
+    ### Fix the target linux systems FSTAB file: /etc/fstab ### EXT4
+
+    # for tab delimiters we use cut -d$'\t'
+    #obtain uuid of old EFI partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default, Debian)
+    UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | head -1 | tr -d '[:space:]')
+    #obtain uuid of old EFI partition from the /etc/fstab: Modern method :: only outputs the uuid by itself :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+    UUID_OLD_EFI_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /boot/efi" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+    #obtain uuid of old OS partition from the /etc/fstab: older UUID=Xx uuid value xX :: for ubuntu versions 22.04 and lower (or other linux distros that follow this pattern by default, Debian)
+    UUID_OLD_OS_PART_FSTAB_LEGACY_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w UUID="[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+    #obtain uuid of old OS partition from the /etc/fstab: Modern method :: only outputs the uuid by itself :: /dev/disk/by-uuid/Xx uuid value xX  /boot/efi for :: ubuntu versions 24.04 and higher (or other linux distros that follow this pattern by default)
+    UUID_OLD_OS_PART_FSTAB_MODERN_UUID=$(cat $OS_PARTITION_MOUNT_LOCATION/etc/fstab | grep -E -o -w "/dev/disk/by-uuid/[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] /" | head -1 | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+    #obtain uuid of new efi partition, directly from the target efi partition to use: older UUID=value method
+    UUID_NEW_EFI_PART=$(blkid "$_CHOSEN_EFI_PARTITION_DEV" | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]')
+    #obtain uuid of new efi partition, directly from the target efi partition to use: modern method;;; only outputs the uuid value by itself, nothing more
+    UUID_NEW_EFI_PART_MODERN=$(blkid "$_CHOSEN_EFI_PARTITION_DEV" | grep -E -o -w UUID=\"[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]\" | sed 's/"//g' | tr -d '[:space:]' | grep -E -o -w "[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]-[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]" | tr -d '[:space:]')
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  HERE WE REPLACE THE OLD UUID VALUES WITHE THE NEW UUID VALUES IN THE TARGET /ETC/FSTAB FILE ##EXT4 ~~~~~~
+    #replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; older UUID=value method
+    sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_LEGACY_UUID+$UUID_NEW_EFI_PART+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+    #replace old efi/esp partition uuid with new efi/esp partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+    sudo sed -i "s+$UUID_OLD_EFI_PART_FSTAB_MODERN_UUID+$UUID_NEW_EFI_PART_MODERN+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+    #replace old OS partition uuid with new OS partition uuid   in /etc/fstab file;; older UUID=value method
+    sudo sed -i "s+$UUID_OLD_OS_PART_FSTAB_LEGACY_UUID+$OS_PARTITION_UUID+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+    #replace old OS partition uuid with new OS partition uuid   in /etc/fstab file;; MODERN METHOD /dev/disk/by-uuid/Xx uuid value xX /boot/efi
+    sudo sed -i "s+$UUID_OLD_OS_PART_FSTAB_MODERN_UUID+$OS_PARTITION_UUID+g" $OS_PARTITION_MOUNT_LOCATION/etc/fstab 2>/dev/null
+
+    sleep 0.1
+    sudo umount "$OS_PARTITION_MOUNT_LOCATION" # !! HIGHLY !! recommend to not auto unmount the partition [if its the current running os] ... ill leave it commented out
+    return
+
+}
+
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+#░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+######/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\`.\/´\
+
+FUN_SELECT_TARGET_PARTITIONS
+
+echo "░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+cat <<EOF
+(\_/) (\_/) (\_/) (\_/) (\_/) (\_/) (\_/) (\_/) (\_/)
+(•x•) (•x•) (•x•) (•x•) (•x•) (•x•) (•x•) (•x•) (•x•)     
+(<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦)
+
+ALL DONE FSTAB-FIXER
+EOF

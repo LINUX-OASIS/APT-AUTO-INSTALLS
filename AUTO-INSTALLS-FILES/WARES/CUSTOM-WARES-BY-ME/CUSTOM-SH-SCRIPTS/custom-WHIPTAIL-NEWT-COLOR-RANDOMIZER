@@ -1,0 +1,380 @@
+#!/bin/bash
+
+##############################################
+##############################################
+
+# # NEWT_COLORS Variables: Organized by UI Component
+
+# # 1. Window and General UI Colors
+#     root=foreground,background         # Main window colors
+#     window=foreground,background       # Window container colors
+#     dialog=foreground,background       # Overall dialog window colors
+#     frame=foreground,background        # Frame (border) around windows or sections
+#     border=foreground,background       # Border around elements
+#     shadow=foreground,background       # Shadow colors for elements
+#     title=foreground,background        # Title bar or element title colors
+
+# # 2. Interactive Elements
+#     button=foreground,background       # Button colors
+#     actbutton=foreground,background    # Active button colors
+#     focus=foreground,background        # Focused item colors
+#     highlight=foreground,background    # Highlighted item colors
+#     checkbox=foreground,background     # Checkbox colors
+#     actcheckbox=foreground,background  # Active checkbox colors
+#     compactbutton=foreground,background # Compact button colors
+#     radiobutton=foreground,background  # Radio button colors
+
+# # 3. Text Elements
+#     textbox=foreground,background      # Textbox colors
+#     acttextbox=foreground,background   # Active textbox colors
+#     text=foreground,background         # Text colors
+#     infobox=foreground,background      # Information box colors
+#     label=foreground,background        # Label text colors
+#     roottext=foreground,background     # Text in root windows or elements
+#     helpline=foreground,background     # Helpline text colors
+
+# # 4. Menu and List Elements
+#     menu=foreground,background         # Menu colors
+#     menuitem=foreground,background     # Menu item colors
+#     listbox=foreground,background      # Listbox colors
+#     actlistbox=foreground,background   # Active listbox colors
+#     item=foreground,background         # Item colors in menus or lists
+#     actsellistbox=foreground,background # Active selected listbox colors
+#     sellistbox=foreground,background   # Selected listbox colors
+
+# # 5. Scroll and Status Bar Elements
+#     scrollbar=foreground,background    # Scrollbar colors
+#     statusbar=foreground,background    # Status bar colors
+
+# # 6. Cursor and Text Focus
+#     cursor=foreground,background       # Cursor colors
+#     entry=foreground,background        # Entry field colors
+#     disentry=foreground,background     # Disabled entry field colors
+
+# # 7. Scale Bar Elements
+#     emptyscale=foreground,background   # Empty scale bar colors
+#     fullscale=foreground,background    # Full scale bar colors
+
+mkdir -p /tmp/CUSTOM_WORKER_DIR_NEWT_COLORS_COLOR_DEFINITION_XXXX
+if [[ ! -d /bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR ]]; then
+    sudo mkdir -p /bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR
+    sudo chmod -R 777 /bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR
+fi
+
+FUN_NEWT_COLORS_RANDOMIZER() {
+
+    unset NEWT_COLORS
+    unset _DUMMY_VAR
+    declare -a _ARRAY_NEWT_COLORS_COLOR_DEFINITION=(
+        [0]=black [1]=red
+        [2]=green [3]=brown
+        [4]=blue [5]=magenta
+        [6]=cyan [7]=lightgray
+        [8]=gray [9]=brightred
+        [10]=brightgreen [11]=yellow
+        [12]=brightblue [13]=brightmagenta
+        [14]=brightmagenta [15]=white)
+
+    # Function to pick distinct colors
+    FUNCTION_PICK_DISTINCT_COLOR() {
+        local color1 color2
+        color1=${_ARRAY_NEWT_COLORS_COLOR_DEFINITION[$(shuf -i 0-15 -n 1)]}
+        color2=${_ARRAY_NEWT_COLORS_COLOR_DEFINITION[$(shuf -i 0-15 -n 1)]}
+
+        # Ensure colors are distinct
+        while [ "$color1" == "$color2" ]; do
+            color2=${_ARRAY_NEWT_COLORS_COLOR_DEFINITION[$(shuf -i 0-15 -n 1)]}
+        done
+
+        echo "$color1,$color2"
+    }
+
+    # Window and General UI Colors
+    root=$(FUNCTION_PICK_DISTINCT_COLOR)   # Main window colors
+    window=$(FUNCTION_PICK_DISTINCT_COLOR) # Window container colors
+    dialog=$(FUNCTION_PICK_DISTINCT_COLOR) # Overall dialog window colors
+    frame=$(FUNCTION_PICK_DISTINCT_COLOR)  # Frame (border) around windows or sections
+    border=$(FUNCTION_PICK_DISTINCT_COLOR) # Border around elements
+    shadow=$(FUNCTION_PICK_DISTINCT_COLOR) # Shadow colors for elements
+    title=$(FUNCTION_PICK_DISTINCT_COLOR)  # Title bar or element title colors
+
+    # Interactive Elements
+    button=$(FUNCTION_PICK_DISTINCT_COLOR)        # Button colors
+    actbutton=$(FUNCTION_PICK_DISTINCT_COLOR)     # Active button colors
+    focus=$(FUNCTION_PICK_DISTINCT_COLOR)         # Focused item colors
+    highlight=$(FUNCTION_PICK_DISTINCT_COLOR)     # Highlighted item colors
+    checkbox=$(FUNCTION_PICK_DISTINCT_COLOR)      # Checkbox colors
+    actcheckbox=$(FUNCTION_PICK_DISTINCT_COLOR)   # Active checkbox colors
+    compactbutton=$(FUNCTION_PICK_DISTINCT_COLOR) # Compact button colors
+    radiobutton=$(FUNCTION_PICK_DISTINCT_COLOR)   # Radio button colors
+
+    # Text Elements
+    textbox=$(FUNCTION_PICK_DISTINCT_COLOR)    # Textbox colors
+    acttextbox=$(FUNCTION_PICK_DISTINCT_COLOR) # Active textbox colors
+    text=$(FUNCTION_PICK_DISTINCT_COLOR)       # Text colors
+    infobox=$(FUNCTION_PICK_DISTINCT_COLOR)    # Information box colors
+    label=$(FUNCTION_PICK_DISTINCT_COLOR)      # Label text colors
+    roottext=$(FUNCTION_PICK_DISTINCT_COLOR)   # Text in root windows or elements
+    helpline=$(FUNCTION_PICK_DISTINCT_COLOR)   # Helpline text colors
+
+    # Menu and List Elements
+    menu=$(FUNCTION_PICK_DISTINCT_COLOR)          # Menu colors
+    menuitem=$(FUNCTION_PICK_DISTINCT_COLOR)      # Menu item colors
+    listbox=$(FUNCTION_PICK_DISTINCT_COLOR)       # Listbox colors
+    actlistbox=$(FUNCTION_PICK_DISTINCT_COLOR)    # Active listbox colors
+    item=$(FUNCTION_PICK_DISTINCT_COLOR)          # Item colors in menus or lists
+    actsellistbox=$(FUNCTION_PICK_DISTINCT_COLOR) # Active selected listbox colors
+    sellistbox=$(FUNCTION_PICK_DISTINCT_COLOR)    # Selected listbox colors
+
+    # Scroll and Status Bar Elements
+    scrollbar=$(FUNCTION_PICK_DISTINCT_COLOR) # Scrollbar colors
+    statusbar=$(FUNCTION_PICK_DISTINCT_COLOR) # Status bar colors
+
+    # Cursor and Text Focus
+    cursor=$(FUNCTION_PICK_DISTINCT_COLOR)   # Cursor colors
+    entry=$(FUNCTION_PICK_DISTINCT_COLOR)    # Entry field colors
+    disentry=$(FUNCTION_PICK_DISTINCT_COLOR) # Disabled entry field colors
+
+    # Scale Bar Elements
+    emptyscale=$(FUNCTION_PICK_DISTINCT_COLOR) # Empty scale bar colors
+    fullscale=$(FUNCTION_PICK_DISTINCT_COLOR)  # Full scale bar colors
+
+    cat <<EOF | tee /tmp/CUSTOM_WORKER_DIR_NEWT_COLORS_COLOR_DEFINITION_XXXX/CUSTOM_SHUFFLED_NEWT_COLORS_definition.tmp
+NEWT_COLORS='
+root=$root
+window=$window
+dialog=$dialog
+frame=$frame
+border=$border
+shadow=$shadow
+title=$title
+button=$border
+actbutton=$actbutton
+focus=$focus
+highlight=$highlight
+checkbox=$checkbox
+actcheckbox=$actcheckbox
+compactbutton=$compactbutton
+radiobutton=$radiobutton
+textbox=$textbox
+acttextbox=$acttextbox
+text=$text
+infobox=$infobox
+label=$label
+roottext=$roottext
+helpline=$helpline
+menu=$menu
+menuitem=$menuitem
+listbox=$listbox
+actlistbox=$actlistbox
+item=$item
+actsellistbox=$actsellistbox
+sellistbox=$sellistbox
+scrollbar=$scrollbar
+statusbar=$statusbar
+cursor=$cursor
+entry=$entry
+disentry=$disentry
+emptyscale=$emptyscale
+fullscale=$fullscale
+'
+EOF
+    clear
+
+    cat /tmp/CUSTOM_WORKER_DIR_NEWT_COLORS_COLOR_DEFINITION_XXXX/CUSTOM_SHUFFLED_NEWT_COLORS_definition.tmp
+    export "$(cat /tmp/CUSTOM_WORKER_DIR_NEWT_COLORS_COLOR_DEFINITION_XXXX/CUSTOM_SHUFFLED_NEWT_COLORS_definition.tmp)"
+
+    _DUMMY_VAR=$(whiptail --fullbuttons --backtitle "B-BA-AC-CK-KT-TI-IT-TL-LE-E" --title "T-TI-IT-TL-LE-E" --ok-button "Continue" --cancel-button "-> SAVE??" --menu "M-ME-EN-NU-U" 0 0 4 \
+        1 one......EXAMPLE-TEXT........... \
+        2 two......EXAMPLE-TEXT........... \
+        3 three......EXAMPLE-TEXT........... \
+        4 four......EXAMPLE-TEXT........... 3>&1 1>&2 2>&3)
+
+}
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+FUN_SAVE_RANDOMIZED_NEWT_COLOR_PALLETTE() {
+    if $(whiptail --fullbuttons --backtitle "[SAVE CURRENT PROFILE]" --title "[SAVE CURRENT CUSTOM NEWT_COLORS PROFILE]" --yesno "SAVE CURRENT CUSTOM NEWT_COLORS PROFILE" 0 0 3>&1 1>&2 2>&3); then
+
+        ## SPAWN -- an example whiptail MSGBOX with the custom randomized NEWT_COLORS  pallette
+        gnome-terminal --title "[whiptail msgbox][EXAMPLE]" -- whiptail --fullbuttons --scrolltext --backtitle "EXAMPLE BK-TITLE" --title "EXAMPLE CHK-LIST" --ok-button "EXAMPLE" --cancel-button "EXAMPLE" \
+            --msgbox "EXAMPLE \n\n $(lsblk -f)" 0 0 3>&1 1>&2 2>&3
+
+        ## SPAWN -- an example whiptail INPUTBOX with the custom randomized NEWT_COLORS  pallette
+        gnome-terminal --title "[whiptail inputbox][EXAMPLE]" -- whiptail --fullbuttons --backtitle "example" --title "[EXAMPLE] INPUT BOX FOR THE NEWT COLOR PROFILE" --ok-button "EXAMPLE" --cancel-button "EXAMPLE" \
+            --inputbox "INPUT [NAME] FOR THE NEWT COLOR PROFILE " 0 0 3>&1 1>&2 2>&3
+
+        ## SPAWN -- an example whiptail MENU with the custom randomized NEWT_COLORS  pallette
+        gnome-terminal --title "[whiptail menu][EXAMPLE]" -- whiptail --fullbuttons --backtitle "EXAMPLE" --title "EXAMPLE MENU" --ok-button "EXAMPLE" --cancel-button "EXAMPLE" \
+            --menu "EXAMPLE M-ME-EN-NU-U" 0 0 4 \
+            1 EXAMPLE......EXAMPLE-TEXT........... \
+            2 EXAMPLE......EXAMPLE-TEXT........... \
+            3 EXAMPLE......EXAMPLE-TEXT........... \
+            4 EXAMPLE......EXAMPLE-TEXT........... 3>&1 1>&2 2>&3
+
+        ## SPAWN -- an example whiptail CHECKLIST with the custom randomized NEWT_COLORS  pallette
+        gnome-terminal --title "[whiptail checklist][EXAMPLE]" -- whiptail --fullbuttons --backtitle "EXAMPLE BK-TITLE" --title "EXAMPLE CHK-LIST" --ok-button "EXAMPLE" --cancel-button "EXAMPLE" \
+            --checklist "[EXAMPLE CHK-LIST] TEXT HERE" 0 0 5 \
+            1 "EXAMPLE-chklst-HERE.-.-.-.-no-spaces.-.-.-." off \
+            2 "EXAMPLE-chklst-HERE.-.-.-.-no-spaces.-.-.-." off \
+            3 "EXAMPLE-chklst-HERE.-.-.-.-no-spaces.-.-.-." off \
+            4 "EXAMPLE-chklst-HERE.-.-.-.-no-spaces.-.-.-." off \
+            5 "EXAMPLE-chklst-HERE.-.-.-.-no-spaces.-.-.-." off 3>&1 1>&2 2>&3
+
+        #!#!#!#!# :-] :-] :-] :-] :-] here is the continuation of the main program to save the custom color .. in stock newt colors, in case if the custom pallete makes text unreadable
+        unset NEWT_COLORS
+
+        _SAVE_NAME_FOR_NEWT_COLOR_CUSTOM_PALLETE_FINAL=$(
+            whiptail --fullbuttons --backtitle "AVOID-SPACES-IN-NAME" --title " INPUT [NAME] FOR THE NEWT COLOR PROFILE [SAVE]" \
+                --inputbox "INPUT [NAME] FOR THE NEWT COLOR PROFILE " 0 0 3>&1 1>&2 2>&3
+        )
+        if [[ -n $_SAVE_NAME_FOR_NEWT_COLOR_CUSTOM_PALLETE_FINAL ]]; then
+            _SAVE_NAME_FOR_NEWT_COLOR_CUSTOM_PALLETE_FINAL=$(echo $_SAVE_NAME_FOR_NEWT_COLOR_CUSTOM_PALLETE_FINAL | tr -d '[:space:]')
+            touch /bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR/"XXXX_${_SAVE_NAME_FOR_NEWT_COLOR_CUSTOM_PALLETE_FINAL}_CUSTOM_NEWT_COLOR.pallette"
+            cat /tmp/CUSTOM_WORKER_DIR_NEWT_COLORS_COLOR_DEFINITION_XXXX/CUSTOM_SHUFFLED_NEWT_COLORS_definition.tmp >/bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR/"XXXX_${_SAVE_NAME_FOR_NEWT_COLOR_CUSTOM_PALLETE_FINAL}_CUSTOM_NEWT_COLOR.pallette"
+        fi
+    fi
+}
+
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░██████████░███████████ ██████   EXECUTION STARTS HERE - AFTER THE FUNCTION HAS BEEN LOADED ▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌"
+
+#####################-#######
+############################
+
+function FUN_IMPORT_A_CUSTOM_NEWT_COLOR_PALLETE_FILE {
+
+    _MENU_BODY_PALLETE_FILES=$(find /bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR -maxdepth 1 -name "*.pallette" | sed 's+/bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR/++g' | cat -n | sed 's/ /@/g' | tr -s '@' | sed 's/^@//g' | tr '\t' ' ')
+    _MENU_HEIGHT_PALLETE_FILES=$(find /bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR -maxdepth 1 -name "*.pallette" | cat -n | sed 's/ /@/g' | tr -s '@' | sed 's/^@//g' | tr '\t' ' ' | wc -l)
+
+    if [[ $_MENU_HEIGHT_PALLETE_FILES -eq 0 ]]; then
+        echo -e "\e[93m No .pallette  NEWT_COLOR setting files found in [/bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR]....... exiting \e[0m"
+        echo "No *.pallette  NEWT_COLOR setting files found in [/bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR]....... exiting"
+        echo -e "\e[93m No .pallette  NEWT_COLOR setting files found in [/bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR]....... exiting \e[0m"
+        echo "No .pallette  NEWT_COLOR setting files found in [/bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR]....... exiting"
+        exit
+    fi
+
+    _PATH_IMPORTED_NEWT_PALLETE_FILE=$(whiptail --separate-output --fullbuttons --scrolltext --backtitle "Input Newt Color [***.pallette] Palette File in [/bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR]" --title "Input Custom Newt Color [***.pallette] Palette File to TEST" \
+        --menu ":: SELECT CUSTOM NEWT_COLOR PALLETTE to TEST [***.pallette]" 0 0 $_MENU_HEIGHT_PALLETE_FILES $_MENU_BODY_PALLETE_FILES 3>&1 1>&2 2>&3)
+
+    _PATH_IMPORTED_NEWT_PALLETE_FILE_SANITIZED=$(echo "$_PATH_IMPORTED_NEWT_PALLETE_FILE" | tr -d '[:space:]')
+
+    if [[ -z $_PATH_IMPORTED_NEWT_PALLETE_FILE_SANITIZED ]]; then
+        echo "USER LEFT IMNPUT FIELD EMPTY ....... EXITING"
+        exit
+    fi
+    _PATH_IMPORTED_NEWT_PALLETE_FILE_FINAL=$(find /bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR -maxdepth 1 -name "*.pallette" | cat -n | sed 's/ /@/g' | tr -s '@' | sed 's/^@//g' | tr '\t' ' ' | grep -w "^$_PATH_IMPORTED_NEWT_PALLETE_FILE" | cut -d' ' -f2)
+
+    # unset NEWT_COLORS
+
+    export "$(cat "$_PATH_IMPORTED_NEWT_PALLETE_FILE_FINAL")"
+
+    _DUMMY_VAR=$(whiptail --fullbuttons --backtitle "B-BA-AC-CK-KT-TI-IT-TL-LE-E" --title "T-TI-IT-TL-LE-E" --ok-button "Continue" --cancel-button "-> SAVE??" --menu "M-ME-EN-NU-U" 0 0 4 \
+        1 one......EXAMPLE-TEXT........... \
+        2 two......EXAMPLE-TEXT........... \
+        3 three......EXAMPLE-TEXT........... \
+        4 four......EXAMPLE-TEXT........... 3>&1 1>&2 2>&3)
+
+    ## SPAWN -- an example whiptail MSGBOX with the custom randomized NEWT_COLORS  pallette
+    gnome-terminal --title "[whiptail msgbox][EXAMPLE]" -- whiptail --fullbuttons --scrolltext --backtitle "EXAMPLE BK-TITLE" --title "EXAMPLE CHK-LIST" --ok-button "EXAMPLE" --cancel-button "EXAMPLE" \
+        --msgbox "EXAMPLE \n\n $(lsblk -f)" 0 0 3>&1 1>&2 2>&3
+
+    ## SPAWN -- an example whiptail INPUTBOX with the custom randomized NEWT_COLORS  pallette
+    gnome-terminal --title "[whiptail inputbox][EXAMPLE]" -- whiptail --fullbuttons --backtitle "example" --title "[EXAMPLE] INPUT BOX FOR THE NEWT COLOR PROFILE" --ok-button "EXAMPLE" --cancel-button "EXAMPLE" \
+        --inputbox "INPUT [NAME] FOR THE NEWT COLOR PROFILE " 0 0 3>&1 1>&2 2>&3
+
+    ## SPAWN -- an example whiptail MENU with the custom randomized NEWT_COLORS  pallette
+    gnome-terminal --title "[whiptail menu][EXAMPLE]" -- whiptail --fullbuttons --backtitle "EXAMPLE" --title "EXAMPLE MENU" --ok-button "EXAMPLE" --cancel-button "EXAMPLE" \
+        --menu "EXAMPLE M-ME-EN-NU-U" 0 0 4 \
+        1 EXAMPLE......EXAMPLE-TEXT........... \
+        2 EXAMPLE......EXAMPLE-TEXT........... \
+        3 EXAMPLE......EXAMPLE-TEXT........... \
+        4 EXAMPLE......EXAMPLE-TEXT........... 3>&1 1>&2 2>&3
+
+    ## SPAWN -- an example whiptail CHECKLIST with the custom randomized NEWT_COLORS  pallette
+    gnome-terminal --title "[whiptail checklist][EXAMPLE]" -- whiptail --fullbuttons --backtitle "EXAMPLE BK-TITLE" --title "EXAMPLE CHK-LIST" --ok-button "EXAMPLE" --cancel-button "EXAMPLE" \
+        --checklist "[EXAMPLE CHK-LIST] TEXT HERE" 0 0 5 \
+        1 "EXAMPLE-chklst-HERE.-.-.-.-no-spaces.-.-.-." off \
+        2 "EXAMPLE-chklst-HERE.-.-.-.-no-spaces.-.-.-." off \
+        3 "EXAMPLE-chklst-HERE.-.-.-.-no-spaces.-.-.-." off \
+        4 "EXAMPLE-chklst-HERE.-.-.-.-no-spaces.-.-.-." off \
+        5 "EXAMPLE-chklst-HERE.-.-.-.-no-spaces.-.-.-." off 3>&1 1>&2 2>&3
+
+    #!#!#!#!# :-] :-] :-] :-] :-] here is the continuation of the main program to save the custom color .. in stock newt colors, in case if the custom pallete makes text unreadable
+    unset NEWT_COLORS
+
+}
+
+############################
+############################
+
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+_MAIN_CHOICE=$(whiptail --separate-output --title "SELECT OPTION - [ whiptail - NEWT_COLOR randomizer ]" --menu "SELECT OPTION - [ whiptail - NEWT_COLOR randomizer ]" 0 0 2 1 "AUTO GENERATE new NEWT_COLOR pallete" 2 "IMPORT a NEWT_COLOR **.pallete file" 3>&1 1>&2 2>&3)
+
+if [ "$_MAIN_CHOICE" == 1 ]; then
+
+    _DUMMY_VAR=X
+    while [[ -n $_DUMMY_VAR ]]; do
+        trap "user aborted" SIGINT
+        FUN_NEWT_COLORS_RANDOMIZER
+    done
+    FUN_SAVE_RANDOMIZED_NEWT_COLOR_PALLETTE
+
+elif [[ $_MAIN_CHOICE == 2 ]]; then
+    FUN_IMPORT_A_CUSTOM_NEWT_COLOR_PALLETE_FILE
+
+else
+    echo "INCORRECT input/option selected ..... exiting..."
+    exit
+fi

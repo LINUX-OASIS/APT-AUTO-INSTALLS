@@ -1,0 +1,902 @@
+#!/bin/bash
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function _FUN_CHOOSE_UBUNTU_VERSION {
+
+    # here we Choose ubuntu release version
+    UBUNTU_VERSION=$(whiptail --title "CHOOSE UBUNTU VERSION" --menu "CHOOSE UBUNTU VERSION" 0 0 3 1 "UBUNTU [LTS] 22.04" 2 "UBUNTU [OTHER] 24.04 / 24.10" 3 "[! EXIT !]" 3>&1 1>&2 2>&3)
+
+    #Sanity check UBUNTU VERSION Corresponds Correctly to the current ubuntu Release version
+    __RELEASE_VERSION=$(cat /etc/lsb-release | grep -o "DISTRIB_RELEASE=[0-9][0-9].[0-9][0-9]" | sed s/DISTRIB_RELEASE=// | tr -d '[:space:]')
+
+    if [[ $UBUNTU_VERSION -eq 1 ]]; then
+        if [[ $__RELEASE_VERSION == "22.04" ]]; then
+            echo "Current Running UBUNTU version [22.04] & Selected Ubuntu release Version are the same: Continuing"
+        else
+            echo "Current Running UBUNTU version [22.04] & Selected Ubuntu release Version are DIFFERENT: EXITING"
+            exit
+        fi
+    fi
+
+    if [[ $UBUNTU_VERSION -eq 2 ]]; then
+        if [[ $__RELEASE_VERSION == "24.10" ]] || [[ $__RELEASE_VERSION == "24.04" ]]; then
+            echo "Current Running UBUNTU version [24.04 / 24.10] & Selected Ubuntu release Version are the same: Continuing"
+        else
+            echo "Current Running UBUNTU version [24.04 / 24.10] & Selected Ubuntu release Version are DIFFERENT: EXITING"
+            exit
+        fi
+    fi
+
+    echo "chosen $UBUNTU_VERSION"
+
+    if [ -z $UBUNTU_VERSION ]; then
+        exit
+    elif [ $UBUNTU_VERSION -eq 1 ]; then
+        #copy apt sources to the /etc/apt/sources.list based on chosen ubuntu version
+        echo "ubuntu version 22.04"
+        FUN_UBUNTU_DEFINE_APT_SOURCES_VERSION_LTS
+    elif [ $UBUNTU_VERSION -eq 2 ]; then
+        #Ubuntu sources [Since Version 24.10] have moved to the /etc/apt/sources.list.d/ubuntu.sources file, which uses the deb822 format. Use deb822-formatted .sources files
+        echo "ubuntu version 24.04 / 24.10"
+    elif [ $UBUNTU_VERSION -eq 3 ]; then
+        exit
+    fi
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_0 {
+
+    echo "0. COPY THIS SOFTWARE SUITE TO /BIN [COPY ITSELF TO /BIN]"
+    CHOICE_BLOCK_INDICATOR="0. COPY THIS SOFTWARE SUITE TO /BIN [COPY ITSELF TO /BIN]"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+    sudo cp -rf "$(echo $PWD | tr -d '[:space:]')" /bin
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_1 {
+
+    echo "1. Mate Desktops [PARROT-OS/LINUX-MINT/UBUNTU] (Wares for all [MATE DE] Desktops"
+    CHOICE_BLOCK_INDICATOR="1.  Mate Desktops [PARROT-OS/LINUX-MINT/UBUNTU] (Wares for all [MATE DE] Desktops"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    #Choose a Specific MATE DE Distro
+    SELECTED_MATE_DE_DISTRO=$(whiptail --title "Select [MATE DE] Distro:" --menu "Select [MATE DE] Distro:" 0 0 3 \
+        1 "Linux Mint [MATE DE]" \
+        2 "Parrot Sec OS [MATE DE]" \
+        3 "UBUNTU [MATE DE]" 3>&1 1>&2 2>&3)
+
+    if [ -z $SELECTED_MATE_DE_DISTRO ]; then
+        echo "USER ABORTED  ..  USER MUST SELECT A [MATE DESKTOP ENVIRONMENT] DISTRO"
+        exit
+    elif [ $SELECTED_MATE_DE_DISTRO -eq 1 ]; then
+        echo "SELECTED LINUX MINT - [MATE DE]"
+    elif [ $SELECTED_MATE_DE_DISTRO -eq 2 ]; then
+        echo ""
+    elif [ $SELECTED_MATE_DE_DISTRO -eq 3 ]; then
+        echo ""
+    fi
+
+    source ./WARES-LIB/LINUX-GNOME-AND-MATE-DE-LIB/FOR_LINUX_GNOME_AND_MATE_DE_LIB_EXT_LIB
+    FUN_WARES_FOR_GNOME_AND_MATE_DE
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_2 {
+
+    echo "2. [LINUX MINT MATE SPECIFIC !! FULL SEND] Executes options 1 3 4"
+    CHOICE_BLOCK_INDICATOR="2. [LINUX MINT MATE SPECIFIC !! FULL SEND] Executes options 1 3 4"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    FUN_MAIN_CHOICE_1
+    FUN_MAIN_CHOICE_3
+    FUN_MAIN_CHOICE_4
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_3 {
+
+    echo " 3.  Manually installed Wares Only  [.DEB Files Only] "
+    CHOICE_BLOCK_INDICATOR="3.  Manually installed Wares Only  [.DEB Files Only]"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    #check if the UBUNTU RELEASE VERSION has been selected already..(checks if _FUN_CHOOSE_UBUNTU_VERSION function has been run previously) &
+    #Runs the _FUN_CHOOSE_UBUNTU_VERSION function if it has been run previously
+    if [ -z $UBUNTU_VERSION ]; then
+
+        _FUN_CHOOSE_UBUNTU_VERSION
+
+    fi
+
+    if [ $UBUNTU_VERSION -eq 1 ]; then
+
+        #install .DEB files for Chosen ubuntu version 1
+        PKG_NAME=" install [.DEB files]"
+        FUN_VERBOSE_INSTALLING
+        sudo apt install -y ./AUTO-INSTALLS-FILES/WARES/MANUAL-INSTALL-WARES/DEB-FILES/UBUNTU_VERSION_CHOICE_1/*.deb
+
+    elif [ $UBUNTU_VERSION -eq 2 ]; then
+
+        #install .DEB files for Chosen ubuntu version 2
+        PKG_NAME=" install [.DEB files]"
+        FUN_VERBOSE_INSTALLING
+        sudo apt install -y ./AUTO-INSTALLS-FILES/WARES/MANUAL-INSTALL-WARES/DEB-FILES/UBUNTU_VERSION_CHOICE_2/*.deb
+
+    fi
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_4 {
+    # [MATE Desktops] COPY MATE PANEL SETTING & APP CONFIGS TO /ETC/SKEL {Depending On Chosen MATE DE Distro}
+    #dependency p7zip-full  this code block depends on p7zip-full , check if installed and install it if not already
+    if ! apt list --installed p7zip-full 2>/dev/null | grep -w p7zip-full >/dev/null; then
+        echo "dependency p7zip-full is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y p7zip-full
+        if ! apt list --installed p7zip 2>/dev/null | grep -w p7zip-full >/dev/null; then
+            echo "Posibly didn't install dependency p7zip-full .. exiting"
+            exit
+        fi
+    fi
+
+    if [ -z $SELECTED_MATE_DE_DISTRO ]; then
+
+        SELECTED_MATE_DE_DISTRO=$(whiptail --title "Select [MATE DE] Distro:" --menu "Select [MATE DE] Distro:" 0 0 3 \
+            1 "Linux Mint [MATE DE]" \
+            2 "Parrot Sec OS [MATE DE]" \
+            3 "UBUNTU [MATE DE]" 3>&1 1>&2 2>&3)
+
+        if [ -z $SELECTED_MATE_DE_DISTRO ]; then
+            echo "USER ABORTED  ..  USER MUST SELECT A [MATE DESKTOP ENVIRONMENT] DISTRO"
+            exit
+        elif [ $SELECTED_MATE_DE_DISTRO -eq 1 ]; then
+            echo "SELECTED LINUX MINT - [MATE DE]"
+        elif [ $SELECTED_MATE_DE_DISTRO -eq 2 ]; then
+            echo ""
+        elif [ $SELECTED_MATE_DE_DISTRO -eq 3 ]; then
+            echo ""
+        fi
+
+    fi
+
+    echo "4. - [MATE Desktops] COPY MATE PANEL SETTING & APP CONFIGS TO /ETC/SKEL {Depending On Chosen MATE DE Distro}"
+    CHOICE_BLOCK_INDICATOR="4.- [MATE Desktops] COPY MATE PANEL SETTING & APP CONFIGS TO /ETC/SKEL {Depending On Chosen MATE DE Distro}"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    if [ $SELECTED_MATE_DE_DISTRO -eq 1 ]; then
+        #chosen linux mint mate DE
+        # COPY MATE PANEL SETTING & APP CONFIGS TO /ETC/SKEL       # !! the panel settings file lives in ~/.config/dconf/user
+        sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/*
+        7z x ./AUTO-INSTALLS-FILES/THEMES-N-DOTFILES/theme-templates-desktop-settings-mint-mate-thinkpad-460s.7z -oAUTO-INSTALLS-FILES/WORKER-TEMP
+
+        sudo cp -R ./AUTO-INSTALLS-FILES/WORKER-TEMP/Templates /etc/skel
+        sudo mkdir -p /etc/skel/.config/dconf/
+        sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/user /etc/skel/.config/dconf/
+        sudo mv ./AUTO-INSTALLS-FILES/WORKER-TEMP/parrot.bashrc ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc
+        sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc /etc/skel && cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc /root
+    fi
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_5 {
+    #installs wares & other specific configs/settings for vanilla ubuntu gnome desktop
+    echo "5. [UBUNTU'S SPECIFIC] (Wares for Ubuntu Vanilla [GNOME DE])"
+    CHOICE_BLOCK_INDICATOR="5. [UBUNTU'S SPECIFIC]  (Wares for Ubuntu Vanilla [GNOME DE])"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    _FUN_CHOOSE_UBUNTU_VERSION
+
+    source ./WARES-LIB/LINUX-GNOME-AND-MATE-DE-LIB/FOR_LINUX_GNOME_AND_MATE_DE_LIB_EXT_LIB
+    FUN_WARES_FOR_GNOME_AND_MATE_DE
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_6 {
+
+    echo "6. [UBUNTU VANILLA SPECIFIC !!! Full  Send !!!] Executes options 5, 3, 7"
+    CHOICE_BLOCK_INDICATOR="6. [UBUNTU VANILLA SPECIFIC !!! Full  Send !!!] Executes options 5, 3, 7"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    FUN_MAIN_CHOICE_5
+    FUN_MAIN_CHOICE_3
+    FUN_MAIN_CHOICE_7
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_7 {
+    cd $CD_DIRNAME || exit
+    #dependency (p7zip-full or 7zip)  this code block depends on p7zip-full or 7zip, check if installed and install it if not already
+    if ! apt list --installed 7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+        echo "dependency 7zip is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y 7zip
+        if ! apt list --installed 7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+            echo "Posibly didn't install dependency 7zip .. exiting"
+            exit
+        fi
+    fi
+
+    echo "7.- [UBUNTU VANILLA SPECIFIC] COPY GNOME PANEL SETTING & APP CONFIGS TO /ETC/SKEL"
+    CHOICE_BLOCK_INDICATOR="7.- [UBUNTU VANILLA SPECIFIC] COPY GNOME PANEL SETTING & APP CONFIGS TO /ETC/SKEL"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    #Sanity check UBUNTU VERSION Corresponds Correctly to the current ubuntu Release version
+    __RELEASE_VERSION=$(cat /etc/lsb-release | grep "DISTRIB_RELEASE=" | sed s/DISTRIB_RELEASE=// | tr -d '[:space:]')
+
+    if [[ $__RELEASE_VERSION == *"22.04"* ]]; then
+        echo -e "Current Running UBUNTU version is [22.04] \n"
+        ####### if ubuntu release version is [22.04]
+        ### COPY PANEL SETTING & APP CONFIGS TO /ETC/SKEL & to $HOME/config/dconf/
+        sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+        7z x ./AUTO-INSTALLS-FILES/THEMES-N-DOTFILES/ubuntu-22.04-vanilla-panel-settings-theme-configs.7z -oAUTO-INSTALLS-FILES/WORKER-TEMP
+        #copy the Templates folder
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Templates /etc/skel
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Templates $HOME
+        #copy the dconf user settings
+        sudo mkdir -p /etc/skel/.config/dconf/
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/user /etc/skel/.config/dconf
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/user $HOME/.config/dconf
+        #rename the .bashrc file & copy it
+        sudo mv ./AUTO-INSTALLS-FILES/WORKER-TEMP/parrot.bashrc ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc /etc/skel
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc /root
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc $HOME
+
+        #do nothing when laptop lid is closed gnome-tweak
+        sudo mkdir /etc/skel/.config/autostart
+        sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/ignore-lid-switch-tweak.desktop /etc/skel/.config/autostart #to do nothing when laptop lid is closed gnome-tweak
+        sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+
+        #to do nothing when laptop lid is closed
+        sudo sed -i s/^HandleLidSwitch=ignore//g /etc/systemd/logind.conf
+        sudo sed -i s/^HandleLidSwitchExternalPower=ignore//g /etc/systemd/logind.conf
+
+        echo "HandleLidSwitch=ignore" | sudo tee -a /etc/systemd/logind.conf
+        echo "HandleLidSwitchExternalPower=ignore" | sudo tee -a /etc/systemd/logind.conf
+
+    fi
+
+    if [[ $__RELEASE_VERSION == *"24.10"* ]] || [[ $__RELEASE_VERSION == *"24.04"* ]]; then
+        echo -e "Current Running UBUNTU version is [24.10] \n"
+        ####### if ubuntu release version is [24.10]
+        ### COPY PANEL SETTING & APP CONFIGS TO /ETC/SKEL & to $HOME/config/dconf/
+        sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+        7z x ./AUTO-INSTALLS-FILES/THEMES-N-DOTFILES/ubuntu-24.04-vanilla-panel-settings-theme-configs.7z -oAUTO-INSTALLS-FILES/WORKER-TEMP
+
+        ### COPY PANEL SETTING & APP CONFIGS TO /ETC/SKEL & to $HOME/config/dconf/
+        #copy the Templates folder
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Templates /etc/skel
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Templates $HOME
+        #copy the dconf user settings
+        sudo mkdir -p /etc/skel/.config/dconf/
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/user /etc/skel/.config/dconf
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/user $HOME/.config/dconf
+        #rename the .bashrc file & copy it
+        sudo mv ./AUTO-INSTALLS-FILES/WORKER-TEMP/parrot.bashrc ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc /etc/skel
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc /root
+        sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc $HOME
+
+        #to do nothing when laptop lid is closed
+        sudo sed -i s/^HandleLidSwitch=ignore//g /etc/systemd/logind.conf
+        sudo sed -i s/^HandleLidSwitchExternalPower=ignore//g /etc/systemd/logind.conf
+
+        echo "HandleLidSwitch=ignore" | sudo tee -a /etc/systemd/logind.conf
+        echo "HandleLidSwitchExternalPower=ignore" | sudo tee -a /etc/systemd/logind.conf
+
+    fi
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_8 {
+    echo "8. [ DEBIAN ] (Wares for DEBIAN [GNOME DE])"
+    CHOICE_BLOCK_INDICATOR="8. [ DEBIAN ] (Wares for DEBIAN [GNOME DE])"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    source ./WARES-LIB/LINUX-GNOME-AND-MATE-DE-LIB/FOR_LINUX_GNOME_AND_MATE_DE_LIB_EXT_LIB
+    FUN_WARES_FOR_GNOME_AND_MATE_DE
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_9 {
+
+    echo "9  INSTALL ALL GAMING CONSOLES ONLY "
+    CHOICE_BLOCK_INDICATOR="9  INSTALL ALL GAMING CONSOLES ONLY"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    #dependency p7zip-full  this code block [INSTALL ALL GAMING CONSOLES ONLY] depends on p7zip-full , check if installed and install it if not already
+    if ! apt list --installed p7zip-full 2>/dev/null | grep -w p7zip-full >/dev/null; then
+        echo "dependency p7zip-full is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y p7zip-full
+        if ! apt list --installed p7zip 2>/dev/null | grep -w p7zip-full >/dev/null; then
+            echo "Posibly didn't install dependency p7zip-full .. exiting"
+            exit
+        fi
+    fi
+
+    ###······································································································
+    ###······································································································
+    ## Install flatpak
+    BANNER_PKG_NAME_MSG="flatpak"
+    PKG_NAME="flatpak"
+    FUN_VERBOSE_INSTALLING
+    sudo apt install flatpak -y
+    sudo apt install gnome-software-plugin-flatpak -y                                            #makes it possible to install apps without needing the command line
+    sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo #add flathub repository
+    FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+    ## and Restart the System to complete flatpak intall
+    #flatpak install flathub org.freedesktop.Platform.openh264/x86_64/19.08 -y #for obs studio and kdenlive MAYBE? test
+    #flatpak install flathub org.freedesktop.Platform.openh264/x86_64/2.0 -y #for obs studio and kdenlive MAYBE? test
+    ###······································································································
+    ###······································································································
+
+    ###······································································································
+    # installing retroarch via flatpak is the preferred way; gives better results
+    ###······································································································
+    ## Install retroarch via flatpak
+    BANNER_PKG_NAME_MSG="Retroarch Via Flatpak"
+    FUN_VERBOSE_INSTALLING
+    flatpak install flathub org.libretro.RetroArch -y
+    flatpak install flathub runtime/org.freedesktop.Platform.openh264/x86_64/2.0 -y
+
+    # To manually installRetroArch cores(.so files) the directory for the cores will depend on how RetroArch was installed
+    # If it's as a flatpak, config is in  ~/.var/app/org.libretro.RetroArch/config/retroarch/cores
+    # If its as a snap in ~/snap.
+    # If it's from a repo, config files for apps are usually in ~/.config or ~/.local/share
+    #  Check your core directory, in Settings -> Directory -> cores
+
+    # manually install cores .so files
+    sudo mkdir -p /etc/skel/.var/app/org.libretro.RetroArch/config/retroarch/cores
+    sudo mkdir -p $HOME/.var/app/org.libretro.RetroArch/config/retroarch/cores
+    sudo chmod -R 777 /etc/skel/.var
+    sudo chmod -R 777 $HOME/.var
+    sudo cp ./AUTO-INSTALLS-FILES/GAMING/RETROARCH-CORES/* /etc/skel/.var/app/org.libretro.RetroArch/config/retroarch/cores
+    sudo cp -rf ./AUTO-INSTALLS-FILES/GAMING/RETROARCH-CORES/* "$HOME"/.var/app/org.libretro.RetroArch/config/retroarch/cores
+    ###······································································································
+    ###······································································································
+
+    #####@@@$%^&*&^%^&^^&^%$
+    ##################################################### INSTALL [PPSSPP PSP EMULATOR VIA FLATPAK]
+    #............ install flatpak
+    PKG_NAME="Flatpak"
+    FUN_VERBOSE_INSTALLING
+    sudo apt install flatpak -y
+    sudo apt install gnome-software-plugin-flatpak -y                                            #makes it possible to install apps without needing the command line
+    sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo #add flathub repository
+
+    #....... [PSP EMULATOR VIA FLATPAk] ppsspp
+    BANNER_PKG_NAME_MSG=" ppsspp psp emulator  [installed via FLATPAK]"
+    FUN_VERBOSE_INSTALLING
+    sudo apt install -y flatpak
+    flatpak install https://dl.flathub.org/repo/appstream/org.ppsspp.PPSSPP.flatpakref -y
+    #......................
+    ##################################################### END INSTALL [PPSSPP PSP EMULATOR VIA FLATPAK]
+    #####@@@$%^&*&^%^&^^&^%$
+
+    #####@@@$%^&*&^%^&^^&^%$
+    ##################################################### INSTALL [XBOX EMULATOR]
+    #.... XBOX EMULATOR... XEMU
+    BANNER_PKG_NAME_MSG=" xemu  xbox emulator"
+    FUN_VERBOSE_INSTALLING
+    sudo add-apt-repository ppa:mborgerson/xemu -y
+    sudo apt update
+    sudo apt install -y xemu
+    # xemu copy mcpx, bios and qcow.hdd.img to xemu folder to be used (could be to any dir but i choose this one)
+    sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+    7z x ./AUTO-INSTALLS-FILES/GAMING/XEMU_XBOX_FILES.zip -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+
+    sudo mkdir -p /etc/skel/.local/share/xemu/xemu/
+
+    sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/BIOS/Complex_4627v1.03.bin /etc/skel/.local/share/xemu/xemu/
+    sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/'Boot ROM image'/mcpx_1.0.bin /etc/skel/.local/share/xemu/xemu/
+    sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/'Pre-built Xbox HDD image'/xbox_hdd.qcow2 /etc/skel/.local/share/xemu/xemu/
+
+    sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/BIOS/Complex_4627v1.03.bin $HOME/.local/share/xemu/xemu/
+    sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/'Boot ROM image'/mcpx_1.0.bin $HOME/.local/share/xemu/xemu/
+    sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/'Pre-built Xbox HDD image'/xbox_hdd.qcow2 $HOME/.local/share/xemu/xemu/
+
+    sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+    #...........................................
+    #####################################################END INSTALL [XBOX EMULATOR]
+    #####@@@$%^&*&^%^&^^&^%$
+
+    ####@@@$%^&*&^%^&^^&^%$
+    ################################################################################
+    #...................................install RYUJINX Nintendo Switch emulator INSTALL [RYUJINX EMULATOR VIA FLATPAK]
+    # install flatpak
+
+    BANNER_PKG_NAME_MSG="flatpak"
+    PKG_NAME="flatpak"
+    FUN_VERBOSE_INSTALLING
+    sudo apt install flatpak -y
+    sudo apt install gnome-software-plugin-flatpak -y                                            #makes it possible to install apps without needing the command line
+    sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo #add flathub repository
+    FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+    #install ryujinx emulator via flatpak
+    BANNER_PKG_NAME_MSG="Ryujinx Nintendo Switch Emulator"
+    FUN_VERBOSE_INSTALLING
+    flatpak install flathub io.github.ryubing.Ryujinx -y
+
+    #add the nintendo switch firmware folder & prod keys files to the ryujinx folder: ~/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system & /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+    sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+    sudo mkdir -p /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+    sudo mkdir -p $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+    sudo chmod -R 777 /etc/skel/.var
+    sudo chmod -R 777 $HOME/.var
+    7z x ./AUTO-INSTALLS-FILES/GAMING/Nintendo-Switch-ProdKeys.net-v19.0.1.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+    7z x ./AUTO-INSTALLS-FILES/GAMING/Nintendo-Switch-Firmware_19.0.1.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+
+    #copy the firmware folder & prod keys files to the ryujinx folder: ~/.var/app/io.github.ryujinx.Ryujinx/config/Ryujinx & /etc/skel/.var/app/io.github.ryujinx.Ryujinx/config/Ryujinx
+    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-ProdKeys.net-v19.0.1/* /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-ProdKeys.net-v19.0.1/* $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+
+    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-Firmware_19.0.1 /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-Firmware_19.0.1 $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+
+    sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+    ################################################################################END INSTALL [RYUJINX EMULATOR VIA FLATPAK]
+    ####@@@$%^&*&^%^&^^&^%$
+
+    #...........................................
+    ################################################################################END INSTALL [RYUJINX EMULATOR VIA FLATPAK]
+    #####@@@$%^&*&^%^&^^&^%$
+
+    #...................................install dolphin emulator INSTALL [DOLPHIN EMULATOR FROM SOURCE]
+    #...................................install dolphin emulator dependencies [DOLPHIN EMULATOR FROM SOURCE]
+    BANNER_PKG_NAME_MSG=" dolphin emulator"
+    FUN_VERBOSE_INSTALLING
+    # git config settings for unstable slow internet connection/satelite/ DSL Broadband - >>> low signal strength, low stability, and low speed.
+    git config --global http.postBuffer 524288000 # Set buffer size to 500 MB
+    git config --global http.lowSpeedLimit 0      # Disable low speed limit
+    git config --global http.lowSpeedTime 999999  # Set low speed time limit to a large value
+    # git config --global core.compression 0        # Dont remotley compress objects
+
+    sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+    sudo apt install -y --no-install-recommends ca-certificates qt6-base-dev qt6-base-private-dev libqt6svg6-dev git cmake make gcc g++ pkg-config libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libxi-dev libxrandr-dev libudev-dev libevdev-dev libsfml-dev libminiupnpc-dev libmbedtls-dev libcurl4-openssl-dev libhidapi-dev libsystemd-dev libbluetooth-dev libasound2-dev libpulse-dev libpugixml-dev libbz2-dev libzstd-dev liblzo2-dev libpng-dev libusb-1.0-0-dev gettext
+    git clone https://github.com/dolphin-emu/dolphin.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/dolphin-emu
+    cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/dolphin-emu || exit
+    git submodule update --init --recursive
+    mkdir Build && cd Build
+    cmake ..
+    make -j$(nproc)
+    sudo make install
+    cd $CD_DIRNAME || exit
+    sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+    ############################## END OF INSTALL [DOLPHIN EMULATOR FROM SOURCE]
+    ###################################################################################################
+    ####@@@$%^&*&^%^&^^&^%$
+
+    # #####@@@$%^&*&^%^&^^&^%$
+    # ##################################################### INSTALL [DOLPHIN EMULATOR VIA FLATPAK]
+    # #.................................. Install Dolphin Emulator Via FLATPAK
+    # # first install flatpak
+    # PKG_NAME="Flatpak"
+    # FUN_VERBOSE_INSTALLING
+    # sudo apt install flatpak -y
+    # sudo apt install gnome-software-plugin-flatpak -y                                            #makes it possible to install apps without needing the command line
+    # sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo #add flathub repository
+
+    # PKG_NAME="DOLPHIN EMULATOR [VIA FLATPAK]"
+    # FUN_VERBOSE_INSTALLING
+    # sudo flatpak install flathub org.DolphinEmu.dolphin-emu -y
+
+    # ###################################################### END INSTALL [DOLPHIN EMULATOR VIA FLATPAK]
+    # #####@@@$%^&*&^%^&^^&^%$
+
+    ####@@@$%^&*&^%^&^^&^%$
+    ################################################# INSTALL [YUZU EMULATOR FROM SOURCE]  YUZU EMULATOR NO LONGER EXISTS....R.I.P  A Nintendo switch emulator alternative will be implemented someday...
+    ## install yuzu emulator.......................................................................
+    # PKG_NAME=" Install  yuzu emulator"
+    # FUN_VERBOSE_INSTALLING
+    # sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+    # sudo apt install -y autoconf cmake g++-11 gcc-11 git glslang-tools libasound2 libboost-context-dev libglu1-mesa-dev libhidapi-dev libpulse-dev libtool libudev-dev libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxext-dev libxkbcommon-x11-0 mesa-common-dev nasm ninja-build qtbase5-dev qtbase5-private-dev qtwebengine5-dev qtmultimedia5-dev libmbedtls-dev catch2 libfmt-dev liblz4-dev nlohmann-json3-dev libzstd-dev libssl-dev libavfilter-dev libavcodec-dev libswscale-dev
+    # git clone --recursive https://github.com/yuzu-emu/yuzu ./AUTO-INSTALLS-FILES/WORKER-TEMP/yuzu
+    # cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/yuzu || exit
+    # mkdir build && cd build || exit
+    # cmake .. -GNinja -DYUZU_USE_BUNDLED_VCPKG=ON -DYUZU_TESTS=OFF
+    # sudo ninja
+    # sudo ninja install
+    # cd $CD_DIRNAME || exit
+    # sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+    # ########
+    # # yuzu copy firmware and keys to its respective locations
+
+    # sudo mkdir -p /etc/skel/.local/share/yuzu/keys
+    # sudo mkdir -p /etc/skel/.local/share/yuzu/nand/system/Contents/registered
+
+    # sudo 7z x ./AUTO-INSTALLS-FILES/GAMING/*keys*.7z -o/etc/skel/.local/share/yuzu/keys
+    # sudo 7z x ./AUTO-INSTALLS-FILES/GAMING/*firmware*.7z -o/etc/skel/.local/share/yuzu/nand/system/Contents/registered
+    ## ..............................................................................................
+    ########################################################################## END OF INSTALL [YUZU EMULATOR FROM SOURCE]
+    ####@@@$%^&*&^%^&^^&^%$
+
+    # #####@@@$%^&*&^%^&^^&^%$
+    # ##################################################### INSTALL [YUZU EMULATOR VIA FLATPAK]
+    # #.................................. Install yuzu Emulator Via FLATPAK
+    # # first install flatpak
+    # PKG_NAME="Flatpak"
+    # FUN_VERBOSE_INSTALLING
+    # sudo apt install flatpak -y
+    # sudo apt install gnome-software-plugin-flatpak -y                                            #makes it possible to install apps without needing the command line
+    # sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo #add flathub repository
+
+    # PKG_NAME="YUZU EMULATOR [VIA FLATPAK]"
+    # FUN_VERBOSE_INSTALLING
+    # sudo flatpak install flathub org.yuzu_emu.yuzu -y
+
+    # # yuzu copy firmware and keys to its respective locations Directory locations Respective to Being Installed Via Flatpak**
+    # sudo mkdir -p /etc/skel/.var/app/org.yuzu_emu.yuzu/data/yuzu/keys
+    # sudo mkdir -p /etc/skel/.var/app/org.yuzu_emu.yuzu/data/yuzu/nand/system/Contents/registered
+
+    # sudo 7z x ./AUTO-INSTALLS-FILES/GAMING/*keys*.7z -o/etc/skel/.var/app/org.yuzu_emu.yuzu/data/yuzu/keys
+    # sudo 7z x ./AUTO-INSTALLS-FILES/GAMING/*firmware*.7z -o/etc/skel/.var/app/org.yuzu_emu.yuzu/data/yuzu/nand/system/Contents/registered
+    # ###################################################### END INSTALL [YUZU EMULATOR VIA FLATPAK]
+    # #####@@@$%^&*&^%^&^^&^%$
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_10 {
+
+    echo " 10  INSTALL [INTEL OPENCL RUNTIME]"
+    CHOICE_BLOCK_INDICATOR="10  INSTALL [INTEL OPENCL RUNTIME]"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    #install opencl
+    PKG_NAME="install  [INTEL OPENCL]"
+    FUN_VERBOSE_INSTALLING
+
+    # sudo dpkg -i ./AUTO-INSTALLS-FILES/WARES/MANUAL-INSTALL-WARES/INTEL-OPENCL-NEO/*.deb
+    sudo apt-get install -y intel-opencl-icd
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_11 {
+
+    echo "11. [UBUNTU'S SPECIFIC] COPY_APT_SOURCES ONLY"
+    CHOICE_BLOCK_INDICATOR="11. [UBUNTU'S SPECIFIC] COPY_APT_SOURCES ONLY"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    UBUNTU_VERSION=$(whiptail --title "CHOOSE UBUNTU VERSION" --menu "CHOOSE UBUNTU VERSION" 0 0 3 1 "UBUNTU [LTS] 22.04" 2 "UBUNTU [OTHER] 24.10" 3 "[! EXIT !]" 3>&1 1>&2 2>&3)
+
+    echo "chosen $UBUNTU_VERSION"
+
+    if [ -z $UBUNTU_VERSION ]; then
+        exit
+    elif [ $UBUNTU_VERSION -eq 1 ]; then
+        #copy apt sources to the /etc/apt/sources.list based on chosen ubuntu version
+        FUN_UBUNTU_DEFINE_APT_SOURCES_VERSION_LTS
+    elif [ $UBUNTU_VERSION -eq 2 ]; then
+        #Ubuntu sources [Since Version 24.10] have moved to the /etc/apt/sources.list.d/ubuntu.sources file, which uses the deb822 format. Use deb822-formatted .sources files
+        echo "ubuntu version 24.10"
+    elif [ $UBUNTU_VERSION -eq 3 ]; then
+        exit
+    fi
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_12 {
+
+    echo "12. [UBUNTU'S SPECIFIC] INSTALL GAMING CONSOLES INDIVIDUALLY"
+    CHOICE_BLOCK_INDICATOR="12. [UBUNTU'S SPECIFIC] INSTALL GAMING CONSOLES INDIVIDUALLY"
+    FUN_CHOICE_BLOCK_INDICATOR
+
+    GAMING_CONSOLES_CHOICE=$(whiptail --title "CHOOSE UBUNTU VERSION" --checklist "CHOOSE GAMING CONCLOES TO INSTALL" 0 0 5 \
+        1 "[PSP EMULATOR VIA FLATPAk] ppsspp" off \
+        2 "[XBOX EMULATOR] XEMU" off \
+        3 "[NINTENDO SWITCH] Ryujinx Nintendo Switch Emulator" off \
+        4 "[DOLPHIN EMULATOR] Nintendo Gamecube" off \
+        5 "[RETROARCH]" off 3>&1 1>&2 2>&3)
+
+    echo "chosen $GAMING_CONSOLES_CHOICE"
+
+    GAMING_CONSOLES_CHOICE_SANITIZED=$(echo $GAMING_CONSOLES_CHOICE | sed 's/"//g')
+
+    for CHOOSER in $GAMING_CONSOLES_CHOICE_SANITIZED; do
+
+        case $CHOOSER in
+
+        1)
+            #............ install flatpak
+            PKG_NAME="Flatpak"
+            FUN_VERBOSE_INSTALLING
+            sudo apt install flatpak -y
+            sudo apt install gnome-software-plugin-flatpak -y                                            #makes it possible to install apps without needing the command line
+            sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo #add flathub repository
+
+            #....... [PSP EMULATOR VIA FLATPAk] ppsspp
+            BANNER_PKG_NAME_MSG=" ppsspp psp emulator  [installed via FLATPAK]"
+            FUN_VERBOSE_INSTALLING
+            sudo apt install -y flatpak
+            flatpak install https://dl.flathub.org/repo/appstream/org.ppsspp.PPSSPP.flatpakref -y
+
+            ;;
+
+        2)
+            #.... XBOX EMULATOR... XEMU
+            #dependency p7zip-full  this code block depends on p7zip-full , check if installed and install it if not already
+            if ! apt list --installed p7zip-full 2>/dev/null | grep -w p7zip-full >/dev/null; then
+                echo "dependency p7zip-full is NOT installed .. installing"
+                sudo apt update
+                sudo apt install -y p7zip-full
+                if ! apt list --installed p7zip 2>/dev/null | grep -w p7zip-full >/dev/null; then
+                    echo "Posibly didn't install dependency p7zip-full .. exiting"
+                    exit
+                fi
+            fi
+            #.... XBOX EMULATOR... XEMU
+            BANNER_PKG_NAME_MSG=" xemu  xbox emulator"
+            FUN_VERBOSE_INSTALLING
+            sudo add-apt-repository ppa:mborgerson/xemu -y
+            sudo apt update
+            sudo apt install -y xemu
+            # xemu copy mcpx, bios and qcow.hdd.img to xemu folder to be used (could be to any dir but i choose this one)
+            sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+            7z x ./AUTO-INSTALLS-FILES/GAMING/XEMU_XBOX_FILES.zip -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+
+            sudo mkdir -p /etc/skel/.local/share/xemu/xemu/
+
+            sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/BIOS/Complex_4627v1.03.bin /etc/skel/.local/share/xemu/xemu/
+            sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/'Boot ROM image'/mcpx_1.0.bin /etc/skel/.local/share/xemu/xemu/
+            sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/'Pre-built Xbox HDD image'/xbox_hdd.qcow2 /etc/skel/.local/share/xemu/xemu/
+            sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+            ;;
+
+        3)
+            #...................................install RYUJINX Nintendo Switch emulator INSTALL [RYUJINX EMULATOR VIA FLATPAK]
+            # install flatpak
+
+            BANNER_PKG_NAME_MSG="flatpak"
+            PKG_NAME="flatpak"
+            FUN_VERBOSE_INSTALLING
+            sudo apt install flatpak -y
+            sudo apt install gnome-software-plugin-flatpak -y                                            #makes it possible to install apps without needing the command line
+            sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo #add flathub repository
+            FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+
+            #install ryujinx emulator via flatpak
+            BANNER_PKG_NAME_MSG="Ryujinx Nintendo Switch Emulator"
+            FUN_VERBOSE_INSTALLING
+            flatpak install flathub io.github.ryubing.Ryujinx -y
+
+            #add the nintendo switch firmware folder & prod keys files to the ryujinx folder: ~/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system & /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+            sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+            sudo mkdir -p /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+            sudo mkdir -p $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+            sudo chmod -R 777 /etc/skel/.var/app/io.github.ryubing.Ryujinx
+            sudo chmod -R 777 $HOME/.var
+            7z x ./AUTO-INSTALLS-FILES/GAMING/Nintendo-Switch-ProdKeys.net-v19.0.1.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+            7z x ./AUTO-INSTALLS-FILES/GAMING/Nintendo-Switch-Firmware_19.0.1.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+
+            #copy the firmware folder & prod keys files to the ryujinx folder: ~/.var/app/io.github.ryujinx.Ryujinx/config/Ryujinx & /etc/skel/.var/app/io.github.ryujinx.Ryujinx/config/Ryujinx
+            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-ProdKeys.net-v19.0.1/* /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-ProdKeys.net-v19.0.1/* $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+
+            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-Firmware_19.0.1 /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-Firmware_19.0.1 $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+
+            sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+            ################################################################################END INSTALL [RYUJINX EMULATOR VIA FLATPAK]
+            ####@@@$%^&*&^%^&^^&^%$
+
+            ;;
+
+        4)
+            ####@@@$%^&*&^%^&^^&^%$
+            ################################################################################
+            #...................................install dolphin emulator INSTALL [DOLPHIN EMULATOR FROM SOURCE]
+            #...................................install dolphin emulator dependencies [DOLPHIN EMULATOR FROM SOURCE]
+            BANNER_PKG_NAME_MSG=" dolphin emulator"
+            FUN_VERBOSE_INSTALLING
+            # git config settings for unstable slow internet connection/satelite/ DSL Broadband - >>> low signal strength, low stability, and low speed.
+            git config --global http.postBuffer 524288000 # Set buffer size to 500 MB
+            git config --global http.lowSpeedLimit 0      # Disable low speed limit
+            git config --global http.lowSpeedTime 999999  # Set low speed time limit to a large value
+            # git config --global core.compression 0        # Dont remotley compress objects
+
+            sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+            sudo apt install -y --no-install-recommends ca-certificates qt6-base-dev qt6-base-private-dev libqt6svg6-dev git cmake make gcc g++ pkg-config libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libxi-dev libxrandr-dev libudev-dev libevdev-dev libsfml-dev libminiupnpc-dev libmbedtls-dev libcurl4-openssl-dev libhidapi-dev libsystemd-dev libbluetooth-dev libasound2-dev libpulse-dev libpugixml-dev libbz2-dev libzstd-dev liblzo2-dev libpng-dev libusb-1.0-0-dev gettext
+            git clone https://github.com/dolphin-emu/dolphin.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/dolphin-emu
+            cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/dolphin-emu || exit
+            git submodule update --init --recursive
+            mkdir Build && cd Build
+            cmake ..
+            make -j$(nproc)
+            sudo make install
+            cd $CD_DIRNAME || exit
+            sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -r ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+            ############################## END OF INSTALL [DOLPHIN EMULATOR FROM SOURCE]
+            ###################################################################################################
+            ####@@@$%^&*&^%^&^^&^%$
+            ;;
+
+        5)
+            ###······································································································
+            ###······································································································
+            ## Install flatpak
+            BANNER_PKG_NAME_MSG="flatpak"
+            PKG_NAME="flatpak"
+            FUN_VERBOSE_INSTALLING
+            sudo apt install flatpak -y
+            sudo apt install gnome-software-plugin-flatpak -y                                            #makes it possible to install apps without needing the command line
+            sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo #add flathub repository
+            FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+            ## and Restart the System to complete flatpak intall
+            #flatpak install flathub org.freedesktop.Platform.openh264/x86_64/19.08 -y #for obs studio and kdenlive MAYBE? test
+            #flatpak install flathub org.freedesktop.Platform.openh264/x86_64/2.0 -y #for obs studio and kdenlive MAYBE? test
+            ###······································································································
+            ###······································································································
+
+            ###······································································································
+            # installing retroarch via flatpak is the preferred way; gives better results
+            ###······································································································
+            ## Install retroarch via flatpak
+            BANNER_PKG_NAME_MSG="Retroarch Via Flatpak"
+            FUN_VERBOSE_INSTALLING
+            flatpak install flathub org.libretro.RetroArch -y
+            flatpak install flathub runtime/org.freedesktop.Platform.openh264/x86_64/2.0 -y
+
+            # To manually installRetroArch cores(.so files) the directory for the cores will depend on how RetroArch was installed
+            # If it's as a flatpak, config is in  ~/.var/app/org.libretro.RetroArch/config/retroarch/cores
+            # If its as a snap in ~/snap.
+            # If it's from a repo, config files for apps are usually in ~/.config or ~/.local/share
+            #  Check your core directory, in Settings -> Directory -> cores
+
+            # manually install cores .so files
+            sudo mkdir -p /etc/skel/.var/app/org.libretro.RetroArch/config/retroarch/cores
+            sudo mkdir -p $HOME/.var/app/org.libretro.RetroArch/config/retroarch/cores
+            sudo chmod -R 777 /etc/skel/.var
+            sudo chmod -R 777 $HOME/.var
+            sudo cp ./AUTO-INSTALLS-FILES/GAMING/RETROARCH-CORES/* /etc/skel/.var/app/org.libretro.RetroArch/config/retroarch/cores
+            sudo cp -rf ./AUTO-INSTALLS-FILES/GAMING/RETROARCH-CORES/* "$HOME"/.var/app/org.libretro.RetroArch/config/retroarch/cores
+            ###······································································································
+            ###······································································································
+            ;;
+
+        *)
+
+            echo "unknown"
+            ;;
+
+        esac
+
+    done
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+function FUN_MAIN_CHOICE_13 {
+
+    ############### install CUSTOM-SH-SCRIPTS to /bin/CUSTOM-SH-SCRIPTS & /bin  and must add user permissions to it chmod 777
+    PKG_NAME=" install CUSTOM-SH-SCRIPTS to /bin/CUSTOM-SH-SCRIPTS & /bin"
+    FUN_VERBOSE_INSTALLING_NO_APT_UPDATE
+    sudo cp -r $CD_DIRNAME/AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS /bin
+    sudo chmod -R 777 /bin/CUSTOM-SH-SCRIPTS
+
+    sudo sed -i 's|export PATH=$PATH:/bin/CUSTOM-SH-SCRIPTS||g' /etc/profile
+    echo "export PATH=$PATH:/bin/CUSTOM-SH-SCRIPTS" | sudo tee -a /etc/profile
+
+    sudo cp $CD_DIRNAME/AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS/* /bin
+    sudo chmod -R 777 /bin/custom*
+    ######################################
+
+}
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+#functions to cat the ubuntu sources.list
+
+function FUN_UBUNTU_DEFINE_APT_SOURCES_VERSION_LTS {
+
+    cat <<EOF | sudo tee /etc/apt/sources.list
+
+# deb cdrom:[Ubuntu 22.04.4 LTS _Jammy Jellyfish_ - Release amd64 (20240220)]/ jammy main restricted
+
+# See http://help.ubuntu.com/community/UpgradeNotes for how to upgrade to
+# newer versions of the distribution.
+deb http://us.archive.ubuntu.com/ubuntu/ jammy main restricted
+# deb-src http://us.archive.ubuntu.com/ubuntu/ jammy main restricted
+
+## Major bug fix updates produced after the final release of the
+## distribution.
+deb http://us.archive.ubuntu.com/ubuntu/ jammy-updates main restricted
+# deb-src http://us.archive.ubuntu.com/ubuntu/ jammy-updates main restricted
+
+## N.B. software from this repository is ENTIRELY UNSUPPORTED by the Ubuntu
+## team. Also, please note that software in universe WILL NOT receive any
+## review or updates from the Ubuntu security team.
+deb http://us.archive.ubuntu.com/ubuntu/ jammy universe
+# deb-src http://us.archive.ubuntu.com/ubuntu/ jammy universe
+deb http://us.archive.ubuntu.com/ubuntu/ jammy-updates universe
+# deb-src http://us.archive.ubuntu.com/ubuntu/ jammy-updates universe
+
+## N.B. software from this repository is ENTIRELY UNSUPPORTED by the Ubuntu 
+## team, and may not be under a free licence. Please satisfy yourself as to 
+## your rights to use the software. Also, please note that software in 
+## multiverse WILL NOT receive any review or updates from the Ubuntu
+## security team.
+deb http://us.archive.ubuntu.com/ubuntu/ jammy multiverse
+# deb-src http://us.archive.ubuntu.com/ubuntu/ jammy multiverse
+deb http://us.archive.ubuntu.com/ubuntu/ jammy-updates multiverse
+# deb-src http://us.archive.ubuntu.com/ubuntu/ jammy-updates multiverse
+
+## N.B. software from this repository may not have been tested as
+## extensively as that contained in the main release, although it includes
+## newer versions of some applications which may provide useful features.
+## Also, please note that software in backports WILL NOT receive any review
+## or updates from the Ubuntu security team.
+deb http://us.archive.ubuntu.com/ubuntu/ jammy-backports main restricted universe multiverse
+# deb-src http://us.archive.ubuntu.com/ubuntu/ jammy-backports main restricted universe multiverse
+
+deb http://security.ubuntu.com/ubuntu jammy-security main restricted
+# deb-src http://security.ubuntu.com/ubuntu jammy-security main restricted
+deb http://security.ubuntu.com/ubuntu jammy-security universe
+# deb-src http://security.ubuntu.com/ubuntu jammy-security universe
+deb http://security.ubuntu.com/ubuntu jammy-security multiverse
+# deb-src http://security.ubuntu.com/ubuntu jammy-security multiverse
+
+
+EOF
+
+}

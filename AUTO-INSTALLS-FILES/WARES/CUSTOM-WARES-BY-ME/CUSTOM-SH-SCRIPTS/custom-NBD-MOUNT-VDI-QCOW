@@ -1,0 +1,147 @@
+#!/bin/bash
+
+#check dependency qemu-utils is installed and install if not already
+for PACKAGE in qemu-utils; do                                                          # the dependencies needed
+    if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
+        echo "dependency $PACKAGE is NOT installed .. installing"
+        sudo apt update
+        sudo apt install -y $PACKAGE
+
+        if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then #exits if package is not installed even after installation code was executed...something went wrong
+            echo "Posibly didn't install dependency $PACKAGE .. exiting"
+            exit
+        fi
+    fi
+done
+
+sudo modprobe nbd max_part=64
+
+function AVAILABLE_NBD_DEVICES_LIST {
+    # Iterate through the devices nbd0 to nbd15
+    for i in {0..15}; do
+        device="/sys/class/block/nbd$i/size"
+
+        # Check if the device size is 0, indicating it's not in use # note, when declaring a variable with declare inside a function, this makes the variable local within the function. make global (i.e., outside of the function where you defined them)
+        if [ $(cat "$device") -eq 0 ]; then
+            # Dynamically declare and assign the variable
+            declare -g "exists_${i}_status='Available :-)'"
+        else
+            # Dynamically declare and assign the variable # note, when declaring a variable with declare inside a function, this makes the variable local within the function. make global (i.e., outside of the function where you defined them)
+            declare -g "exists_${i}_status='[IN USE]  '"
+        fi
+    done
+}
+AVAILABLE_NBD_DEVICES_LIST
+
+MOUNT_OR_DISCONNECT_NBD_DEVICE=$(whiptail --backtitle " MOUNT OR DISCONNECT ? " --menu "MOUNT DISK IMAGE TO NBD DEVICE OR DISCONNECT A NBD DEVICE ?" 0 0 2 \
+    0 "MOUNT A [VDI] [QCOW2] DISK IMAGE TO NBD " \
+    1 "DISCONNECT A NBD DEVICE" 3>&1 1>&2 2>&3)
+
+#show /dev/ndb* devices
+whiptail --msgbox "$(lsblk -f /dev/nbd*)" 0 0
+
+# F FU UN NC CT TI IO ON N 1 TO CRETE AN NBD DEVICE ### # F FU UN NC CT TI IO ON N 1 TO CRETE AN NBD DEVICE F FU UN NC CT TI IO ON N 1 TO CRETE AN NBD DEVICE ### # F FU UN NC CT TI IO ON N 1 TO CRETE AN NBD DEVICE
+if [ $MOUNT_OR_DISCONNECT_NBD_DEVICE -eq 0 ]; then
+
+    function UNUSED_NBD_DEVICE_NUM_FUNCTION {
+        UNUSED_NBD_DEVICE_NUM=$(whiptail --backtitle "NBD MOUNT VDI / QCOW2 DISK IMAGE FILES" --title "NBD MOUNT VDI / QCOW2 DISK IMAGE FILES" \
+            --menu " Select Unused Network Block Device [nbdXX] " 0 0 15 \
+            0 "nbd0  $exists_0_status" \
+            1 "nbd1  $exists_1_status" \
+            2 "nbd2  $exists_2_status" \
+            3 "nbd3  $exists_3_status" \
+            4 "nbd4  $exists_4_status" \
+            5 "nbd5  $exists_5_status" \
+            6 "nbd6  $exists_6_status" \
+            7 "nbd7  $exists_7_status" \
+            8 "nbd8  $exists_8_status" \
+            9 "nbd9  $exists_9_status" \
+            10 "nbd10  $exists_10_status" \
+            11 "nbd11  $exists_11_status" \
+            12 "nbd12  $exists_12_status" \
+            13 "nbd13  $exists_13_status" \
+            14 "nbd14  $exists_14_status" \
+            15 "nbd15  $exists_15_status" 3>&1 1>&2 2>&3)
+    }
+
+    UNUSED_NBD_DEVICE_NUM_FUNCTION
+
+    if [ -z $UNUSED_NBD_DEVICE_NUM ]; then
+        exit
+    elif [ $(cat /sys/class/block/nbd$UNUSED_NBD_DEVICE_NUM/size) -ne 0 ]; then
+        whiptail --msgbox " WARNING: Device /dev/nbd$UNUSED_NBD_DEVICE_NUM IS IN USE !!!!   Will not continue with this device.... [!! EXITING !!]" 0 0
+        exit
+
+    fi
+
+    whiptail --msgbox " selected  /dev/nbd$UNUSED_NBD_DEVICE_NUM " 0 0
+
+    IMAGE_FILE_PATH=$(whiptail --title "Input  [VDI / QCOW2] Image File Absolute Path " --inputbox "Input  [VDI / QCOW2] Image File Absolute Path" 0 0 3>&1 1>&2 2>&3)
+
+    if [ -z $IMAGE_FILE_PATH ]; then
+        exit
+    fi
+
+    echo " RUNNING :::: sudo qemu-nbd --connect=/dev/nbd$UNUSED_NBD_DEVICE_NUM $IMAGE_FILE_PATH "
+    echo " RUNNING :::: sudo qemu-nbd --connect=/dev/nbd$UNUSED_NBD_DEVICE_NUM $IMAGE_FILE_PATH "
+    echo " RUNNING :::: sudo qemu-nbd --connect=/dev/nbd$UNUSED_NBD_DEVICE_NUM $IMAGE_FILE_PATH "
+
+    sudo qemu-nbd --connect=/dev/nbd"$UNUSED_NBD_DEVICE_NUM" "$IMAGE_FILE_PATH"
+
+fi # F FU UN NC CT TI IO ON N 1 TO CRETE AN NBD DEVICE ### E  #!!!@!!@! E EN ND DI IN NG GING
+
+########################
+################################################
+################### SEPERATOR  .. DISCONNECT NBD DEVICE CODE AHEAD #############################################################################
+############################################################################################################################################################
+
+if [ $MOUNT_OR_DISCONNECT_NBD_DEVICE -eq 1 ]; then
+
+    function IN_USE_NBD_DEVICE_NUM_FUNCTION {
+        IN_USE_NBD_DEVICE_NUM=$(whiptail --backtitle "[[ DISCONNECT ]] NBD  DEVICE" --title "[[ DISCONNECT ]] NBD  DEVICE" \
+            --menu " [[DISCONNECT]] Select nbd device [nbdXX] To [[DISCONNECT]] " 0 0 15 \
+            0 "nbd0  $exists_0_status" \
+            1 "nbd1  $exists_1_status" \
+            2 "nbd2  $exists_2_status" \
+            3 "nbd3  $exists_3_status" \
+            4 "nbd4  $exists_4_status" \
+            5 "nbd5  $exists_5_status" \
+            6 "nbd6  $exists_6_status" \
+            7 "nbd7  $exists_7_status" \
+            8 "nbd8  $exists_8_status" \
+            9 "nbd9  $exists_9_status" \
+            10 "nbd10  $exists_10_status" \
+            11 "nbd11  $exists_11_status" \
+            12 "nbd12  $exists_12_status" \
+            13 "nbd13  $exists_13_status" \
+            14 "nbd14  $exists_14_status" \
+            15 "nbd15  $exists_15_status" 3>&1 1>&2 2>&3)
+    }
+
+    IN_USE_NBD_DEVICE_NUM_FUNCTION
+
+fi
+
+if [ -z $IN_USE_NBD_DEVICE_NUM ]; then
+    exit
+
+fi
+
+whiptail --title "selected  /dev/nbd$IN_USE_NBD_DEVICE_NUM" --msgbox " selected  /dev/nbd$IN_USE_NBD_DEVICE_NUM " 0 0
+
+if whiptail --yesno " WARNING: Device /dev/nbd$IN_USE_NBD_DEVICE_NUM !!!!   Will be [[DISCONECTED]] \n Continue ?" 0 0; then
+
+    echo "RUNNING ::::: sudo qemu-nbd --disconnect /dev/nbd$IN_USE_NBD_DEVICE_NUM"
+    echo "RUNNING ::::: sudo qemu-nbd --disconnect /dev/nbd$IN_USE_NBD_DEVICE_NUM"
+    echo ""
+
+    sudo qemu-nbd --disconnect /dev/nbd$IN_USE_NBD_DEVICE_NUM
+
+    echo -e "\n\n"
+    echo "RUNNING ::::: sudo umount /dev/nbd""$IN_USE_NBD_DEVICE_NUM""p*"
+    echo "RUNNING ::::: sudo umount /dev/nbd""$IN_USE_NBD_DEVICE_NUM""p*"
+    echo ""
+
+    sudo umount /dev/nbd"$IN_USE_NBD_DEVICE_NUM"p*
+
+fi

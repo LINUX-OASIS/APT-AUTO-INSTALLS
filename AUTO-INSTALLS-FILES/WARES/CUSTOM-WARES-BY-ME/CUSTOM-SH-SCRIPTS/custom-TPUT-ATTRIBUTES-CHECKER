@@ -1,0 +1,41 @@
+#!/bin/bash
+
+if whiptail --yesno " Add  tput ATTRIBUTES ??" 0 0 3>&1 1>&2 2>&3; then
+
+    ATTRIBUTES=$(whiptail --separate-output --checklist "input tput attributes to include  for displaying" 0 0 7 \
+        blink "blinking text" off \
+        bold "bold text" off \
+        smul "Start Underlined text" off \
+        rmul "End underlined text" off \
+        rev "Start reverse video" off \
+        invis "Start invisible text" off \
+        smso "Start Standout mode" off \
+        rmso "end Standout mode" off 3>&1 1>&2 2>&3)
+
+    if [ -z "$ATTRIBUTES" ]; then
+        echo " no attributes selected ....... exiting"
+        exit
+    fi
+
+    for key in $ATTRIBUTES; do
+
+        tput $key
+        echo "RUNNING :::: tput $key"
+        echo "EXAMPLE::::: tput $key"
+        echo TESTERTESTERTESTERTESTERTESTERTESTERTESTER
+        echo TESTERTESTERTESTERTESTERTESTERTESTERTESTER
+        echo TESTERTESTERTESTERTESTERTESTERTESTERTESTER
+        echo TESTERTESTERTESTERTESTERTESTERTESTERTESTER
+        echo TESTERTESTERTESTERTESTERTESTERTESTERTESTER
+        echo TESTERTESTERTESTERTESTERTESTERTESTERTESTER
+        echo TESTERTESTERTESTERTESTERTESTERTESTERTESTER
+        echo TESTERTESTERTESTERTESTERTESTERTESTERTESTER
+        echo -e "\n"
+        tput sgr0
+    done
+
+else
+    echo "Selected No, exitting"
+    exit
+
+fi
