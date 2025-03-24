@@ -171,6 +171,13 @@ EOF
 
         # Final message
         echo -e "ThinkPad Fan Speed Control: [${_BOLD_WHITE_BLUE_BACKGROUND_ESC_CODE} level $_FAN_SPEED_THINKPAD_SANITIZED ${_NC_ESC_CODE}]"
+
+        # if file /proc/acpi/ibm/fan does not exist, then report it, advise that a reboot is needed and exit
+        if [ ! -f /proc/acpi/ibm/fan ]; then
+            echo "ERROR: /proc/acpi/ibm/fan does not exist. You must reboot your computer for the changes to take effect."
+            read -p "Press ENTER to continue ::"
+        fi
+
         echo "ThinkPad Fan Speed Control: Complete. :D :D :D"
 
     # END OF SCRIPT
