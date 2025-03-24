@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Checks for package/dependencies installed status and installs them if not already installed
-for PACKAGE in samba qrencode fim zbar-tools; do # the dependencies needed
+for PACKAGE in samba qrencode fim zbar-tools; do                                     # the dependencies needed
   if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
     echo "dependency $PACKAGE is NOT installed .. installing"
     sudo apt update
@@ -141,7 +141,9 @@ $INPUT_PASSWORD
 EOF
 
   sudo ufw allow samba
-  sudo systemctl restart smbd
+  sudo smbcontrol all reload-config
+  # by restarting the service, any curent file transfers are exited / interrupted & failed: so we use: smbcontrol all reload-config
+  # sudo systemctl restart smbd
 
   # CREATE INFO FILES FOR THE SAMBA SHARE INSTANCE
   sudo mkdir -p /etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL~~~~~$BASENAME_INPUT_DIR_PATH
@@ -274,7 +276,9 @@ $INPUT_PASSWORD
 $INPUT_PASSWORD
 EOF
   sudo ufw allow samba
-  sudo systemctl restart smbd
+  sudo smbcontrol all reload-config
+  # by restarting the service, any curent file transfers are exited / interrupted & failed: so we use: smbcontrol all reload-config
+  # sudo systemctl restart smbd
 
   # CREATE INFO FILES FOR THE SAMBA SHARE INSTANCE
   sudo mkdir -p /etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH
