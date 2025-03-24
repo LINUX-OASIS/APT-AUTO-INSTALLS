@@ -870,6 +870,68 @@ EOF
 	sudo apt install -y maskprocessor
 	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
 
+	# START install charmbracelet gum: for glamorous shell bash scripts CLI output
+	BANNER_PKG_NAME_MSG="install charmbracelet gum: for glamorous shell bash scripts CLI output - from github"
+	FUN_VERBOSE_INSTALLING
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+	mkdir -p ./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-gum
+	sudo chmod -R 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-gum
+	# Fetch the latest version of gum using wget and pattern matching
+	LATEST_VERSION_CHARMBRACELET_GUM=$(wget -qO- https://github.com/charmbracelet/gum/releases/latest | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -n 1)
+	# Construct the download URL
+	FILE_NAME_GUM="gum_${LATEST_VERSION_CHARMBRACELET_GUM#v}_Linux_x86_64.tar.gz"
+	DOWNLOAD_URL_GUM="https://github.com/charmbracelet/gum/releases/download/${LATEST_VERSION_CHARMBRACELET_GUM}/${FILE_NAME_GUM}"
+	# Download the file using wget
+	wget "$DOWNLOAD_URL_GUM" -P "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-gum"
+	# Extract the downloaded file & move the binary gum to /usr/local/bin directory
+	sudo tar -xvf "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-gum/${FILE_NAME_GUM}"
+	# Match the exact file path
+	SOURCE_FILE_CHARMBRACELET_GUM=$(find "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-gum" -type f -name "gum" -path "*x86_64*")
+	# Move the file to /usr/local/bin
+	if [ -n "$SOURCE_FILE_CHARMBRACELET_GUM" ]; then
+		sudo mkdir -p /usr/local/bin
+		sudo chmod -R 777 /usr/local/bin
+		sudo mv "$SOURCE_FILE_CHARMBRACELET_GUM" "/usr/local/bin"
+		sudo chmod 777 /usr/local/bin/gum
+		echo "Moved gum to /usr/local/bin"
+	else
+		echo "Error: File matching pattern not found for gum charmbracelet binary!"
+	fi
+	# Cleanup the downloaded files
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+	# END install charmbracelet gum: for glamorous shell bash scripts CLI output
+
+	# START install charmbracelet VHS: Write terminal GIFs as code for integration testing and demoing your CLI tools.
+	BANNER_PKG_NAME_MSG="install charmbracelet VHS: Write terminal GIFs as code for integration testing and demoing your CLI tools - from github"
+	FUN_VERBOSE_INSTALLING
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+	mkdir -p ./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs
+	sudo chmod -R 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs
+	# Fetch the latest version of vhs using wget and pattern matching
+	LATEST_VERSION_CHARMBRACELET_VHS=$(wget -qO- https://github.com/charmbracelet/vhs/releases/latest | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -n 1)
+	# Construct the download URL
+	FILE_NAME_VHS="vhs_${LATEST_VERSION_CHARMBRACELET_VHS#v}_Linux_x86_64.tar.gz"
+	DOWNLOAD_URL_VHS="https://github.com/charmbracelet/vhs/releases/download/${LATEST_VERSION_CHARMBRACELET_VHS}/${FILE_NAME_VHS}"
+	# Download the file using wget
+	wget "$DOWNLOAD_URL_VHS" -P "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs"
+	# Extract the downloaded file & move the binary gum to /usr/local/bin directory
+	sudo tar -xvf "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs/${FILE_NAME_VHS}"
+	# Match the exact file path
+	SOURCE_FILE_CHARMBRACELET_VHS=$(find "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs" -type f -name "gum" -path "*x86_64*")
+	# Move the file to /usr/local/bin
+	if [ -n "$SOURCE_FILE_CHARMBRACELET_VHS" ]; then
+		sudo mkdir -p /usr/local/bin
+		sudo chmod -R 777 /usr/local/bin
+		sudo mv "$SOURCE_FILE_CHARMBRACELET_VHS" "/usr/local/bin"
+		sudo chmod 777 /usr/local/bin/vhs
+		echo "Moved vhs to /usr/local/bin"
+	else
+		echo "Error: File matching pattern not found for vhs charmbracelet binary!"
+	fi
+	# Cleanup the downloaded files
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+	# END install charmbracelet VHS: Write terminal GIFs
+
 	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
 	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
 	##(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
