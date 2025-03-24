@@ -1297,6 +1297,8 @@ EOF
 
 	#install virtualbox guest additions iso
 	if [ -f /usr/share/virtualbox/VBoxGuestAdditions.iso ]; then
+		BANNER_PKG_NAME_MSG="VBoxGuestAdditions.iso exists in [/usr/share/virtualbox] ... installing VBoxGuestAdditions.iso"
+		FUN_VERBOSE_INSTALLING
 		echo "VBoxGuestAdditions.iso exists in [/usr/share/virtualbox] ... installing"
 		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
 		7z x /usr/share/virtualbox/VBoxGuestAdditions.iso -o./AUTO-INSTALLS-FILES/WORKER-TEMP
