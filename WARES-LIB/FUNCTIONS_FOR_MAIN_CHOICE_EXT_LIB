@@ -468,15 +468,15 @@ function FUN_MAIN_CHOICE_9 {
     sudo mkdir -p $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
     sudo chmod -R 777 /etc/skel/.var
     sudo chmod -R 777 $HOME/.var
-    7z x ./AUTO-INSTALLS-FILES/GAMING/Nintendo-Switch-ProdKeys.net-v19.0.1.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
-    7z x ./AUTO-INSTALLS-FILES/GAMING/Nintendo-Switch-Firmware_19.0.1.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+    7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-PRODKEYS-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+    7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-FIRMWARE-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
 
     #copy the firmware folder & prod keys files to the ryujinx folder: ~/.var/app/io.github.ryujinx.Ryujinx/config/Ryujinx & /etc/skel/.var/app/io.github.ryujinx.Ryujinx/config/Ryujinx
-    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-ProdKeys.net-v19.0.1/* /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
-    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-ProdKeys.net-v19.0.1/* $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
 
-    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-Firmware_19.0.1 /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
-    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-Firmware_19.0.1 $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-* /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+    sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-* $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
 
     sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
     ################################################################################END INSTALL [RYUJINX EMULATOR VIA FLATPAK]
@@ -721,15 +721,15 @@ function FUN_MAIN_CHOICE_12 {
             sudo mkdir -p $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
             sudo chmod -R 777 /etc/skel/.var/app/io.github.ryubing.Ryujinx
             sudo chmod -R 777 $HOME/.var
-            7z x ./AUTO-INSTALLS-FILES/GAMING/Nintendo-Switch-ProdKeys.net-v19.0.1.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
-            7z x ./AUTO-INSTALLS-FILES/GAMING/Nintendo-Switch-Firmware_19.0.1.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+            7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-PRODKEYS-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+            7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-FIRMWARE-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
 
             #copy the firmware folder & prod keys files to the ryujinx folder: ~/.var/app/io.github.ryujinx.Ryujinx/config/Ryujinx & /etc/skel/.var/app/io.github.ryujinx.Ryujinx/config/Ryujinx
-            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-ProdKeys.net-v19.0.1/* /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
-            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-ProdKeys.net-v19.0.1/* $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
 
-            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-Firmware_19.0.1 /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
-            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Nintendo-Switch-Firmware_19.0.1 $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-* /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+            sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-* $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
 
             sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* && sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
             ################################################################################END INSTALL [RYUJINX EMULATOR VIA FLATPAK]
