@@ -1496,6 +1496,29 @@ EOF
 
 	# ....................................................................................
 
+	# ....................................................................................
+	# ......  ADD a separate GRUB boot menu entry for persistence UBUNTU, if runnig from a live USB / iso # scratch that.. for now, only way to add a custom menu entry
+	# is manually via the custom-disk/boot/gurb file from the actual iso .. for the booted system its in /etc/grub.d/40_custom file: /etc/grub.d/40_custom provides an easy way to add custom menu entries.
+	# via /etc/grub.d/40_custom file: /etc/grub.d/40_custom provides an easy way to add custom menu entries.
+
+# 	if mount | grep ' / ' | grep "^/cow on /"; then
+# 		BANNER_PKG_NAME_MSG="ADD a separate GRUB boot menu entry for persistence [UBUNTU PERSISTENCE], if runnig from a live USB / iso"
+# 		FUN_VERBOSE_INSTALLING_NO_APT_UPDATE
+# 		sudo chmod 777 /etc/grub.d/40_custom
+
+# 		cat <<EOF >/etc/grub.d/40_custom
+# menuentry "Try Ubuntu with Persistence" {
+#     set gfxpayload=keep
+#     linux   /casper/vmlinuz  file=/cdrom/preseed/ubuntu.seed boot=casper quiet splash persistent ---
+#     initrd  /casper/initrd
+# }
+# EOF
+# 		sudo update-grub
+
+# 	fi
+
+	# ....................................................................................
+
 	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via systemd unit file :: to run : AT BOOT : NOTE: IF SYSTEMD IS AVAILABE, ELSE; USE CRONTAB
 	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via systemd unit file :: to run : AT BOOT : NOTE: IF SYSTEMD IS AVAILABE, ELSE; USE CRONTAB
 	###$$%%^&######$$%%^&###  RUN COMMANDS AT BOOT UP  ... via systemd unit file :: to run : AT BOOT : NOTE: IF SYSTEMD IS AVAILABE, ELSE; USE CRONTAB
