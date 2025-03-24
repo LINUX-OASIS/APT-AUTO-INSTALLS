@@ -884,7 +884,7 @@ EOF
 	# Download the file using wget
 	wget "$DOWNLOAD_URL_GUM" -P "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-gum"
 	# Extract the downloaded file & move the binary gum to /usr/local/bin directory
-	sudo tar -xvf "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-gum/${FILE_NAME_GUM}"
+	sudo tar -xvf "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-gum/${FILE_NAME_GUM}" -C "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-gum/"
 	# Match the exact file path
 	SOURCE_FILE_CHARMBRACELET_GUM=$(find "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-gum" -type f -name "gum" -path "*x86_64*")
 	# Move the file to /usr/local/bin
@@ -915,9 +915,9 @@ EOF
 	# Download the file using wget
 	wget "$DOWNLOAD_URL_VHS" -P "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs"
 	# Extract the downloaded file & move the binary gum to /usr/local/bin directory
-	sudo tar -xvf "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs/${FILE_NAME_VHS}"
+	sudo tar -xvf "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs/${FILE_NAME_VHS}" -C "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs/"
 	# Match the exact file path
-	SOURCE_FILE_CHARMBRACELET_VHS=$(find "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs" -type f -name "gum" -path "*x86_64*")
+	SOURCE_FILE_CHARMBRACELET_VHS=$(find "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-vhs" -type f -name "vhs" -path "*x86_64*")
 	# Move the file to /usr/local/bin
 	if [ -n "$SOURCE_FILE_CHARMBRACELET_VHS" ]; then
 		sudo mkdir -p /usr/local/bin
