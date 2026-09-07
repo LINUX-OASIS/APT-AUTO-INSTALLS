@@ -1,0 +1,491 @@
+#!/bin/bash
+
+# Script: custom-VIRTUALBOX-RAW-DISK-ACCESS-VMDK-CREATOR
+# Description: This script automates the creation of VirtualBox raw disk VMDK files.
+# It allows users to create VMDKs for either specific disk partitions or an entire physical disk.
+# The script includes dependency checks for VirtualBox and handles different VirtualBox versions (6.x and 7.x+).
+
+# --- Dependency Check and Installation ---
+# This section ensures that VirtualBox is installed and configured correctly for raw disk access.
+# It first checks for VirtualBox 7.x, then falls back to checking for any older version.
+# If no VirtualBox installation is found, it proceeds to install VirtualBox 7.1 and its Extension Pack.
+# Finally, it adds the current user to the 'vboxusers' and 'disk' groups, which are necessary for VirtualBox
+# to access raw disk devices without requiring root privileges for every operation.
+if ! apt list --installed "virtualbox-7*" 2>/dev/null | grep -w "virtualbox-7.." >/dev/null; then
+	# This condition checks if VirtualBox 7.x (e.g., virtualbox-7.0, virtualbox-7.1) is installed.
+	# `apt list --installed "virtualbox-7*"`: Lists installed packages matching "virtualbox-7*".
+	# `2>/dev/null`: Redirects stderr to /dev/null to suppress error messages if the package is not found.
+	# `grep -w "virtualbox-7.."`: Filters the output to find lines containing "virtualbox-7." as a whole word,
+	# ensuring we match specific versions like 7.0, 7.1, etc.
+	# `>/dev/null`: Redirects stdout to /dev/null as we only care about the exit status of grep.
+	# If VirtualBox 7.x is not installed, the script proceeds to check for older versions or install it.
+	if ! apt list --installed "virtualbox" 2>/dev/null | grep -w "virtualbox" >/dev/null; then
+
+		# Update package lists to ensure apt has the latest information about available packages.
+		sudo apt update
+		sleep 1 # Pause for 1 second to allow apt to finish its operations.
+		# Create the directory for apt keyrings if it does not already exist.
+		# This is where GPG keys for repositories are stored.
+		sudo mkdir -p /etc/apt/keyrings
+		# Download and dearmor the Oracle VirtualBox GPG key.
+		# `wget -q -O- https://...`: Downloads the key quietly and outputs to stdout.
+		# `sudo gpg --dearmor --yes --output ...`: De-armors the key (converts from ASCII to binary)
+		# and saves it to the specified keyring file. `--yes` confirms the operation.
+		wget -q -O- https://www.virtualbox.org/download/oracle_vbox_2016.asc | sudo gpg --dearmor --yes --output /etc/apt/keyrings/oracle-virtualbox-2016.gpg
+
+		# Add the VirtualBox repository to the system's apt sources.
+		# This `cat <<EOF | sudo tee ... EOF` block writes a multi-line string to a file.
+		# `Types: deb`: Specifies the type of repository (Debian binary packages).
+		# `URIs: https://download.virtualbox.org/virtualbox/debian`: The URL of the VirtualBox repository.
+		# `Suites: $(cat /etc/os-release | grep UBUNTU_CODENAME= | cut -d = -f2 | tr -d '[:space:]')`: Dynamically
+		# determines the Ubuntu codename (e.g., "jammy", "noble") from `/etc/os-release` to ensure the correct
+		# suite is used for the repository.
+		# `Components: contrib`: Specifies the component of the repository to use.
+		# `Architectures: amd64`: Specifies the architecture for which packages should be downloaded.
+		# `Signed-By: /etc/apt/keyrings/oracle-virtualbox-2016.gpg`: Points to the GPG key used to sign the repository,
+		# ensuring the authenticity of the packages.
+		cat <<EOF | sudo tee /etc/apt/sources.list.d/virtualbox.sources
+Types: deb
+URIs: https://download.virtualbox.org/virtualbox/debian
+Suites: $(cat /etc/os-release | grep UBUNTU_CODENAME= | cut -d = -f2 | tr -d '[:space:]')
+Components: contrib
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/oracle-virtualbox-2016.gpg
+
+EOF
+		# Update package lists again to include the newly added VirtualBox repository.
+		sudo apt update
+		# Install VirtualBox 7.1. The `-y` flag automatically answers yes to prompts.
+		sudo apt install -y virtualbox-7.1
+
+		# --- VirtualBox Extension Pack Installation ---
+		# Install `debconf-utils` which provides `debconf-set-selections`, used for unattended
+		# installation by pre-seeding answers to debconf prompts.
+		sudo apt install -y debconf-utils
+		# Pre-seed debconf with the license agreement acceptance for the Extension Pack.
+		# This prevents the installation from pausing to ask the user to accept the license.
+		echo virtualbox-ext-pack virtualbox-ext-pack/license select true | sudo debconf-set-selections
+		# Create a temporary directory for downloading the Extension Pack.
+		# `mktemp -d -t CUSTOM_TMP_INSTALL_VIRTUALBOX_WORKER_DIR_XXXXX`: Creates a unique temporary directory.
+		_TEMP_WORKER_DIR=$(mktemp -d -t CUSTOM_TMP_INSTALL_VIRTUALBOX_WORKER_DIR_XXXXX)
+		# Fetch the latest VirtualBox Extension Pack version from the VirtualBox website.
+		# `wget -qO- https://www.virtualbox.org/wiki/Downloads`: Downloads the page quietly to stdout.
+		# `grep -o 'Oracle_VirtualBox_Extension_Pack-[0-9]\+\.[0-9]\+\.[0-9]\+'`: Extracts the version string.
+		# `sed 's/Oracle_VirtualBox_Extension_Pack-\(.*\)/\1/'`: Removes the prefix, leaving only the version number.
+		# `tr -d '[:space:]'`: Removes any whitespace.
+		LATEST_VERSION_EXT_PACK=$(wget -qO- https://www.virtualbox.org/wiki/Downloads | grep -o 'Oracle_VirtualBox_Extension_Pack-[0-9]\+\.[0-9]\+\.[0-9]\+' | sed 's/Oracle_VirtualBox_Extension_Pack-\(.*\)/\1/' | tr -d '[:space:]')
+		# Download the latest Extension Pack to the temporary directory.
+		# `-P "$_TEMP_WORKER_DIR"`: Specifies the directory to save the downloaded file.
+		wget https://download.virtualbox.org/virtualbox/${LATEST_VERSION_EXT_PACK}/Oracle_VirtualBox_Extension_Pack-${LATEST_VERSION_EXT_PACK}.vbox-extpack -P "$_TEMP_WORKER_DIR"
+		# Install the downloaded Extension Pack silently.
+		# `yes |`: Pipes 'yes' to the command, automatically answering 'y' to any prompts.
+		# `VBoxManage extpack install`: VirtualBox command to install an extension pack.
+		sudo VBoxManage extpack install ${_TEMP_WORKER_DIR}/*.vbox-extpack
+		# Remove the temporary directory and its contents.
+		sudo rm -rf $_TEMP_WORKER_DIR
+
+		# Add the current user to the 'vboxusers' group. This group is required for VirtualBox
+		# to function correctly and access USB devices, etc.
+		sudo usermod -aG vboxusers $USER
+		# Add the current user to the 'disk' group. This is crucial for allowing VirtualBox
+		# to access raw disk devices (like /dev/sda, /dev/nvme0n1) without needing root privileges.
+		sudo usermod -aG disk $USER
+
+	fi
+
+fi
+
+# --- Function Definitions ---
+
+# Function: FUN_VIRTUALBOX_RAW_DISK_PARTITIONS
+# Description: This function guides the user through the process of creating a VirtualBox raw disk VMDK file
+# that maps to specific partitions on a physical disk.
+# It prompts the user for a filename for the VMDK, allows selection of a root block device (e.g., /dev/sda),
+# and then enables the user to select individual partitions on that device.
+# Finally, it determines the installed VirtualBox version and calls the appropriate `VBoxManage` command
+# to create the VMDK based on the selected partitions.
+FUN_VIRTUALBOX_RAW_DISK_PARTITIONS() {
+	# Display an informational message box to the user using whiptail.
+	# `whiptail --title "..." --msgbox "..." 0 0`: Displays a message box.
+	# `0 0` for height and width allows whiptail to automatically size the box.
+	whiptail --title " VIRTUALBOX RAW DISK ACCESS .VMDK FILE CREATOR [PARTITIONS] " --msgbox " VIRTUALBOX RAW DISK ACCESS .VMDK FILE CREATOR [PARTITIONS]" 0 0
+	# Prompt user for the filename of the .VMDK file to be created.
+	# `whiptail --inputbox "..." 0 0`: Displays an input box.
+	# `3>&1 1>&2 2>&3`: Redirects file descriptors to capture the output of whiptail into the FILENAME variable.
+	FILENAME=$(whiptail --title "INPUT Filename Of .VMDK file to Create: (No spaces)" --inputbox "INPUT Filename Of .VMDK file to Create: " 0 0 3>&1 1>&2 2>&3)
+
+	# Check if the user aborted the filename input (i.e., pressed Cancel or Esc).
+	# If FILENAME is empty, it means the user aborted.
+	if [ -z "$FILENAME" ]; then
+		echo "USER ABORTED"
+		exit 1 # Exit with a non-zero status to indicate an error or abortion.
+	fi
+
+	# Remove any spaces from the filename to ensure it's a valid file path.
+	# `tr -d '[:space:]'`: Deletes all whitespace characters from the input.
+	FILENAME_FINAL=$(echo "$FILENAME" | tr -d '[:space:]')
+
+	# --- Obtain Root Block Device ---
+	# Read lsblk output for disks
+	readarray -t lines < <(lsblk -d -P -o NAME,MODEL,SIZE) # -d for disks only
+
+	# Prepare whiptail options
+	options=()
+	for line in "${lines[@]}"; do
+		[[ -z $line ]] && continue
+		# extract values using eval
+		eval "$line" # sets variables: NAME, MODEL, SIZE
+		tag="/dev/$NAME"
+		# Make a single-line description
+		desc=$(printf "%-20s %-8s" "$MODEL" "$SIZE")
+		options+=("$tag" "$desc")
+	done
+
+	# Determine menu height
+	height=${#options[@]}
+	height=$(((height / 2) > 20 ? 20 : (height / 2)))
+
+	# Show whiptail menu
+	ROOT_BLOCK_DEVICE_DEV=$(whiptail --title "Select [ROOT BLOCK DEVICE] (aka.the entire storage drive)" \
+		--menu "Use UP/DOWN to select, ENTER to confirm.\n\n        DEVICE     MODEL                SIZE" \
+		0 0 "$height" \
+		"${options[@]}" 3>&1 1>&2 2>&3)
+
+	# Check if the user aborted the root block device selection.
+	if [ -z "$ROOT_BLOCK_DEVICE_DEV" ]; then
+		echo "USER ABORTED"
+		exit 1
+	fi
+
+	# --- Obtain Partitions for VMDK ---
+	# Read lsblk output for the selected device's partitions
+	readarray -t lines < <(lsblk -P -o NAME,FSTYPE,LABEL,UUID,SIZE,PARTN "$ROOT_BLOCK_DEVICE_DEV" | grep 'PARTN=')
+
+	# Prepare whiptail options
+	i=1
+	declare -A id_map # Associative array for reliable mapping
+	options=()
+	for line in "${lines[@]}"; do
+		[[ -z $line ]] && continue
+		# extract values using eval
+		eval "$line" # sets variables: NAME, FSTYPE, LABEL, SIZE, PARTN
+		tag="$PARTN" # The partition number is what VBoxManage needs
+		# Make a single-line description
+		desc=$(printf "%-8s %-8s %-20s %-36s %8s" "$NAME" "$FSTYPE" "$LABEL" "$UUID" "$SIZE")
+		options+=("$tag" "$desc" "off")
+		id_map["$i"]="$tag" # we just use it to get precise height for the whiptail menu
+		((i++))
+	done
+
+	# Determine menu height
+	height=${#id_map[@]}
+
+	# Show whiptail checklist
+	PARTITIONS=$(whiptail --separate-output --title "Select Temporary Storage Device" \
+		--checklist "Use SPACE to select, ENTER to confirm.\n\n\
+NAME     FSTYPE   LABEL                UUID                                 SIZE\n\
+---------------------------------------------------------------------------------------" \
+		0 0 "$height" \
+		"${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ -z "$PARTITIONS" ]; then
+		echo "USER ABORTED"
+		exit 1
+	fi
+
+	# Format the selected partitions into a comma-separated string.
+	# The output from whiptail with --separate-output is one line per selection.
+	SELECTED_PARTITIONS_RESULT_FINAL=$(echo "$PARTITIONS" | tr '\n' ',' | sed 's/,$//')
+
+	# --- Determine VirtualBox Version ---
+	# Get the major version of VirtualBox currently installed (e.g., '6' or '7').
+	# `vboxmanage --version`: Outputs the full version string.
+	# `grep -o "^."`: Extracts the first character (the major version number).
+	# `tr -d '[:space:]'`: Removes any whitespace.
+	VBOX_VERSION=$(vboxmanage --version | grep -o "^." | tr -d '[:space:]')
+
+	# Call the appropriate `VBoxManage` function based on the detected VirtualBox version.
+	# VirtualBox 6.x and 7.x+ use different syntax for creating raw disk VMDKs.
+	if [ "$VBOX_VERSION" -eq "6" ]; then
+		FUN_VBOXMANAGE_COMMAND_FOR_VERSION_6XX_PARTITIONS
+	fi
+
+	if [ "$VBOX_VERSION" -ge "7" ]; then
+		FUN_VBOXMANAGE_COMMAND_FOR_VERSION_7XPLUS_PARTITIONS
+	fi
+
+} # End of FUN_VIRTUALBOX_RAW_DISK_PARTITIONS
+
+# Function: FUN_VBOXMANAGE_COMMAND_FOR_VERSION_6XX_PARTITIONS
+# Description: This function executes the `VBoxManage` command specific to VirtualBox version 6.x
+# to create a raw disk VMDK file for selected partitions.
+# It prompts the user for confirmation before running the command and then sets appropriate
+# read/write/execute permissions on the created VMDK files.
+FUN_VBOXMANAGE_COMMAND_FOR_VERSION_6XX_PARTITIONS() {
+	# Confirm with the user before executing the `VBoxManage` command.
+	# `whiptail --yesno "..." 0 0`: Displays a yes/no confirmation box.
+	if whiptail --title "Will Now Run :: " --yesno "VBoxManage internalcommands createrawvmdk -filename ${FILENAME_FINAL}.vmdk -rawdisk ${ROOT_BLOCK_DEVICE_DEV} -partitions ${SELECTED_PARTITIONS_RESULT_FINAL}" 0 0 3>&1 1>&2 2>&3; then
+
+		# Execute the `VBoxManage` command to create the raw VMDK for partitions.
+		# `internalcommands createrawvmdk`: The specific subcommand for creating raw VMDKs in VirtualBox 6.x.
+		# `-filename`: Specifies the output VMDK file name.
+		# `-rawdisk`: Specifies the raw disk device (e.g., /dev/sda).
+		# `-partitions`: Specifies the comma-separated list of partition numbers to include.
+		VBoxManage internalcommands createrawvmdk -filename "$FILENAME_FINAL".vmdk -rawdisk "$ROOT_BLOCK_DEVICE_DEV" -partitions "$SELECTED_PARTITIONS_RESULT_FINAL"
+		# Set read/write/execute permissions (777) for all users on the created VMDK files.
+		# This is often necessary for VirtualBox to access them correctly, especially if created by root.
+		sudo chmod 777 "$FILENAME_FINAL".vmdk
+		# For partition-based raw disk access, VirtualBox 6.x also creates a `-pt.vmdk` file
+		# which contains the partition table information. Permissions must be set for this file too.
+		sudo chmod 777 "$FILENAME_FINAL"-pt.vmdk
+
+	else
+		echo "USER ABORTED. Exiting"
+		exit 1
+	fi
+}
+
+# Function: FUN_VBOXMANAGE_COMMAND_FOR_VERSION_7XPLUS_PARTITIONS
+# Description: This function executes the `VBoxManage` command specific to VirtualBox version 7.x+
+# to create a raw disk VMDK file for selected partitions.
+# It prompts the user for confirmation before running the command and then sets appropriate
+# read/write/execute permissions on the created VMDK files.
+FUN_VBOXMANAGE_COMMAND_FOR_VERSION_7XPLUS_PARTITIONS() {
+
+	# Confirm with the user before executing the `VBoxManage` command.
+	if whiptail --title "Will Now Run :: " --yesno "VBoxManage createmedium disk --filename $FILENAME_FINAL.vmdk --format=VMDK --variant RawDisk --property RawDrive=$ROOT_BLOCK_DEVICE_DEV --property Partitions=$SELECTED_PARTITIONS_RESULT_FINAL" 0 0 3>&1 1>&2 2>&3; then
+
+		# Execute the `VBoxManage` command to create the raw VMDK for partitions.
+		# `createmedium disk`: The subcommand for creating disk images in VirtualBox 7.x+.
+		# `--filename`: Specifies the output VMDK file name.
+		# `--format=VMDK`: Specifies the disk image format as VMDK.
+		# `--variant RawDisk`: Specifies that this is a raw disk access VMDK.
+		# `--property RawDrive`: Specifies the raw disk device (e.g., /dev/sda).
+		# `--property Partitions`: Specifies the comma-separated list of partition numbers to include.
+		VBoxManage createmedium disk --filename "$FILENAME_FINAL".vmdk --format=VMDK --variant RawDisk --property RawDrive="$ROOT_BLOCK_DEVICE_DEV" --property Partitions="$SELECTED_PARTITIONS_RESULT_FINAL"
+		# Set read/write/execute permissions (777) for all users on the created VMDK files.
+		sudo chmod 777 "$FILENAME_FINAL".vmdk
+		# For partition-based raw disk access, VirtualBox 7.x+ also creates a `-pt.vmdk` file
+		# which contains the partition table information. Permissions must be set for this file too.
+		sudo chmod 777 "$FILENAME_FINAL"-pt.vmdk
+
+	else
+		echo "USER ABORTED. Exiting"
+		exit 1
+	fi
+
+}
+
+# Function: FUN_VIRTUALBOX_RAW_DISK_ENTIRE_DRIVE
+# Description: This function guides the user through the process of creating a VirtualBox raw disk VMDK file
+# that maps to an entire physical disk (root block device).
+# It prompts the user for a filename for the VMDK and allows selection of the entire physical disk.
+# Finally, it determines the installed VirtualBox version and calls the appropriate `VBoxManage` command
+# to create the VMDK for the whole disk.
+FUN_VIRTUALBOX_RAW_DISK_ENTIRE_DRIVE() {
+
+	# Display an informational message box to the user using whiptail.
+	whiptail --title " VIRTUALBOX RAW DISK ACCESS .VMDK CREATOR [ENTIRE ROOT DEVICE] aka Whole Disk" --msgbox " VIRTUALBOX RAW DISK ACCESS .VMDK CREATOR [ENTIRE ROOT DEVICE] aka Whole Disk" 0 0
+
+	# Prompt user for the filename of the .VMDK file to be created.
+	FILENAME=$(whiptail --title "INPUT Filename Of .VMDK file to Create: (No spaces)" --inputbox "INPUT Filename Of .VMDK file to Create: " 0 0 3>&1 1>&2 2>&3)
+
+	# Check if the user aborted the filename input.
+	if [ -z "$FILENAME" ]; then
+		echo "USER ABORTED"
+		exit 1
+	fi
+
+	# Remove any spaces from the filename.
+	FILENAME_FINAL=$(echo "$FILENAME" | tr -d '[:space:]')
+
+	# --- Obtain Root Block Device ---
+	# Read lsblk output for disks
+	readarray -t lines < <(lsblk -d -P -o NAME,MODEL,SIZE) # -d for disks only
+
+	# Prepare whiptail options
+	options=()
+	for line in "${lines[@]}"; do
+		[[ -z $line ]] && continue
+		# extract values using eval
+		eval "$line" # sets variables: NAME, MODEL, SIZE
+		tag="/dev/$NAME"
+		# Make a single-line description
+		desc=$(printf "%-20s %-8s" "$MODEL" "$SIZE")
+		options+=("$tag" "$desc")
+	done
+
+	# Determine menu height
+	height=${#options[@]}
+	height=$(((height / 2) > 20 ? 20 : (height / 2)))
+
+	# Show whiptail menu
+	ROOT_BLOCK_DEVICE_DEV=$(whiptail --title "Select [ROOT BLOCK DEVICE] (aka.the entire storage drive)" \
+		--menu "Use UP/DOWN to select, ENTER to confirm.\n\n        DEVICE     MODEL                SIZE" \
+		0 0 "$height" \
+		"${options[@]}" 3>&1 1>&2 2>&3)
+
+	# Check if the user aborted the root block device selection.
+	if [ -z "$ROOT_BLOCK_DEVICE_DEV" ]; then
+		echo "USER ABORTED"
+		exit 1
+	fi
+
+	# --- Determine VirtualBox Version ---
+	# Get the major version of VirtualBox currently installed (e.g., '6' or '7').
+	# `vboxmanage --version`: Outputs the full version string.
+	# `grep -o "^."`: Extracts the first character (the major version number).
+	# `tr -d '[:space:]'`: Removes any whitespace.
+	VBOX_VERSION=$(vboxmanage --version | grep -o "^." | tr -d '[:space:]')
+
+	# Call the appropriate VBoxManage function based on the VirtualBox version.
+	# VirtualBox 6.x and 7.x+ use different syntax for creating raw disk VMDKs.
+	if [ "$VBOX_VERSION" -eq "6" ]; then
+		FUN_VBOXMANAGE_FOR_VERSION_6XX_WHOLE_DISK
+	fi
+
+	if [ "$VBOX_VERSION" -ge "7" ]; then
+		FUN_VBOXMANAGE_COMMAND_FOR_VERSION_7XPLUS_WHOLE_DISK
+	fi
+
+} # End of FUN_VIRTUALBOX_RAW_DISK_ENTIRE_DRIVE
+
+# Function: FUN_VBOXMANAGE_COMMAND_FOR_VERSION_6XX_WHOLE_DISK
+# Description: This function executes the `VBoxManage` command specific to VirtualBox version 6.x
+# to create a raw disk VMDK file for an entire physical disk.
+# It prompts the user for confirmation before running the command and then sets appropriate
+# read/write/execute permissions on the created VMDK file.
+FUN_VBOXMANAGE_FOR_VERSION_6XX_WHOLE_DISK() {
+	# Confirm with the user before executing the `VBoxManage` command.
+	# `whiptail --yesno "..." 0 0`: Displays a yes/no confirmation box, allowing the user to confirm
+	# the command before it's executed. The `0 0` arguments allow whiptail to automatically size the box.
+	# `3>&1 1>&2 2>&3`: This is a standard shell trick to redirect whiptail's output (which goes to stderr)
+	# to stdout, so it can be captured by the `if` statement.
+	if whiptail --title "Will Now Run :: " --yesno "VBoxManage internalcommands createrawvmdk -filename ${FILENAME_FINAL}.vmdk -rawdisk ${ROOT_BLOCK_DEVICE_DEV}" 0 0 3>&1 1>&2 2>&3; then
+
+		# Execute the `VBoxManage` command to create the raw VMDK for the entire disk.
+		# `VBoxManage internalcommands createrawvmdk`: This is the specific subcommand used in VirtualBox 6.x
+		# for creating VMDK files that provide raw access to a physical disk or partition.
+		# `-filename "${FILENAME_FINAL}".vmdk`: Specifies the name of the VMDK file to be created.
+		#   The filename is dynamically set by the user's input.
+		# `-rawdisk "${ROOT_BLOCK_DEVICE_DEV}"`: Specifies the physical disk device (e.g., /dev/sda)
+		#   that the VMDK will map to. This allows VirtualBox to directly access the entire disk.
+		VBoxManage internalcommands createrawvmdk -filename "${FILENAME_FINAL}".vmdk -rawdisk "${ROOT_BLOCK_DEVICE_DEV}"
+		# Set read/write/execute permissions (777) for all users on the created VMDK file.
+		# This is often necessary to ensure VirtualBox and the user have the required permissions
+		# to access and use the raw disk VMDK.
+		sudo chmod 777 "$FILENAME_FINAL".vmdk
+		# Note: For whole disk access in VirtualBox 6.x, a separate partition table VMDK (`-pt.vmdk`)
+		# is typically not created or needed, as the entire disk's Master Boot Record (MBR) or
+		# GUID Partition Table (GPT) is used directly.
+		# sudo chmod 777 $FILENAME_FINAL-pt.vmdk # This line is commented out as it's not applicable here.
+
+	else
+		# If the user selects "No" or cancels the whiptail confirmation, display an "USER ABORTED" message
+		# and exit the script with a non-zero status to indicate that the operation was not completed.
+		echo "USER ABORTED. Exiting"
+		exit 1 # Exit with a non-zero status to indicate an error or abortion.
+	fi
+}
+
+# Function: FUN_VBOXMANAGE_COMMAND_FOR_VERSION_7XPLUS_WHOLE_DISK
+# Description: This function executes the `VBoxManage` command specific to VirtualBox version 7.x+
+# to create a raw disk VMDK file for an entire physical disk.
+# It prompts the user for confirmation before running the command and then sets appropriate
+# read/write/execute permissions on the created VMDK file.
+FUN_VBOXMANAGE_COMMAND_FOR_VERSION_7XPLUS_WHOLE_DISK() {
+
+	# Confirm with the user before executing the `VBoxManage` command.
+	# `whiptail --yesno "..." 0 0`: Displays a yes/no confirmation box, allowing the user to confirm
+	# the command before it's executed. The `0 0` arguments allow whiptail to automatically size the box.
+	# `3>&1 1>&2 2>&3`: This is a standard shell trick to redirect whiptail's output (which goes to stderr)
+	# to stdout, so it can be captured by the `if` statement.
+	if whiptail --title "Will Now Run :: " --yesno "VBoxManage createmedium disk --filename $FILENAME_FINAL.vmdk --format=VMDK --variant RawDisk --property RawDrive=$ROOT_BLOCK_DEVICE_DEV" 0 0 3>&1 1>&2 2>&3; then
+
+		# Execute the `VBoxManage` command to create the raw VMDK for the entire disk.
+		# `VBoxManage createmedium disk`: This is the subcommand used in VirtualBox 7.x and later
+		# for creating various types of disk images, including raw disk access VMDKs.
+		# `--filename "$FILENAME_FINAL".vmdk`: Specifies the name of the VMDK file to be created.
+		#   The filename is dynamically set by the user's input.
+		# `--format=VMDK`: Explicitly sets the format of the created medium to VMDK.
+		# `--variant RawDisk`: Specifies that the VMDK should be a raw disk access VMDK, meaning it directly
+		#   maps to a physical disk or partition.
+		# `--property RawDrive="$ROOT_BLOCK_DEVICE_DEV"`: This property is specific to raw disk VMDKs and points
+		#   to the physical disk device (e.g., /dev/sda) that the VMDK will provide access to.
+		VBoxManage createmedium disk --filename "$FILENAME_FINAL".vmdk --format=VMDK --variant RawDisk --property RawDrive="$ROOT_BLOCK_DEVICE_DEV"
+		# Set read/write/execute permissions (777) for all users on the created VMDK file.
+		# This is often necessary to ensure VirtualBox and the user have the required permissions
+		# to access and use the raw disk VMDK.
+		sudo chmod 777 "$FILENAME_FINAL".vmdk
+		# Note: For whole disk access in VirtualBox 7.x+, a separate partition table VMDK (`-pt.vmdk`)
+		# is typically not created or needed, as the entire disk's Master Boot Record (MBR) or
+		# GUID Partition Table (GPT) is used directly.
+		# sudo chmod 777 $FILENAME_FINAL-pt.vmdk # This line is commented out as it's not applicable here.
+
+	else
+		# If the user selects "No" or cancels the whiptail confirmation, display an "USER ABORTED" message
+		# and exit the script with a non-zero status to indicate that the operation was not completed.
+		echo "USER ABORTED. Exiting"
+		exit 1 # Exit with a non-zero status to indicate an error or abortion.
+	fi
+
+}
+
+# Function: FUN_SHOW_HELP_ABOUT
+# Description: Displays help and information about the script.
+FUN_SHOW_HELP_ABOUT() {
+	whiptail --scrolltext --title "About This Script" --msgbox \
+		"**VirtualBox Raw Disk VMDK Creator**
+
+This script automates the creation of VirtualBox .VMDK files that provide direct, raw access to physical disks or partitions.
+
+**Features:**
+- Automatically checks for and installs VirtualBox if needed.
+- Handles different command syntax for VirtualBox 6.x and 7.x+.
+- Adds the current user to the 'vboxusers' and 'disk' groups for necessary permissions.
+
+**Main Menu Options:**
+- **Raw [PARTITIONS]:** Creates a VMDK that maps to one or more selected partitions on a physical disk. This is useful if you want a VM to access only specific partitions (e.g., a dual-boot Windows partition) while leaving others untouched.
+- **Raw [ENTIRE ROOT DISK]:** Creates a VMDK that maps to an entire physical disk. This gives the VM full control over the disk, including the partition table. Use with caution.
+
+**IMPORTANT:**
+Raw disk access is a powerful feature that can lead to data loss if misused. Ensure the host OS does not mount and use the partitions you are giving to the guest VM simultaneously, as this can cause filesystem corruption." 0 0
+}
+
+# --- Main Script Logic ---
+# This section presents the main menu to the user using `whiptail` and calls the appropriate function
+# based on the user's selection. A loop is used to allow the user to view the help screen and
+# return to the main menu.
+
+while true; do
+	# Display the main menu using whiptail.
+	# The third option "Help / About" is added.
+	MAIN_CHOICE=$(whiptail --title "VIRTUALBOX RAW DISK ACCESS VMDK CREATOR" --menu "Select Option:" 0 0 3 \
+		1 "Raw [PARTITIONS]" \
+		2 "Raw [ENTIRE ROOT DISK]" \
+		3 "Help / About" 3>&1 1>&2 2>&3)
+
+	# Check the exit status of whiptail. If the user pressed Cancel or Esc, exit.
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED. Exiting."
+		exit 0
+	fi
+
+	# Based on the user's choice, execute the corresponding function.
+	case "$MAIN_CHOICE" in
+	1)
+		# If the user selected "Raw [PARTITIONS]", call the function to create a VMDK for partitions.
+		FUN_VIRTUALBOX_RAW_DISK_PARTITIONS
+		break # Exit the loop after the action is completed.
+		;;
+	2)
+		# If the user selected "Raw [ENTIRE ROOT DISK]", call the function to create a VMDK for the entire disk.
+		FUN_VIRTUALBOX_RAW_DISK_ENTIRE_DRIVE
+		break # Exit the loop after the action is completed.
+		;;
+	3)
+		# If the user selected "Help / About", display the help information. The loop will then continue.
+		FUN_SHOW_HELP_ABOUT
+		;;
+	esac
+done

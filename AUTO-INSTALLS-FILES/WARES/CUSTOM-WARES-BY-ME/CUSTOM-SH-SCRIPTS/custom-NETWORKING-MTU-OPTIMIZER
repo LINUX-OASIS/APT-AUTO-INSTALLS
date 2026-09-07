@@ -1,0 +1,298 @@
+#!/bin/bash
+
+# This script automatically finds the highest possible Maximum Transmission Unit (MTU)
+# for a given network interface by testing values in a specified range.
+# It then sets the interface to the highest successful MTU found.
+
+# --- Interface Selection ---
+
+# This section interactively asks the user to select a network interface.
+# It uses 'whiptail' to create a graphical menu in the terminal if it's installed.
+# If not, it falls back to a simple text-based prompt.
+
+while true; do
+	# First, check if the 'whiptail' command is available on the system.
+	if ! command -v whiptail &>/dev/null; then
+		# This block is the fallback mechanism when 'whiptail' is not installed.
+		echo "whiptail is not installed. Please install it to run this script interactively."
+
+		# Get a list of network interfaces and store them in the 'interfaces' variable.
+		interfaces=$(ip -o link show | awk -F': ' '{print $2}' | grep -v 'lo')
+
+		# Display the available interfaces to the user.
+		echo "Available interfaces:"
+		echo "$interfaces"
+		echo "Type 'HELP' for About/Help info."
+		# Prompt the user to enter an interface name and read their input into the INTERFACE variable.
+		read -p "Please enter the interface name to use: " INTERFACE
+
+		if [ "$INTERFACE" = "HELP" ]; then
+			INTERFACE="HELP/About"
+		fi
+	else
+		# This block executes if 'whiptail' is installed.
+
+		# The command to get the list of interfaces is the same as in the fallback block.
+		interfaces=$(ip -o link show | awk -F': ' '{print $2}' | grep -v 'lo')
+
+		# Prepare the options for the whiptail menu.
+		options=()
+		options+=("HELP/About" "")
+		# This 'for' loop iterates through each interface name captured in the 'interfaces' variable.
+		for iface in $interfaces; do
+			options+=("$iface" "")
+		done
+
+		_PRECISE_MENU_HEIGHT_NIC=${#options[@]}
+
+		# Calculate precise height: Total elements divided by 2 (since they are pairs).
+		_PRECISE_MENU_HEIGHT_NIC=$((_PRECISE_MENU_HEIGHT_NIC / 2))
+
+		INTERFACE=$(whiptail --scrolltext --backtitle "Maximum Transmission Unit (MTU) Optimizer" --title "Select Network Interface" --menu "Choose the interface to configure:" 0 0 "$_PRECISE_MENU_HEIGHT_NIC" "${options[@]}" 3>&1 1>&2 2>&3)
+	fi
+
+	# After the user has had a chance to select an interface (either via whiptail or manual input).
+	# Check if the INTERFACE variable is empty.
+	if [ -z "$INTERFACE" ]; then
+		echo "No interface selected. Exiting."
+		exit 1
+	fi
+
+	if [ "$INTERFACE" = "HELP/About" ]; then
+		# --- HELP/About ---
+		HELP_TITLE="About MTU Optimizer"
+		HELP_MSG="This script helps you find and set the optimal Maximum Transmission Unit (MTU) for your network hardware.\n\n"
+		HELP_MSG+="1. Discovery: The script tests MTU values from 1500 to 10000 by attempting to apply them to the driver. This identifies the hardware/driver limit.\n\n"
+		HELP_MSG+="2. Transient vs Persistent:\n"
+		HELP_MSG+="   - Transient (Options 1 & 2): Changes take effect immediately but are lost after a reboot.\n"
+		HELP_MSG+="   - Persistent (Options 3 & 4): Creates a custom systemd service that applies your chosen MTU every time the system boots.\n\n"
+		HELP_MSG+="3. WARNING: This tool tests LOCAL hardware support. It does NOT guarantee that your router, switch, or ISP supports these values. If you set an MTU higher than your network path supports, you may experience 'MTU Blackholes' where some websites or services fail to load.\n\n"
+		HELP_MSG+="4. Systemd Service: Persistent settings are stored in /etc/systemd/system/mtu-set-<interface>.service."
+
+		if ! command -v whiptail &>/dev/null; then
+			echo -e "--- $HELP_TITLE ---\n"
+			echo -e "$HELP_MSG"
+			read -p "Press Enter to return to menu..."
+		else
+			whiptail --scrolltext --title "$HELP_TITLE" --msgbox "$(echo -e "$HELP_MSG")" 0 0
+		fi
+		continue
+	fi
+
+	# If we got here, a valid interface was selected.
+	break
+done
+# --- End Interface Selection ---
+
+# --- MTU Discovery ---
+# This section silently tests for all valid MTU values for the selected interface.
+
+# The starting MTU value for testing. 1500 is the standard for Ethernet.
+START_MTU=1500
+# The maximum MTU value to test.
+MAX_TEST=10000
+
+# This array will store all the MTU values that were successfully set.
+valid_mtus=()
+
+echo "Discovering supported MTU values for $INTERFACE..."
+
+# This is a C-style 'for' loop in bash.
+# start val, run until condition is met, increment by step [C-style bash for loop]
+for ((MTU = $START_MTU; MTU <= $MAX_TEST; MTU += 100)); do
+	# Attempt to set the MTU and check if the command was successful.
+	if sudo ip link set dev "$INTERFACE" mtu "$MTU" 2>/dev/null; then
+		echo "MTU $MTU supported."
+		# If successful, add the value to our array of valid MTUs.
+		valid_mtus+=("$MTU")
+	else
+		# If the command fails, the MTU is too high, so we stop.
+		echo "MTU $MTU not supported. Stopping discovery."
+		break
+	fi
+done
+
+# Check if any successful MTU values were found.
+if [ ${#valid_mtus[@]} -eq 0 ]; then
+	echo "No successful MTU value was found in the tested range."
+	exit 1
+fi
+# --- End MTU Discovery ---
+
+# --- Mode Selection ---
+# This loop allows the user to perform multiple operations (e.g., test transiently, then enable persistence)
+# without restarting the script from the discovery phase.
+while true; do
+	if ! command -v whiptail &>/dev/null; then
+		# Fallback for systems without whiptail (GUI-like menu).
+		echo "========================================"
+		echo "       MTU Optimizer Selection          "
+		echo "========================================"
+		echo "1) Set the optimal (maximum) MTU (Transient)"
+		echo "2) Select a specific MTU from a list of valid values (Transient)"
+		echo "3) Enable Boot-time MTU Persistence (Systemd)"
+		echo "4) Disable Boot-time MTU Persistence (Systemd)"
+		echo "5) Exit"
+		read -p "Enter your choice [1-5]: " mode_choice
+	else
+		# Define menu options for whiptail in "tag" "item" pairs.
+		menu_options=(
+			"1" "Set the optimal (maximum) MTU (Transient)"
+			"2" "Select a specific MTU from a list of valid values (Transient)"
+			"3" "Enable Boot-time MTU Persistence (Systemd)"
+			"4" "Disable Boot-time MTU Persistence (Systemd)"
+			"5" "Exit"
+		)
+
+		# Calculate precise height: Total elements divided by 2 (since they are pairs).
+		_MENU_HEIGHT=$((${#menu_options[@]} / 2))
+
+		# Use whiptail to present the choice.
+		# 0 0 tells whiptail to auto-size the box width/height based on terminal size.
+		# $_MENU_HEIGHT defines how many items are visible in the list before scrolling.
+		mode_choice=$(whiptail --backtitle "Maximum Transmission Unit (MTU) Optimizer" --title "Select Operation Mode" --menu "What would you like to do?" 0 0 "$_MENU_HEIGHT" "${menu_options[@]}" 3>&1 1>&2 2>&3)
+	fi
+
+	# Handle 'Cancel' or 'Exit' selection.
+	if [ -z "$mode_choice" ] || [ "$mode_choice" -eq 5 ]; then
+		echo "Exiting."
+		exit 0
+	fi
+
+	# --- Main Logic ---
+	# Case statement handles the specific logic for each user choice.
+	case "$mode_choice" in
+	1)
+		# --- Set Optimal (Maximum) MTU ---
+		# The 'valid_mtus' array is sorted, so the last element is the highest supported value.
+		last_successful_mtu=${valid_mtus[-1]}
+
+		# Final confirmation before system modification.
+		if ! command -v whiptail &>/dev/null; then
+			read -p "The highest supported MTU found is $last_successful_mtu. Set MTU for $INTERFACE to this value? (y/n) " -n 1 -r
+			echo
+			if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+				echo "User cancelled."
+				continue
+			fi
+		else
+			if ! (whiptail --title "Confirm MTU Change" --yesno "The highest supported MTU found is $last_successful_mtu.\n\nDo you want to set the MTU for interface '$INTERFACE' to this value?" 0 0); then
+				continue
+			fi
+		fi
+
+		echo "Setting MTU to $last_successful_mtu..."
+		if sudo ip link set dev "$INTERFACE" mtu "$last_successful_mtu"; then
+			echo "MTU for $INTERFACE successfully set to $last_successful_mtu."
+		else
+			echo "Sanity check FAILED. Hardware rejected the command."
+		fi
+		read -p "Press Enter to continue..."
+		;;
+	2)
+		# --- Select Specific MTU from List (Transient) ---
+		mtu_options=()
+		for mtu_val in "${valid_mtus[@]}"; do
+			mtu_options+=("$mtu_val" "")
+		done
+
+		if ! command -v whiptail &>/dev/null; then
+			echo "Please select one of the following valid MTU values:"
+			printf '%s\n' "${valid_mtus[@]}"
+			read -p "Enter your choice: " specific_mtu
+		else
+			# Calculate precise height for the MTU selection menu.
+			_MTU_LIST_HEIGHT=$((${#mtu_options[@]} / 2))
+			# Limit visible height to 10 to prevent the menu from taking over the whole screen if many MTUs are found.
+			[ "$_MTU_LIST_HEIGHT" -gt 10 ] && _MTU_LIST_HEIGHT=10
+
+			specific_mtu=$(whiptail --title "Select a Specific MTU" --menu "Choose the MTU value to set for interface $INTERFACE:" 0 0 "$_MTU_LIST_HEIGHT" "${mtu_options[@]}" 3>&1 1>&2 2>&3)
+		fi
+
+		if [ -n "$specific_mtu" ]; then
+			echo "Attempting to set MTU for $INTERFACE to $specific_mtu..."
+			if sudo ip link set dev "$INTERFACE" mtu "$specific_mtu"; then
+				echo "Successfully set MTU for $INTERFACE to $specific_mtu."
+			else
+				echo "Failed to set MTU."
+			fi
+			read -p "Press Enter to continue..."
+		fi
+		;;
+	3)
+		# --- Enable Boot-time MTU Persistence ---
+		# This uses systemd to ensure settings survive a reboot.
+		mtu_options=()
+		for mtu_val in "${valid_mtus[@]}"; do
+			mtu_options+=("$mtu_val" "")
+		done
+
+		if ! command -v whiptail &>/dev/null; then
+			echo "Please select the MTU value to persist at boot:"
+			printf '%s\n' "${valid_mtus[@]}"
+			read -p "Enter your choice: " specific_mtu
+		else
+			_MTU_LIST_HEIGHT=$((${#mtu_options[@]} / 2))
+			[ "$_MTU_LIST_HEIGHT" -gt 10 ] && _MTU_LIST_HEIGHT=10
+
+			specific_mtu=$(whiptail --title "Select Persistent MTU" --menu "Choose the MTU value to set at boot for interface $INTERFACE:" 0 0 "$_MTU_LIST_HEIGHT" "${mtu_options[@]}" 3>&1 1>&2 2>&3)
+		fi
+
+		if [ -n "$specific_mtu" ]; then
+			# Define path for the per-interface systemd unit.
+			SERVICE_FILE="/etc/systemd/system/mtu-set-${INTERFACE}.service"
+			echo "Creating systemd service at $SERVICE_FILE..."
+
+			# We use 'network-online.target' to ensure the interface exists and is initialized before we try to set the MTU.
+			cat <<EOF | sudo tee "$SERVICE_FILE" >/dev/null
+[Unit]
+Description=Set MTU for ${INTERFACE} to ${specific_mtu}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ip link set dev ${INTERFACE} mtu ${specific_mtu}
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+			echo "Reloading systemd daemon and enabling service..."
+			sudo systemctl daemon-reload
+
+			# --now starts the service immediately while enabling it for boot.
+			if sudo systemctl enable --now "mtu-set-${INTERFACE}.service"; then
+				echo "Success! MTU for $INTERFACE will be set to $specific_mtu on boot."
+				sudo ip link set dev "$INTERFACE" mtu "$specific_mtu"
+			else
+				echo "Failed to enable service."
+			fi
+			read -p "Press Enter to continue..."
+		fi
+		;;
+	4)
+		# --- Disable Boot-time MTU Persistence ---
+		SERVICE_FILE="/etc/systemd/system/mtu-set-${INTERFACE}.service"
+
+		if [ -f "$SERVICE_FILE" ]; then
+			echo "Found persistence service for $INTERFACE. Removing..."
+			sudo systemctl disable --now "mtu-set-${INTERFACE}.service"
+			sudo rm "$SERVICE_FILE"
+			sudo systemctl daemon-reload
+			echo "Persistence removed successfully."
+		else
+			echo "No persistence service found for $INTERFACE."
+		fi
+		read -p "Press Enter to continue..."
+		;;
+	5)
+		echo "Exiting."
+		exit 0
+		;;
+	*)
+		echo "Invalid selection."
+		;;
+	esac
+done

@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+
+# Function to check for required commands and offer installation
+check_dependencies() {
+	local missing_deps=()
+	for cmd in whiptail gsettings; do
+		if ! command -v "$cmd" &>/dev/null; then
+			missing_deps+=("$cmd")
+		fi
+	done
+
+	if [ ${#missing_deps[@]} -gt 0 ]; then
+		echo "Error: Missing required dependencies: ${missing_deps[*]}"
+		if command -v apt-get &>/dev/null; then
+			if (whiptail --title "Missing Dependencies" --yesno "The following dependencies are missing: ${missing_deps[*]}.\n\nWould you like to try and install them now using 'apt'?" 0 0); then
+				# whiptail is in 'whiptail', gsettings in 'libglib2.0-bin'
+				sudo apt-get update && sudo apt-get install -y whiptail libglib2.0-bin
+				# Re-check after install attempt
+				for cmd in "${missing_deps[@]}"; do
+					if ! command -v "$cmd" &>/dev/null; then
+						whiptail --title "Installation Failed" --msgbox "Failed to install '$cmd'. Please install it manually and run the script again." 0 0
+						exit 1
+					fi
+				done
+			else
+				whiptail --title "Aborted" --msgbox "Cannot continue without dependencies. Exiting." 0 0
+				exit 1
+			fi
+		else
+			whiptail --title "Error" --msgbox "Missing dependencies: ${missing_deps[*]}.\nPlease install them manually." 0 0
+			exit 1
+		fi
+	fi
+}
+
+show_help() {
+	_HELP_STRING=$(
+		cat <<'EOF'
+GNOME Workspace Configuration - A TUI for managing workspace style.
+
+DESCRIPTION:
+  This script provides a simple Text-based User Interface (TUI) to switch
+  the GNOME Shell's workspace behavior between DYNAMIC and STATIC modes.
+
+USAGE:
+  ./custom-GNOME-WORKSPACES-STATIC-DYNAMIC
+  
+MODES:
+  1. Dynamic Workspaces:
+     - This is the default GNOME behavior.
+     - Workspaces are created and removed on-the-fly as you use them.
+     - An empty workspace is always available at the bottom.
+
+  2. Static Workspaces (Fixed Number):
+     - Provides a fixed number of workspaces that are always available.
+     - You can choose between 4, 6, or 8 workspaces.
+     - This is similar to the behavior of older GNOME versions or other
+       desktop environments.
+
+DEPENDENCIES:
+  - whiptail (for the user interface)
+  - gsettings (libglib2.0-bin) (for changing GNOME settings)
+  The script will offer to install these on Debian/Ubuntu systems if they
+  are missing.
+EOF
+	)
+	whiptail --title "Help / About" --msgbox "$_HELP_STRING" 0 0
+}
+
+main() {
+	local CHOICE
+	CHOICE=$(whiptail --title "GNOME Workspace Configuration" --menu "Choose the workspace mode:" 0 0 3 \
+		"1" "Dynamic Workspaces (Default)" \
+		"2" "Static Workspaces (Fixed Number)" \
+		"3" "HELP / ABOUT" 3>&1 1>&2 2>&3)
+
+	# Exit if user presses Esc or Cancel
+	if [ $? -ne 0 ]; then
+		echo "User cancelled. Exiting."
+		exit 0
+	fi
+
+	case "$CHOICE" in
+	1)
+		gsettings set org.gnome.mutter dynamic-workspaces true
+		whiptail --title "Success" --msgbox "Workspaces are now set to DYNAMIC." 0 0
+		echo "Done: Workspaces are now dynamic."
+		;;
+	2)
+		local NUM_STATIC_WORKSPACES
+		NUM_STATIC_WORKSPACES=$(whiptail --backtitle "Static Workspace Setup" --title "Choose Number of Static Workspaces" --menu "Select the desired number of workspaces:" 0 0 3 \
+			"4" "[ 4 ] Workspaces" \
+			"6" "[ 6 ] Workspaces" \
+			"8" "[ 8 ] Workspaces" 3>&1 1>&2 2>&3)
+
+		if [ -z "$NUM_STATIC_WORKSPACES" ]; then
+			echo "User cancelled. No changes made."
+			exit 0
+		fi
+
+		gsettings set org.gnome.mutter dynamic-workspaces false
+		gsettings set org.gnome.desktop.wm.preferences num-workspaces "$NUM_STATIC_WORKSPACES"
+		whiptail --title "Success" --msgbox "Workspaces are now STATIC with [$NUM_STATIC_WORKSPACES] workspaces available." 0 0
+		echo "Done: Workspaces are now static with [$NUM_STATIC_WORKSPACES] workspaces available."
+		;;
+	3)
+		show_help
+		;;
+	*)
+		echo "Invalid option selected. Exiting."
+		exit 1
+		;;
+	esac
+}
+
+# Run dependency check then main function
+check_dependencies
+main

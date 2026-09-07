@@ -1,0 +1,204 @@
+#!/bin/bash
+
+# This script converts an existing BTRFS root filesystem (not a subvolume)
+# into a subvolume-based installation, creating '@' for root and '@home' for /home.
+# This is crucial for leveraging BTRFS snapshotting and rollback capabilities effectively.
+
+# Export NEWT_COLORS to customize the appearance of whiptail dialogs.
+# This ensures a consistent and readable user interface for interactive prompts.
+export NEWT_COLORS="\
+root=black,red;\
+window=black,brightred;\
+border=yellow,brightred;\
+title=white,brightred;\
+textbox=white,black;\
+button=brightred,white;\
+actbutton=white,brightred;\
+compactbutton=white,red;\
+checkbox=yellow,black;\
+radiobutton=yellow,black;\
+label=yellow,red;\
+entry=white,black;\
+pulldown=white,red;\
+compactentry=brightyellow,black"
+
+echo "Converting Ubuntu BTRFS installation into subvolumes..."
+
+# Step 1: Identify the BTRFS root partition
+# This section lists all BTRFS partitions and prompts the user to select the correct one
+# for conversion.
+
+# Get the count of available BTRFS partitions to set the whiptail menu size.
+_BTRFS_AVAILABLE_PARTITIONS_LIST_COUNT=$(lsblk -f -noheaders -o NAME,FSTYPE | grep -w "btrfs" | sed 's/├─//g' | sed 's/└─//g' | wc -l | tr -d '[:space:]')
+
+# Prepare the list of BTRFS partitions for the whiptail menu.
+# It formats the output of lsblk to be suitable for whiptail's menu structure.
+lsblk -f -noheaders -o NAME,FSTYPE,LABEL,UUID | grep -w "btrfs" | sed 's/├─//g' | sed 's/└─//g' | cat -n | sed 's/^[[:space:]]*//g' | sed 's/ / /g' >/tmp/BTRFS_PARTITIONS_MENU_BODY.tmp
+_BTRFS_AVAILABLE_PARTITIONS_LIST_MENU_BODY=$(printf "%-10s %-12s %-10s %-20s %-40s\n" $(cat /tmp/BTRFS_PARTITIONS_MENU_BODY.tmp))
+
+# Display a whiptail menu for the user to select the BTRFS partition.
+_CHOICE_NUM_BTRFS_PARTITION=$(whiptail --fullbuttons --scrolltext --backtitle "CONVERT [BTRFS] INSTALL - INTO [BTRFS SUBVOLUME] INSTALL" \
+    --title "BTRFS Partition Selection" \
+    --menu "Select a BTRFS partition to convert into a subvolume-based installation:" \
+    0 0 "$_BTRFS_AVAILABLE_PARTITIONS_LIST_COUNT" $_BTRFS_AVAILABLE_PARTITIONS_LIST_MENU_BODY 3>&1 1>&2 2>&3)
+
+# Extract the device path (e.g., /dev/sdaX) of the selected BTRFS partition.
+BTRFS_PARTITION_DEV=$(lsblk -f -noheaders -o NAME,FSTYPE | grep -w "btrfs" | sed 's/├─//g' | sed 's/└─//g' | cat -n | sed 's/^[[:space:]]*//g' | grep -w "^$_CHOICE_NUM_BTRFS_PARTITION" | tr '[:space:]' '@' | cut -d '@' -f 2 | sed 's+^+/dev/+g' | tr -d '[:space:]')
+
+# Check if a BTRFS partition was successfully identified.
+if [ -z "$BTRFS_PARTITION_DEV" ]; then
+    echo "Error: Unable to find the BTRFS root partition."
+    exit 1
+fi
+echo "BTRFS root partition: $BTRFS_PARTITION_DEV"
+
+# Step 2: Mount the selected BTRFS partition (subvolid=5, which is the default top-level subvolume)
+# to a temporary directory. This allows access to the existing filesystem for reorganization.
+TEMP_MOUNT="/tmp/CUSTOM_btrfs_temp_mount_convert-$(echo $BTRFS_PARTITION_DEV | sed 's+/dev/++g' | tr -d '[:space:]')"
+sudo mkdir -p "$TEMP_MOUNT" || {
+    echo "Error: Failed to create temporary mount directory."
+    exit 1
+}
+
+echo "Mounting $BTRFS_PARTITION_DEV to $TEMP_MOUNT with subvolid=5..."
+sudo mount -o subvolid=5 "$BTRFS_PARTITION_DEV" "$TEMP_MOUNT" || {
+    echo "Error: Failed to mount $BTRFS_PARTITION_DEV."
+    exit 1
+}
+
+# Failsafe: Check for existing subvolumes named '@' or '@home'.
+# If these subvolumes already exist, it indicates that the conversion might have been
+# attempted before or the system is already subvolume-based, preventing accidental data loss.
+if sudo btrfs subvolume list "$TEMP_MOUNT" | grep -q -w "@\|@home"; then
+    echo "Error: Btrfs subvolumes @ or @home already exist. Exiting script."
+    echo "Cleaning up..."
+    sudo umount "$TEMP_MOUNT" || {
+        echo "Error: Failed to unmount $TEMP_MOUNT."
+        exit 1
+    }
+    sudo rmdir "$TEMP_MOUNT" || {
+        echo "Error: Failed to remove temporary mount directory."
+        exit 1
+    }
+
+    exit
+fi
+
+# Step 3: Sanity check and user confirmation before moving files.
+# This is a critical operation that reorganizes the filesystem, so multiple
+# confirmations are required to prevent accidental data loss.
+
+# First confirmation using a yes/no whiptail dialog.
+if whiptail --fullbuttons --backtitle "CONVERT [BTRFS] INSTALL - INTO [BTRFS SUBVOLUME] INSTALL" --yesno "About to move all files to the new subvolumes:\n\n- Root filesystem -> @\n- Home directory -> @home\n\nThis is a critical operation. Proceed?" 0 0; then
+    echo "Initial confirmation received."
+else
+    echo "Operation canceled by the user."
+    sudo umount "$TEMP_MOUNT"
+    sudo rmdir "$TEMP_MOUNT"
+    exit 0
+fi
+
+# Second confirmation requiring the user to type 'yes'.
+user_input=$(whiptail --fullbuttons --inputbox "Type 'yes' to confirm and continue:" 0 0 3>&1 1>&2 2>&3)
+if [[ ! "$user_input" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    echo "Operation canceled."
+    sudo umount "$TEMP_MOUNT"
+    sudo rmdir "$TEMP_MOUNT"
+    exit 0
+fi
+
+# Implement a 10-second timer to allow the user to abort the operation (Ctrl+C).
+# This provides a final opportunity to stop the script before irreversible changes begin.
+trap 'echo "Operation aborted by user."; sudo umount "$TEMP_MOUNT"; sudo rmdir "$TEMP_MOUNT"; exit 1' SIGINT
+echo "You have 10 seconds to abort the operation (Ctrl+C to cancel)..."
+for i in {10..1}; do
+    echo -ne "$i seconds remaining...\r"
+    sleep 1
+done
+echo
+
+# Step 4: Create the new '@' and '@home' subvolumes and move existing files into them.
+echo "Creating new subvolumes..."
+
+# Create the '@' subvolume, which will house the new root filesystem.
+sudo btrfs subvolume create "$TEMP_MOUNT/@/" || {
+    echo "Error: Failed to create @ subvolume."
+    exit 1
+}
+sleep 1
+
+# Move all files and directories from the current root (mounted at $TEMP_MOUNT)
+# into the newly created '@' subvolume, excluding the '@' and '@home' directories themselves.
+echo "Moving root filesystem to @ subvolume..."
+find "$TEMP_MOUNT" -mindepth 1 -maxdepth 1 \
+    ! -name '@' \
+    ! -name '@home' \
+    -exec sudo mv -t "$TEMP_MOUNT/@/" {} + 2>/dev/null
+
+# Create the '@home' subvolume, which will house the user's home directories.
+sudo btrfs subvolume create "$TEMP_MOUNT/@home/" || {
+    echo "Error: Failed to create @home subvolume."
+    exit 1
+}
+sleep 1
+
+# Move the contents of the old /home directory (now located at $TEMP_MOUNT/@/home)
+# into the new '@home' subvolume.
+echo "Moving home directory to @home subvolume..."
+sudo mv "$TEMP_MOUNT/@/home"/* "$TEMP_MOUNT/@home/" 2>/dev/null || echo "Warning: Failed to move some files to @home subvolume."
+
+# Synchronize filesystem changes to disk to ensure data integrity.
+sync
+
+# Step 5: Update /etc/fstab to reflect the new subvolume structure.
+# This is crucial for the system to boot correctly with the new subvolumes.
+echo "Updating /etc/fstab..."
+
+# Retrieve the UUID of the BTRFS partition. This is used for reliable mounting in fstab.
+BTRFS_UUID=$(blkid -s UUID -o value "$BTRFS_PARTITION_DEV" | tr -d '[:space:]') || {
+    echo "Error: Failed to retrieve UUID of $BTRFS_PARTITION_DEV"
+    exit 1
+}
+# Create a backup of the original fstab file before making changes.
+sudo cp "$TEMP_MOUNT"/@/etc/fstab "$TEMP_MOUNT"/@/etc/fstab.bak || {
+    echo "Error: Failed to create a backup of $TEMP_MOUNT/etc/fstab."
+    exit 1
+}
+# Update the fstab entry for the root filesystem to mount the '@' subvolume.
+sudo sed -i "s+$BTRFS_UUID / .*+$BTRFS_UUID / btrfs defaults,subvol=@ 0 1+" "$TEMP_MOUNT"/@/etc/fstab || {
+    echo "Error: Failed to update fstab for root."
+    exit 1
+}
+
+# Check if an entry for /home already exists in fstab.
+if ! grep -q "^$BTRFS_UUID /home" "$TEMP_MOUNT"/@/etc/fstab; then
+    # If no /home entry exists, append a new one for the '@home' subvolume.
+    echo "/dev/disk/by-uuid/$BTRFS_UUID /home btrfs defaults,subvol=@home 0 2" | sudo tee -a "$TEMP_MOUNT"/@/etc/fstab >/dev/null || {
+        echo "Error: Failed to append entry for /home in $TEMP_MOUNT/@/etc/fstab."
+        exit 1
+    }
+else
+    # If a /home entry exists, update it to mount the '@home' subvolume.
+    echo "Entry for /home already exists in $TEMP_MOUNT/@/etc/fstab."
+    sudo sed -i "s+$BTRFS_UUID /home .*+$BTRFS_UUID /home btrfs defaults,subvol=@home 0 2+" "$TEMP_MOUNT"/@/etc/fstab || {
+        echo "Error: Failed to update fstab for home."
+        exit 1
+    }
+
+fi
+
+# Step 6: Clean up temporary mount points and prompt for reboot.
+echo "Cleaning up..."
+# Unmount the temporary BTRFS mount point.
+sudo umount "$TEMP_MOUNT" || {
+    echo "Error: Failed to unmount $TEMP_MOUNT."
+    exit 1
+}
+# Remove the temporary mount directory.
+sudo rmdir "$TEMP_MOUNT" || {
+    echo "Error: Failed to remove temporary mount directory."
+    exit 1
+}
+
+echo "Conversion complete! Please reboot the system to apply the changes."
+exit 0

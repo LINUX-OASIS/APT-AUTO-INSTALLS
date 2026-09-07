@@ -1,0 +1,187 @@
+#!/bin/bash
+#
+# This script launches a simple Python HTTP server to share a directory over the network.
+# It provides a simple terminal interface using 'whiptail' to select the directory,
+# automatically finds an open port, and displays the connection details.
+#
+
+# Customizes the color scheme for whiptail dialog boxes.
+export NEWT_COLORS='
+root=white,brightmagenta
+border=yellow,black
+window=brightmagenta,brightblue
+shadow=green,yellow
+title=white,brightblue
+button=brightmagenta,black
+actbutton=black,lightgray
+checkbox=lightgray,black
+actcheckbox=brightgreen,green
+entry=black,white
+label=brightgreen,brightmagenta
+listbox=white,gray
+actlistbox=black,red
+textbox=black,yellow
+acttextbox=brightred,green
+helpline=lightgray,green
+roottext=green,lightgray
+emptyscale=green,brightmagenta
+fullscale=yellow,brightgreen
+disentry=brightblue,lightgray
+compactbutton=white,gray
+actsellistbox=black,yellow
+sellistbox=brightmagenta,lightgray'
+
+# --- Usage Examples ---
+# By default, the server binds to all network interfaces.
+# Basic command: python3 -m http.server 9000
+# Command with options: python3 -m http.server --directory <dir> --port <port>
+#
+# Note on pyftpdlib: This dependency is checked but not used by the HTTP server.
+# It is likely intended for future or optional FTP server functionality.
+# pyftpdlib allows for user/password protected network shares.
+
+# --- Dependency Check ---
+# This section ensures that all required packages are installed before proceeding.
+for PACKAGE in "python3-pip" "python3-pyftpdlib" "net-tools"; do
+	# Check if the package is installed.
+	if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+		echo "Dependency $PACKAGE is NOT installed. Attempting to install..."
+		sudo apt update
+		sudo apt install -y $PACKAGE
+
+		# Verify that the installation was successful.
+		if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+			echo "Possibly failed to install dependency $PACKAGE. Exiting."
+			exit
+		fi
+		# Special check for the pip package required by pyftpdlib.
+		if ! pip list | grep python-ftp-server >/dev/null; then
+			sudo python3 -m pip install python-ftp-server
+
+			if ! pip list | grep python-ftp-server >/dev/null; then
+				echo "Possibly failed to install pip dependency 'python-ftp-server'. Exiting."
+				exit
+			fi
+		fi
+	fi
+done
+
+# --- Function Definitions ---
+
+#
+# Prompts the user to enter the directory to be shared.
+# Uses whiptail for a graphical input box in the terminal.
+# Sets the global variable 'DIRECTORY'. Defaults to the current directory.
+#
+FUN_DIRECTORY() {
+	DIRECTORY=$(whiptail --backtitle "PYTHON HTTP SERVER" --title "Input Directory to Share" --inputbox "Enter the directory path to share. Defaults to the current directory." 10 60 "$PWD" 3>&1 1>&2 2>&3)
+
+	# Exit if the user cancels the dialog.
+	if [ -z "$DIRECTORY" ]; then
+		echo "USER ABORTED"
+		exit
+	fi
+}
+
+#
+# Finds the next available TCP port, starting from 9000.
+# It checks for active listening ports using netstat.
+# Sets the global variable 'PORT_NUM'.
+#
+FUN_CHECK_FREE_PORT() {
+	# Get a list of all listening ports.
+	netstat -tulpn 2>/dev/null >/tmp/custom-PYTHON-SIMPLE-HTTP-SERVER-FREE-PORTS-CHECK.tmp
+
+	# Set the starting port number.
+	PORT_NUM=9000
+
+	# Increment the port number until a free one is found.
+	while grep ":$PORT_NUM " /tmp/custom-PYTHON-SIMPLE-HTTP-SERVER-FREE-PORTS-CHECK.tmp >/dev/null; do
+		PORT_NUM=$((PORT_NUM + 1))
+	done
+
+	# Clean up the temporary file.
+	rm /tmp/custom-PYTHON-SIMPLE-HTTP-SERVER-FREE-PORTS-CHECK.tmp
+}
+
+#
+# Displays the connection details for all active network interfaces.
+# It iterates through available interfaces and prints their IP addresses,
+# the shared directory, and the full URL to connect to the server.
+#
+function FUN_CONNECTION_DETAILS_INFO {
+	echo -e "\e[1;48;5;4m" "--- HTTP Server Connection Details ---" "\e[0m"
+	# Get a list of all network interface names.
+	LIST_AVAILABLE_NET_INTERFACES=$(ip link show | grep -w "[0-9]:" | cut -d: -f2)
+
+	for VAL in $LIST_AVAILABLE_NET_INTERFACES; do
+		# Get the IPv4 address for the current interface.
+		NET_IFACE_IP_ADDR=$(ip address show "$VAL" | grep -w inet | awk '{print $2}' | cut -d/ -f1)
+
+		# Only display interfaces that have an IP address.
+		if [[ -n "$NET_IFACE_IP_ADDR" ]]; then
+			echo
+			echo "[NET-IFACE]: $VAL"
+			ip address show "$VAL" | grep -w inet
+			echo -e "\t[SHARING DIRECTORY]: $DIRECTORY"
+			echo -e "\t[CONNECT VIA] >>>>>>  [[ \e[3;7m http://$NET_IFACE_IP_ADDR:$PORT_NUM \e[0m ]]"
+		fi
+	done
+	echo ".........................................................................."
+	echo -e "\e[1;48;5;23m""Press Ctrl+C to stop the server. \n""\e[0m"
+}
+
+# Define a cleanup function
+cleanup() {
+
+	echo "Terminating the server..."
+
+	if kill "$SERVER_PID" 2>/dev/null; then
+		echo -e "\e[1;48;5;28m""The Python HTTP server has been terminated.""\e[0m"
+	elif kill -9 "$SERVER_PID" 2>/dev/null; then
+		echo -e "\e[1;48;5;28m""The Python HTTP server has been terminated. with \'kill -9 $SERVER_PID\'""\e[0m"
+	else
+		echo -e "\e[1;48;5;1m""Failed to terminate the server. PID=${SERVER_PID} It may not have been started.""\e[0m"
+	fi
+
+	# Ask the user if they want to continue
+	if whiptail --title "start a new python HTTP server instance" --defaultno --yesno "CONTINUE?\nstart a new python HTTP server instance" 0 0 3>&1 1>&2 2>&3; then
+		echo "contine: start a new python HTTP server instance"
+	else
+		# Reset terminal colors on exit.
+		unset NEWT_COLORS
+		echo "Script finished."
+
+		exit 0
+	fi
+
+}
+
+# Trap signals to ensure cleanup is called
+trap cleanup SIGINT SIGTERM
+
+while true; do
+
+	# --- Main Execution ---
+
+	# 1. Get the target directory from the user.
+	FUN_DIRECTORY
+
+	# 2. Find an available port for the server.
+	FUN_CHECK_FREE_PORT
+
+	# 3. Display connection information to the user.
+	FUN_CONNECTION_DETAILS_INFO
+
+	# 4. Start the Python HTTP server with the specified directory and port.
+	echo "Starting server..."
+	python3 -m http.server --directory "$DIRECTORY" "$PORT_NUM" &
+
+	# capture its process id to a variable
+	SERVER_PID=$!
+	echo "Server started with PID: $SERVER_PID"
+
+	# Wait for the server process to complete
+	wait $SERVER_PID
+
+done

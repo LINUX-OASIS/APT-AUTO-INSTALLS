@@ -1,0 +1,332 @@
+#!/bin/bash
+# MADE BY: LINUX-OASIS
+
+CPU_VENDOR_ID=$(grep "vendor_id" /proc/cpuinfo | head -n 1 | awk '{print $3}')
+
+# Function: Set high performance mode
+FUN_PERFORMANCE_HIGH() {
+	echo "Configuring high performance mode: [ C-state max 1 ] [ mitigations off ] [ performance governor ] [ disable thermald ]"
+	echo -e "Updating GRUB boot parameters...\n"
+
+	local new_grub_cmdline="intel_iommu=on mitigations=off"
+
+	if [[ "$CPU_VENDOR_ID" == "GenuineIntel" ]]; then
+		new_grub_cmdline+=" intel_idle.max_cstate=1"
+	elif [[ "$CPU_VENDOR_ID" == "AuthenticAMD" ]]; then
+		new_grub_cmdline+=" processor.max_cstate=0"
+	fi
+
+	# Update GRUB kernel parameters
+	_set_grub_cmdline "$new_grub_cmdline"
+
+	# Set CPU frequency governor to performance
+	echo 'GOVERNOR="performance"' | sudo tee /etc/default/cpufrequtils
+	sudo systemctl restart cpufrequtils.service
+
+	# Use powerprofilesctl to set high performance
+	powerprofilesctl set performance
+
+	# Disable thermald service
+	FUN_DISABLE_THERMALD
+}
+
+# Function: Reset to stock settings
+FUN_PERFORMANCE_STOCK() {
+	echo "Restoring stock power settings..."
+
+	# Reset GRUB kernel parameters
+	_set_grub_cmdline "intel_iommu=on"
+
+	# Reset CPU governor to balanced
+	echo 'GOVERNOR="powersave"' | sudo tee /etc/default/cpufrequtils
+	sudo systemctl restart cpufrequtils.service
+
+	# Use powerprofilesctl to set balanced mode
+	powerprofilesctl set balanced
+
+	# Enable thermald service
+	FUN_ENABLE_THERMALD
+}
+
+# Function: Set power saver mode
+FUN_PERFORMANCE_POWERSAVE() {
+	echo "Configuring power-saver mode..."
+
+	# Reset GRUB kernel parameters
+	_set_grub_cmdline "intel_iommu=on"
+
+	# Set CPU governor to power save
+	echo 'GOVERNOR="powersave"' | sudo tee /etc/default/cpufrequtils
+	sudo systemctl restart cpufrequtils.service
+
+	# Use powerprofilesctl to set power saver
+	powerprofilesctl set power-saver
+}
+
+# Function: Set CPU governor to performance only
+FUN_SET_PERFORMANCE_GOVERNOR_ONLY() {
+	echo "Setting CPU governor to performance for all cores..."
+	echo 'GOVERNOR="performance"' | sudo tee /etc/default/cpufrequtils
+	sudo systemctl restart cpufrequtils.service
+	powerprofilesctl set performance
+}
+
+# Function: Reset CPU governor to stock
+SET_STOCK_GOVERNOR_ONLY() {
+	echo "Resetting CPU governor to stock (powersave)..."
+	echo 'GOVERNOR="powersave"' | sudo tee /etc/default/cpufrequtils
+	sudo systemctl restart cpufrequtils.service
+	powerprofilesctl set balanced
+}
+
+# Function: Set CPU governor to power saver only
+SET_POWERSAVE_GOVERNOR_ONLY() {
+	echo "Setting CPU governor to power saver..."
+	echo 'GOVERNOR="powersave"' | sudo tee /etc/default/cpufrequtils
+	sudo systemctl restart cpufrequtils.service
+	powerprofilesctl set power-saver
+}
+
+# Function: Configure C-state to max 1
+FUN_SET_CSTATE_MAX_1() {
+	echo "Setting C-state to max 1 and disabling mitigations..."
+	local current_cmdline=$(_get_current_grub_cmdline)
+	local new_cmdline="$current_cmdline" # Start with current
+
+	# Always ensure intel_iommu=on
+	if ! echo "$new_cmdline" | grep -q '\bintel_iommu=on\b'; then
+		new_cmdline="intel_iommu=on $new_cmdline"
+	fi
+
+	# Add mitigations=off if not present
+	if ! echo "$new_cmdline" | grep -q '\bmitigations=off\b'; then
+		new_cmdline+=" mitigations=off"
+	fi
+
+	# Add specific cstate parameter based on CPU vendor
+	if [[ "$CPU_VENDOR_ID" == "GenuineIntel" ]]; then
+		# Remove any existing processor.max_cstate if present
+		new_cmdline=$(echo "$new_cmdline" | sed -e 's/\bprocessor\.max_cstate=[0-9]\b//g')
+		if ! echo "$new_cmdline" | grep -q '\bintel_idle\.max_cstate=1\b'; then
+			new_cmdline+=" intel_idle.max_cstate=1"
+		fi
+	elif [[ "$CPU_VENDOR_ID" == "AuthenticAMD" ]]; then
+		# Remove any existing intel_idle.max_cstate if present
+		new_cmdline=$(echo "$new_cmdline" | sed -e 's/\bintel_idle\.max_cstate=[0-9]\b//g')
+		if ! echo "$new_cmdline" | grep -q '\bprocessor\.max_cstate=0\b'; then
+			new_cmdline+=" processor.max_cstate=0"
+		fi
+	fi
+
+	# Clean up double spaces
+	new_cmdline=$(echo "$new_cmdline" | sed -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')
+
+	_set_grub_cmdline "$new_cmdline"
+}
+
+# Function: Reset C-state to stock
+FUN_SET_CSTATE_STOCK() {
+	echo "Resetting C-state to stock..."
+	local current_cmdline=$(_get_current_grub_cmdline)
+	local new_cmdline="$current_cmdline"
+
+	# Remove intel_idle.max_cstate or processor.max_cstate
+	new_cmdline=$(echo "$new_cmdline" | sed -e 's/\bintel_idle\.max_cstate=[0-9]\b//g' -e 's/\bprocessor\.max_cstate=[0-9]\b//g')
+
+	# Ensure intel_iommu=on is still present if it was initially there and not explicitly removed
+	if ! echo "$new_cmdline" | grep -q '\bintel_iommu=on\b'; then
+		if echo "$current_cmdline" | grep -q '\bintel_iommu=on\b'; then
+			new_cmdline="intel_iommu=on $new_cmdline"
+		elif [ -z "$new_cmdline" ]; then
+			new_cmdline="intel_iommu=on" # If nothing else, default to intel_iommu=on
+		fi
+	fi
+
+	# Clean up double spaces
+	new_cmdline=$(echo "$new_cmdline" | sed -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')
+
+	_set_grub_cmdline "$new_cmdline"
+}
+
+# Helper function to get current GRUB_CMDLINE_LINUX_DEFAULT from our custom file
+_get_current_grub_cmdline() {
+	local grub_file="/etc/default/grub.d/custom-KERNEL-BOOT-PARAMETERS.cfg"
+	local current_cmdline="intel_iommu=on" # Sensible default if file/var not found
+
+	if [ -f "$grub_file" ]; then
+		local found_cmdline=$(grep '^GRUB_CMDLINE_LINUX_DEFAULT=' "$grub_file" | cut -d'"' -f2)
+		if [ -n "$found_cmdline" ]; then
+			current_cmdline="$found_cmdline"
+		fi
+	fi
+	# Remove surrounding quotes from the command line string to handle it as raw space-separated parameters
+	current_cmdline=$(echo "$current_cmdline" | sed -e 's/^"//' -e 's/"$//')
+	echo "$current_cmdline"
+}
+
+# Helper function to write updated GRUB_CMDLINE_LINUX_DEFAULT
+_set_grub_cmdline() {
+	local new_cmdline="$1"
+	local grub_file="/etc/default/grub.d/custom-KERNEL-BOOT-PARAMETERS.cfg"
+	echo "GRUB_CMDLINE_LINUX_DEFAULT=\"$new_cmdline\"" | sudo tee "$grub_file" >/dev/null
+	sudo update-grub >/dev/null 2>&1
+	echo "GRUB boot parameters updated. Reboot is required for changes to take effect!"
+}
+
+# Function: Disable CPU mitigations only
+FUN_DISABLE_MITIGATIONS_ONLY() {
+	echo "Disabling CPU mitigations in GRUB parameters..."
+	local current_cmdline=$(_get_current_grub_cmdline)
+	local new_cmdline="$current_cmdline"
+
+	if ! echo "$current_cmdline" | grep -q '\bmitigations=off\b'; then
+		new_cmdline="$current_cmdline mitigations=off"
+		# Clean up double spaces if they occur
+		new_cmdline=$(echo "$new_cmdline" | sed -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')
+	fi
+	_set_grub_cmdline "$new_cmdline"
+}
+
+# Function: Enable CPU mitigations only (remove mitigations=off)
+FUN_ENABLE_MITIGATIONS_ONLY() {
+	echo "Enabling CPU mitigations in GRUB parameters (removing mitigations=off)..."
+	local current_cmdline=$(_get_current_grub_cmdline)
+	local new_cmdline=$(echo "$current_cmdline" | sed -e 's/\bmitigations=off\b//g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')
+
+	# Ensure intel_iommu=on is still present if it was initially there and not explicitly removed
+	if ! echo "$new_cmdline" | grep -q '\bintel_iommu=on\b'; then
+		if echo "$current_cmdline" | grep -q '\bintel_iommu=on\b'; then
+			new_cmdline="intel_iommu=on $new_cmdline"
+			new_cmdline=$(echo "$new_cmdline" | sed -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')
+		elif [ -z "$new_cmdline" ]; then
+			new_cmdline="intel_iommu=on" # If nothing else, default to intel_iommu=on
+		fi
+	fi
+	_set_grub_cmdline "$new_cmdline"
+}
+
+# Function: Disable thermald service
+FUN_DISABLE_THERMALD() {
+	echo "Disabling and masking thermald service..."
+	sudo systemctl stop thermald.service
+	sudo systemctl disable thermald.service
+	sudo systemctl mask thermald.service
+	echo "thermald service disabled and masked."
+	systemctl status thermald.service --no-pager
+}
+
+# Function: Enable thermald service
+FUN_ENABLE_THERMALD() {
+	echo "Enabling and starting thermald service..."
+	sudo systemctl unmask thermald.service
+	sudo systemctl enable thermald.service
+	sudo systemctl start thermald.service
+	echo "thermald service enabled and started."
+	systemctl status thermald.service --no-pager
+}
+
+# Function: Display system status
+SYSTEM_STATUS_FULL_INFO() {
+	echo "Collecting full system status..."
+
+	echo -e "\e[48;5;84m""\e[1;38;5;16m""DEVICE INFORMATION" "\e[0m"
+
+	echo -e "\e[48;5;153m""\e[1;38;5;16m""Display IO scheduler" "\e[0m"
+	# Display IO scheduler
+	echo "IO Scheduler Info:"
+	grep "" /sys/block/*/queue/scheduler
+
+	echo -e "\e[48;5;84m""\e[1;38;5;16m""POWER & PERFORMANCE SETTINGS" "\e[0m"
+	echo -e "\e[48;5;153m""\e[1;38;5;16m""Display current power profile" "\e[0m"
+
+	# Display current power profile
+	echo "Power Profile:"
+	powerprofilesctl get
+
+	echo -e "\e[48;5;153m""\e[1;38;5;16m""Display thermald status" "\e[0m"
+	# Display thermald status
+	echo "thermald status:"
+	systemctl is-active thermald.service || echo "thermald is inactive"
+	systemctl is-enabled thermald.service || echo "thermald is disabled/masked"
+
+	echo -e "\e[48;5;153m""\e[1;38;5;16m""Display CPU governors" "\e[0m"
+	# Display CPU governors
+	echo "CPU Governors:"
+	cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
+	echo -e "\e[48;5;153m""\e[1;38;5;16m""Display CPU C-states" "\e[0m"
+	# Display C-state info
+	echo "C-state Info:"
+	cat /sys/module/intel_idle/parameters/max_cstate
+
+	echo -e "\e[48;5;153m""\e[1;38;5;16m""Display kernel parameters" "\e[0m"
+	# Display current kernel parameters
+	echo "Kernel Parameters:"
+	cat /proc/cmdline
+
+	# Display thermald info enabled or disabled
+	echo -e "\e[48;5;153m""\e[1;38;5;16m""Display thermald information" "\e[0m"
+	if systemctl is-active --quiet thermald.service; then
+		echo "thermald is active. Current thermald status:"
+		sudo systemctl status thermald.service --no-pager
+	else
+		echo "thermald is inactive."
+	fi
+
+	echo -ne "\n"
+	# Pause before exiting
+	read -r -s -p "Press [Enter] key to continue..."
+}
+
+# Function: Display help/about information
+FUN_SHOW_HELP() {
+	whiptail --title "About Performance Setter" --msgbox "This script by LINUX-OASIS helps manage system power and performance settings.\n\nKey features:\n- Adjusts GRUB kernel parameters (IOMMU, Mitigations, C-states).\n- Sets CPU frequency governors (performance, powersave).\n- Configures power profiles via powerprofilesctl.\n- Manages thermald service (disable/mask for performance, enable for thermal safety).\n- Automatically detects CPU (Intel/AMD) for correct C-state parameter handling (intel_idle.max_cstate=1 for Intel, processor.max_cstate=0 for AMD).\n\nWARNINGS:\n- Options changing GRUB parameters (1, 2, 7, 8, 9, 10) require a REBOOT to take full effect.\n- 'mitigations=off' improves performance but REDUCES SECURITY against certain CPU vulnerabilities. Use with caution.\n- Disabling 'thermald' may increase temperatures on Intel systems. Monitor heat accordingly.\n\nOptions:\n1. MAX PERFORMANCE: High performance, mitigations off, C-state 1.\n2. STOCK POWER: Restore balanced settings, mitigations on, default C-states.\n3. POWER-SAVER: Prioritize power saving.\n4-6. GOVERNOR ONLY: Adjust CPU governor without GRUB changes.\n7-8. C-STATE ONLY: Adjust C-state limit via GRUB.\n9-10. MITIGATIONS ONLY: Enable/Disable CPU mitigations via GRUB.\n11-12. THERMALD: Disable (mask) or Enable the thermal daemon.\n13. SYSTEM STATUS: Display current system power/performance settings.\n14. ABOUT/HELP: Show this information page." 0 0
+}
+
+while true; do
+	# Display menu using whiptail
+	CHOICE=$(whiptail --title "Performance Settings" --menu "Select an option:" 0 0 14 \
+		1 "[MAX PERFORMANCE] POWER" \
+		2 "[STOCK] POWER SETTING" \
+		3 "[POWER-SAVER] SETTING" \
+		4 "[PERFORMANCE GOVERNOR ONLY]" \
+		5 "[STOCK GOVERNOR ONLY]" \
+		6 "[POWER-SAVER GOVERNOR ONLY]" \
+		7 "[C-STATE to max 1 ONLY]" \
+		8 "[C-STATE STOCK ONLY]" \
+		9 "[DISABLE MITIGATIONS ONLY]" \
+		10 "[ENABLE MITIGATIONS ONLY]" \
+		11 "[DISABLE THERMALD (MASK)]" \
+		12 "[ENABLE THERMALD (UNMASK)]" \
+		13 "[SYSTEM STATUS FULL INFO]" \
+		14 "[ABOUT/HELP]" 3>&1 1>&2 2>&3)
+
+	# Execute based on user choice
+	if [ -z "$CHOICE" ]; then
+		echo "No selection made. Exiting..."
+		exit
+	fi
+
+	if [ "$CHOICE" -eq 1 ] || [ "$CHOICE" -eq 2 ] || [ "$CHOICE" -eq 7 ] || [ "$CHOICE" -eq 8 ] || [ "$CHOICE" -eq 9 ] || [ "$CHOICE" -eq 10 ]; then
+		whiptail --msgbox "Selected $CHOICE. Reboot for changes to take effect!" 0 0
+	fi
+
+	case "$CHOICE" in
+	1) FUN_PERFORMANCE_HIGH ;;
+	2) FUN_PERFORMANCE_STOCK ;;
+	3) FUN_PERFORMANCE_POWERSAVE ;;
+	4) FUN_SET_PERFORMANCE_GOVERNOR_ONLY ;;
+	5) SET_STOCK_GOVERNOR_ONLY ;;
+	6) SET_POWERSAVE_GOVERNOR_ONLY ;;
+	7) FUN_SET_CSTATE_MAX_1 ;;
+	8) FUN_SET_CSTATE_STOCK ;;
+	9) FUN_DISABLE_MITIGATIONS_ONLY ;;
+	10) FUN_ENABLE_MITIGATIONS_ONLY ;;
+	11) FUN_DISABLE_THERMALD ;;
+	12) FUN_ENABLE_THERMALD ;;
+	13) SYSTEM_STATUS_FULL_INFO ;;
+	14) FUN_SHOW_HELP ;;
+	*) echo "Invalid choice. Exiting..." ;;
+	esac
+done
+# End of script

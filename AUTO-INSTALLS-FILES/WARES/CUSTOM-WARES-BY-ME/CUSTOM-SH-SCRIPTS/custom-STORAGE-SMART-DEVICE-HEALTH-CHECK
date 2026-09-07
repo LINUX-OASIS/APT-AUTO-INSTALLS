@@ -1,0 +1,169 @@
+#!/bin/bash
+
+# Check and install dependencies if missing
+for PACKAGE in nvme-cli smartmontools; do
+	if ! dpkg -s "$PACKAGE" &>/dev/null; then
+		echo "Dependency $PACKAGE is NOT installed .. installing"
+		sudo apt update
+		sudo apt install -y "$PACKAGE"
+
+		if ! dpkg -s "$PACKAGE" &>/dev/null; then
+			echo "Possibly didn't install dependency $PACKAGE .. exiting"
+			exit 1
+		fi
+	fi
+done
+
+# Colors for whiptail dialogs
+export NEWT_COLORS='
+root=green,black
+border=green,black
+title=green,black
+roottext=white,black
+window=green,black
+textbox=white,black
+button=black,green
+compactbutton=white,black
+listbox=white,black
+actlistbox=black,white
+actsellistbox=black,green
+checkbox=green,black
+actcheckbox=black,green
+'
+
+# Shows an information box about the script
+function show_about_info {
+	whiptail --scrolltext --title "About & Help" --msgbox "This script provides a quick way to check the S.M.A.R.T. health status of your storage devices.\n\n\
+--- HOW IT WORKS ---\n\
+1. It scans for NVMe and SATA/SCSI devices.\n\
+2. You select a device from the list.\n\
+3. A summary of the health report is displayed.\n\
+4. A full, detailed report is saved to:\n\
+   /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp\n\n\
+--- TOOLS USED ---\n\
+- For NVMe drives: 'nvme-cli' and 'smartmontools'\n\
+- For SATA/SCSI drives: 'smartmontools'\n\n\
+This script requires sudo privileges to run." 0 0
+}
+
+# Get storage devices list into a temp file
+function FUN_OBTAIN_STORAGE_DEVICES {
+	# Get NVMe devices
+	sudo nvme list | grep -E -o -w "/dev/nvme[0-9][a-z][0-9]" >/tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp
+
+	# Append SATA/SCSI devices if present
+	if ls /dev/sd[a-z] &>/dev/null; then
+		ls /dev/sd[a-z] | sort >>/tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp
+	fi
+
+	# Number and prepare for whiptail menu
+	mapfile -t DEVICES </tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp
+	DEV_ITEMS_COUNT=${#DEVICES[@]}
+
+	# Build whiptail menu items: number and device
+	MENU_ITEMS=()
+	for i in "${!DEVICES[@]}"; do
+		MENU_ITEMS+=("$((i + 1))" "${DEVICES[$i]}")
+	done
+
+	SELECTION=$(whiptail --title "Storage Device Health Checker" --menu "Select device" 0 0 "$DEV_ITEMS_COUNT" "${MENU_ITEMS[@]}" 3>&1 1>&2 2>&3)
+
+	# Check if user aborted
+	if [[ -z "$SELECTION" ]]; then
+		echo "USER ABORTED"
+		exit 0
+	fi
+
+	SELECTED_STORAGE_DEV="${DEVICES[$((SELECTION - 1))]}"
+}
+
+# Show NVMe device health info
+function FUN_STORAGE_HEALTH_INFO_NVME {
+	if [[ "$SELECTED_STORAGE_DEV" =~ ^/dev/nvme ]]; then
+		# Check transport type for NVMe devices
+		TRANSPORT_TYPE=$(lsblk -no TRAN -p "$SELECTED_STORAGE_DEV" | head -n 1)
+		SMARTCTL_OPTS=""
+
+		# Use tput for colors
+		tput setab 130
+
+		if [[ "$TRANSPORT_TYPE" == "usb" ]]; then
+			# For NVMe over USB, skip nvme-cli and use smartctl with the 'nvme' device type
+			echo "NVMe device on USB. Using smartctl with NVMe passthrough." >/tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+			SMARTCTL_OPTS="-d nvme"
+		else
+			# For direct PCIe NVMe, use nvme-cli as it provides more detailed info
+			sudo nvme smart-log "$SELECTED_STORAGE_DEV" -H | tee /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+		fi
+
+		tput setab 234
+		sudo smartctl -a $SMARTCTL_OPTS "$SELECTED_STORAGE_DEV" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+		tput setab 5
+		sudo smartctl -H $SMARTCTL_OPTS "$SELECTED_STORAGE_DEV" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+
+		# Extract summary info lines from report into a shorter summary
+		grep -E "Model Number:|Total NVM Capacity:|critical_warning|temperature|available_spare|percentage_used|Data Units Read:|Data Units Written:|power_on_hours|media_errors|Warning Temperature Time|Critical Composite Temperature Time|Temperature Sensor 1|Temperature Sensor 2|SMART overall-health self-assessment test result:" \
+			/tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp >/tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+
+		# Show summary with whiptail
+		whiptail --backtitle "$(grep 'percentage_used' /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp | head -1 | tr -d '[:space:]')" \
+			--title "SHORT SUMMARY FOR: $SELECTED_STORAGE_DEV" \
+			--msgbox "$(cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp)" 0 0 3>&1 1>&2 2>&3
+	fi
+}
+
+# Show SATA/SCSI device health info
+function FUN_STORAGE_HEALTH_INFO_SDX {
+	if [[ "$SELECTED_STORAGE_DEV" =~ ^/dev/sd[a-z]$ ]]; then
+		# Check transport type
+		TRANSPORT_TYPE=$(lsblk -no TRAN -p "$SELECTED_STORAGE_DEV" | head -n 1)
+		SMARTCTL_OPTS=""
+		if [[ "$TRANSPORT_TYPE" == "usb" ]]; then
+			SMARTCTL_OPTS="-d sat"
+		fi
+
+		tput setab 103
+		tput setaf 15
+		sudo smartctl -a $SMARTCTL_OPTS "$SELECTED_STORAGE_DEV" | tee /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+		tput setab 67
+		tput setaf 82
+		sudo smartctl -H $SMARTCTL_OPTS "$SELECTED_STORAGE_DEV" | tee -a /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp
+
+		local health_status
+		health_status=$(sudo smartctl -H $SMARTCTL_OPTS "$SELECTED_STORAGE_DEV" | grep "self-assessment test result:" | cut -d: -f2 | xargs)
+
+		# Extract summary info lines from report into a shorter summary
+		grep -E "Device Model:|Serial Number:|Firmware Version:|User Capacity:|SMART overall-health|Power_On_Hours|Temperature_Celsius|Reallocated_Sector_Ct|Current_Pending_Sector|Offline_Uncorrectable" \
+			/tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp >/tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+
+		whiptail --backtitle "SMART overall health: $health_status" \
+			--title "SHORT SUMMARY FOR: $SELECTED_STORAGE_DEV" \
+			--msgbox "$(cat /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp)" 0 0 3>&1 1>&2 2>&3
+	fi
+}
+
+# Main execution
+while true; do
+	CHOICE=$(whiptail --title "Main Menu" --menu "Select an option" 0 0 3 \
+		"1" "Check Device Health" \
+		"2" "About / Help" \
+		"3" "Exit" 3>&1 1>&2 2>&3)
+
+	case $CHOICE in
+	1)
+		FUN_OBTAIN_STORAGE_DEVICES
+		FUN_STORAGE_HEALTH_INFO_NVME
+		FUN_STORAGE_HEALTH_INFO_SDX
+		;;
+	2)
+		show_about_info
+		;;
+	3 | "")
+		echo "USER EXITED"
+		# clean up temp files
+		rm -f /tmp/custom-STORAGE-DEV-HEALTH-CHK-LIST.tmp /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-FINAL.tmp /tmp/custom-STORAGE-DEV-HEALTH-CHK-REPORT-SUMMARY-SHORT.tmp
+		exit 0
+		;;
+	esac
+done
+unset NEWT_COLORS

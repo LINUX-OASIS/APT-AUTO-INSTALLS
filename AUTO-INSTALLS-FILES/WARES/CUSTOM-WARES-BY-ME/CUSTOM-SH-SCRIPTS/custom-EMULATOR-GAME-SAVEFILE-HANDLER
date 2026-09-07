@@ -1,0 +1,1168 @@
+#!/bin/bash
+
+# ==============================================================================
+# custom-EMULATOR-GAME-SAVEFILE-HANDLER
+#
+# Program to export and import save files for gaming emulators.
+# Supported Emulators:
+#   1. Nintendo Switch (Eden) - Full Library Backup, Single Game Export/Import,
+#      Automatic Title ID <-> Game Name Resolution, User UUID Auto-Remapping,
+#      Device Save Support, Archive (.zip/.tar/.7z) Extraction, Non-Destructive
+#      Safe Backups.
+#   2. Nintendo GameCube (Dolphin)
+#   3. PlayStation Portable (PPSSPP)
+#   4. Original Xbox (Xemu)
+#
+# NOTE: Permissions 777 (chmod 777) are intentional and desired.
+# ==============================================================================
+
+# Ensure full read/write/execute permissions for all created files and directories
+umask 000
+
+# Set script itself to 777
+if [ -f "$0" ]; then
+	chmod 777 "$0" 2>/dev/null || true
+fi
+
+# ------------------------------------------------------------------------------
+# Utility Functions
+# ------------------------------------------------------------------------------
+
+# Expand ~ and remove trailing slashes
+expand_path() {
+	local p="$1"
+	p="${p/#\~/$HOME}"
+	p="${p%/}"
+	echo "$p"
+}
+
+# Recursively apply 777 permissions
+apply_perms() {
+	local target="$1"
+	if [ -e "$target" ]; then
+		chmod -R 777 "$target" 2>/dev/null || true
+	fi
+}
+
+# Check if an emulator process is currently running and warn the user
+check_emulator_running() {
+	local pattern="$1"
+	local display_name="$2"
+	local pids
+	pids=$(pgrep -i -f "$pattern" 2>/dev/null | grep -v "^$$\$" | grep -v "^$PPID\$")
+	if [ -n "$pids" ]; then
+		whiptail --title "WARNING: $display_name IS RUNNING" \
+			--yesno "$display_name appears to be currently running (PID: $pids).\n\nModifying save files while an emulator is running can cause save file corruption or changes to be immediately overwritten.\n\nIt is strongly advised to exit $display_name first.\n\nDo you want to proceed anyway?" 13 65
+		return $?
+	fi
+	return 0
+}
+
+# ------------------------------------------------------------------------------
+# Emulator Path Detection
+# ------------------------------------------------------------------------------
+
+# Dolphin path detection (Flatpak first, then native XDG, legacy, config)
+detect_dolphin_path() {
+	if [ -d "$HOME/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/GC" ]; then
+		echo "$HOME/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/GC"
+	elif [ -d "$HOME/.local/share/dolphin-emu/GC" ]; then
+		echo "$HOME/.local/share/dolphin-emu/GC"
+	elif [ -d "$HOME/.dolphin-emu/GC" ]; then
+		echo "$HOME/.dolphin-emu/GC"
+	elif [ -d "$HOME/.config/dolphin-emu/GC" ]; then
+		echo "$HOME/.config/dolphin-emu/GC"
+	elif [ -d "$HOME/.var/app/org.DolphinEmu.dolphin-emu" ]; then
+		echo "$HOME/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/GC"
+	else
+		echo "$HOME/.local/share/dolphin-emu/GC"
+	fi
+}
+
+# PPSSPP path detection (Flatpak first, then native)
+detect_ppsspp_path() {
+	if [ -d "$HOME/.var/app/org.ppsspp.PPSSPP/config/ppsspp/PSP/SAVEDATA" ]; then
+		echo "$HOME/.var/app/org.ppsspp.PPSSPP/config/ppsspp/PSP/SAVEDATA"
+	elif [ -d "$HOME/.var/app/org.ppsspp.PPSSPP" ]; then
+		echo "$HOME/.var/app/org.ppsspp.PPSSPP/config/ppsspp/PSP/SAVEDATA"
+	elif [ -d "$HOME/.config/ppsspp/PSP/SAVEDATA" ]; then
+		echo "$HOME/.config/ppsspp/PSP/SAVEDATA"
+	else
+		echo "$HOME/.config/ppsspp/PSP/SAVEDATA"
+	fi
+}
+
+# Xemu path detection (Native first, fallback to Flatpak)
+detect_xemu_path() {
+	if [ -d "$HOME/.local/share/xemu/xemu" ]; then
+		echo "$HOME/.local/share/xemu/xemu"
+	elif [ -d "$HOME/.var/app/app.xemu.xemu/data/xemu/xemu" ]; then
+		echo "$HOME/.var/app/app.xemu.xemu/data/xemu/xemu"
+	elif [ -d "$HOME/.var/app/app.xemu.xemu" ]; then
+		echo "$HOME/.var/app/app.xemu.xemu/data/xemu/xemu"
+	else
+		echo "$HOME/.local/share/xemu/xemu"
+	fi
+}
+
+# ------------------------------------------------------------------------------
+# Generic Export / Import Functions (for Dolphin, PPSSPP, Xemu)
+# ------------------------------------------------------------------------------
+
+generic_export_saves() {
+	local emulator_name="$1"
+	local source_dir="$2"
+	local default_dest="$3"
+	local process_pattern="$4"
+
+	if [ -n "$process_pattern" ]; then
+		check_emulator_running "$process_pattern" "$emulator_name" || return 0
+	fi
+
+	if [ ! -d "$source_dir" ]; then
+		whiptail --title "ERROR" --msgbox "Source directory for $emulator_name does not exist:\n$source_dir" 10 60
+		return 1
+	fi
+
+	local dest_dir
+	dest_dir=$(whiptail --title "EXPORT $emulator_name SAVE FILES" \
+		--inputbox "Enter the destination directory:" 10 60 "$default_dest" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$dest_dir" ]; then
+		return 0
+	fi
+
+	dest_dir=$(expand_path "$dest_dir")
+
+	if [ ! -d "$dest_dir" ]; then
+		whiptail --title "EXPORT $emulator_name SAVE FILES" \
+			--yesno "The destination directory does not exist. Create it?" 10 60
+		if [ $? -eq 0 ]; then
+			mkdir -p "$dest_dir" || {
+				whiptail --title "ERROR" --msgbox "Failed to create directory:\n$dest_dir" 10 60
+				return 1
+			}
+			apply_perms "$dest_dir"
+		else
+			whiptail --title "EXPORT $emulator_name SAVE FILES" --msgbox "Export cancelled." 8 45
+			return 1
+		fi
+	fi
+
+	local err_out
+	err_out=$(cp -rf "$source_dir"/. "$dest_dir/" 2>&1)
+	if [ $? -eq 0 ]; then
+		apply_perms "$dest_dir"
+		whiptail --title "EXPORT SUCCESS" --msgbox "$emulator_name save files exported successfully to:\n$dest_dir\n\nPermissions (777) applied." 10 60
+		return 0
+	else
+		whiptail --title "EXPORT FAILED" --msgbox "Failed to export save files to:\n$dest_dir\n\nError:\n$err_out" 12 60
+		return 1
+	fi
+}
+
+generic_import_saves() {
+	local emulator_name="$1"
+	local dest_dir="$2"
+	local default_src="$3"
+	local process_pattern="$4"
+
+	if [ -n "$process_pattern" ]; then
+		check_emulator_running "$process_pattern" "$emulator_name" || return 0
+	fi
+
+	local src_input
+	src_input=$(whiptail --title "IMPORT $emulator_name SAVE FILES" \
+		--inputbox "Enter the source directory (or archive) containing the save files:" 10 65 "$default_src" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$src_input" ]; then
+		return 0
+	fi
+
+	src_input=$(expand_path "$src_input")
+
+	if [ ! -e "$src_input" ]; then
+		whiptail --title "ERROR" --msgbox "Source does not exist:\n$src_input" 10 60
+		return 1
+	fi
+
+	local actual_src="$src_input"
+	local temp_extract_dir=""
+
+	# Archive detection (.zip, .tar.gz, .7z, etc.)
+	if [ -f "$src_input" ]; then
+		temp_extract_dir=$(mktemp -d /tmp/save_extract_XXXXXX)
+		local extract_err
+		if [[ "$src_input" =~ \.(zip)$ ]]; then
+			extract_err=$(unzip -q -o "$src_input" -d "$temp_extract_dir" 2>&1)
+		elif [[ "$src_input" =~ \.(tar\.gz|tgz)$ ]]; then
+			extract_err=$(tar -xzf "$src_input" -C "$temp_extract_dir" 2>&1)
+		elif [[ "$src_input" =~ \.(tar\.bz2|tbz2)$ ]]; then
+			extract_err=$(tar -xjf "$src_input" -C "$temp_extract_dir" 2>&1)
+		elif [[ "$src_input" =~ \.(tar\.xz|txz)$ ]]; then
+			extract_err=$(tar -xJf "$src_input" -C "$temp_extract_dir" 2>&1)
+		elif [[ "$src_input" =~ \.(7z)$ ]]; then
+			extract_err=$(7z x -y -o"$temp_extract_dir" "$src_input" 2>&1)
+		else
+			extract_err="Unsupported archive format."
+		fi
+
+		if [ $? -ne 0 ] || [ ! -d "$temp_extract_dir" ]; then
+			whiptail --title "ERROR" --msgbox "Failed to extract archive:\n$extract_err" 10 60
+			[ -n "$temp_extract_dir" ] && rm -rf "$temp_extract_dir"
+			return 1
+		fi
+		actual_src="$temp_extract_dir"
+	fi
+
+	local backup_info=""
+	# Safe timestamped backup (never deletes previous backups)
+	if [ -d "$dest_dir" ]; then
+		whiptail --title "WARNING: OVERWRITE SAVES" \
+			--yesno "Warning: Importing will overwrite your current $emulator_name save files.\n\nA timestamped backup will be created automatically before proceeding.\n\nDo you want to proceed?" 12 70
+		if [ $? -ne 0 ]; then
+			[ -n "$temp_extract_dir" ] && rm -rf "$temp_extract_dir"
+			whiptail --title "IMPORT CANCELLED" --msgbox "Import cancelled." 8 45
+			return 1
+		fi
+
+		local timestamp
+		timestamp=$(date +%Y%m%d_%H%M%S)
+		local backup_dir="${dest_dir}.bak_${timestamp}"
+		cp -r "$dest_dir" "$backup_dir" 2>/dev/null
+		if [ $? -eq 0 ]; then
+			apply_perms "$backup_dir"
+			backup_info="A backup was saved to:\n$backup_dir\n\n"
+		fi
+	fi
+
+	if [ ! -d "$dest_dir" ]; then
+		mkdir -p "$dest_dir" || {
+			[ -n "$temp_extract_dir" ] && rm -rf "$temp_extract_dir"
+			whiptail --title "ERROR" --msgbox "Failed to create emulator save directory:\n$dest_dir" 10 60
+			return 1
+		}
+		apply_perms "$dest_dir"
+	fi
+
+	local copy_err
+	copy_err=$(cp -rf "$actual_src"/. "$dest_dir/" 2>&1)
+	local copy_status=$?
+
+	[ -n "$temp_extract_dir" ] && rm -rf "$temp_extract_dir"
+
+	if [ $copy_status -eq 0 ]; then
+		apply_perms "$dest_dir"
+		whiptail --title "IMPORT SUCCESS" --msgbox "$emulator_name save files imported successfully!\n\n${backup_info}Permissions (777) applied." 12 70
+		return 0
+	else
+		whiptail --title "IMPORT FAILED" --msgbox "Failed to import save files to:\n$dest_dir\n\nError:\n$copy_err" 12 60
+		return 1
+	fi
+}
+
+# ------------------------------------------------------------------------------
+# Nintendo Switch (Eden) Embedded Python Helper
+# ------------------------------------------------------------------------------
+
+run_eden_engine() {
+	python3 - "$@" <<'PYEOF'
+import sys, os, re, json, shutil, time, tempfile
+
+def get_eden_paths():
+    cfg = os.path.expanduser("~/.config/eden/qt-config.ini")
+    save_dir = ""
+    nand_dir = ""
+    rom_dirs = []
+    if os.path.exists(cfg):
+        with open(cfg, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("save_directory=") and len(line) > len("save_directory="):
+                    save_dir = line.split("=", 1)[1].strip()
+                elif line.startswith("nand_directory=") and len(line) > len("nand_directory="):
+                    nand_dir = line.split("=", 1)[1].strip()
+                elif "gamedirs" in line and r"\path=" in line:
+                    p = line.split(r"\path=", 1)[1].strip()
+                    if os.path.isdir(p) and p not in rom_dirs:
+                        rom_dirs.append(p)
+                elif line.startswith(r"Paths\romsPath="):
+                    p = line.split("=", 1)[1].strip()
+                    if os.path.isdir(p) and p not in rom_dirs:
+                        rom_dirs.append(p)
+    if not nand_dir:
+        for nd in [os.path.expanduser("~/.local/share/eden/nand"),
+                   os.path.expanduser("~/.var/app/dev.eden_emu.eden/data/eden/nand"),
+                   os.path.expanduser("~/.var/app/org.eden_emu.eden/data/eden/nand")]:
+            if os.path.isdir(nd):
+                nand_dir = nd
+                break
+    if not nand_dir:
+        nand_dir = os.path.expanduser("~/.local/share/eden/nand")
+    if not save_dir:
+        save_dir = os.path.join(nand_dir, "user/save")
+    common_roms = [
+        "/mnt/INT-WWAN-EXT4/GAMES/NINTENDO-SWITCH",
+        os.path.expanduser("~/Games/Switch"),
+        os.path.expanduser("~/Games/Nintendo-Switch"),
+        os.path.expanduser("~/ROMs/Switch"),
+        os.path.expanduser("~/Emulation/roms/switch")
+    ]
+    for c in common_roms:
+        if os.path.isdir(c) and c not in rom_dirs:
+            rom_dirs.append(c)
+    return save_dir, nand_dir, rom_dirs
+
+def get_title_db(rom_dirs):
+    title_db = {}
+    title_pattern = re.compile(r"\[([0-9a-fA-F]{16})\]")
+    for rd in rom_dirs:
+        if not os.path.isdir(rd):
+            continue
+        for fname in os.listdir(rd):
+            m = title_pattern.search(fname)
+            if m:
+                raw_tid = m.group(1).upper()
+                clean = re.sub(r"\[.*?\]", "", fname)
+                clean = re.sub(r"\.(nsp|xci|nca|nsz|xcz)$", "", clean, flags=re.IGNORECASE)
+                clean = re.sub(r"(\bv\d+(\.\d+)*\b|Update|UPD|BASE|DLC)", "", clean, flags=re.IGNORECASE)
+                clean = clean.replace("_", " ").replace(".", " ").strip(" -.")
+                clean = " ".join(clean.split())
+                base_tid = raw_tid[:-3] + "000" if raw_tid.endswith("800") else raw_tid
+                if base_tid not in title_db or len(clean) < len(title_db[base_tid]):
+                    if clean:
+                        title_db[base_tid] = clean
+                if raw_tid not in title_db:
+                    if clean:
+                        title_db[raw_tid] = clean
+    return title_db
+
+def get_profiles(nand_dir, save_root):
+    profiles = {}
+    prof_path = os.path.join(nand_dir, "system/save/8000000000000010/su/avators/profiles.dat")
+    if os.path.exists(prof_path):
+        try:
+            with open(prof_path, "rb") as f:
+                data = f.read()
+            for offset in range(0x10, len(data), 0xF8):
+                if offset + 0x40 > len(data):
+                    break
+                b = data[offset:offset+16]
+                if b == b"\x00" * 16:
+                    continue
+                uuid = (b[8:16][::-1].hex() + b[0:8][::-1].hex()).upper()
+                name = data[offset+0x28:offset+0x28+32].split(b"\x00")[0].decode("utf-8", errors="ignore").strip()
+                profiles[uuid] = name if name else "Eden User"
+        except Exception:
+            pass
+    base_save = os.path.join(save_root, "0000000000000000")
+    if os.path.isdir(base_save):
+        for d in os.listdir(base_save):
+            if len(d) == 32 and d != "0"*32 and re.match(r"^[0-9a-fA-F]{32}$", d):
+                d_up = d.upper()
+                if d_up not in profiles:
+                    profiles[d_up] = f"Profile ({d_up[:8]}...)"
+    return profiles
+
+def get_saved_games(save_root, title_db):
+    saves = []
+    base_user_save = os.path.join(save_root, "0000000000000000")
+    if not os.path.isdir(base_user_save):
+        return saves
+    tid_regex = re.compile(r"^[0-9a-fA-F]{16}$")
+    for user_uuid in os.listdir(base_user_save):
+        user_path = os.path.join(base_user_save, user_uuid)
+        if not os.path.isdir(user_path):
+            continue
+        is_device = (user_uuid == "0"*32)
+        for tid in os.listdir(user_path):
+            if tid_regex.match(tid):
+                tid_path = os.path.join(user_path, tid)
+                if os.path.isdir(tid_path):
+                    files = []
+                    for r, _, fs in os.walk(tid_path):
+                        for f in fs:
+                            files.append(f)
+                    if files:
+                        t_upper = tid.upper()
+                        name = title_db.get(t_upper, f"Switch Game [{t_upper}]")
+                        saves.append({
+                            "title_id": t_upper,
+                            "game_name": name,
+                            "user_uuid": user_uuid,
+                            "is_device": is_device,
+                            "path": tid_path,
+                            "files_count": len(files)
+                        })
+    return saves
+
+def chmod_777_tree(dir_path):
+    try:
+        for root, dirs, files in os.walk(dir_path):
+            try:
+                os.chmod(root, 0o777)
+            except Exception:
+                pass
+            for f in files:
+                try:
+                    os.chmod(os.path.join(root, f), 0o777)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+# -----------------------------------------------------------------------------
+# CLI Subcommands
+# -----------------------------------------------------------------------------
+cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+
+if cmd == "info":
+    save_root, nand_root, rom_dirs = get_eden_paths()
+    title_db = get_title_db(rom_dirs)
+    profiles = get_profiles(nand_root, save_root)
+    saved_games = get_saved_games(save_root, title_db)
+    
+    # Sort installed games
+    installed_list = []
+    seen = set()
+    for t, n in sorted(title_db.items(), key=lambda x: x[1].lower()):
+        if n and n not in seen:
+            seen.add(n)
+            installed_list.append({"title_id": t, "game_name": n})
+
+    out = {
+        "save_root": save_root,
+        "nand_root": nand_root,
+        "profiles": [{"uuid": u, "name": n} for u, n in profiles.items()],
+        "saved_games": saved_games,
+        "installed_games": installed_list
+    }
+    print(json.dumps(out))
+    sys.exit(0)
+
+elif cmd == "export-all":
+    dest_dir = os.path.abspath(sys.argv[2])
+    save_root, nand_root, rom_dirs = get_eden_paths()
+    title_db = get_title_db(rom_dirs)
+    profiles = get_profiles(nand_root, save_root)
+    saved_games = get_saved_games(save_root, title_db)
+
+    os.makedirs(dest_dir, exist_ok=True)
+    
+    # Copy 0000000000000000 tree
+    base_save = os.path.join(save_root, "0000000000000000")
+    if os.path.isdir(base_save):
+        shutil.copytree(base_save, os.path.join(dest_dir, "0000000000000000"), dirs_exist_ok=True)
+
+    # Copy profiles.dat if available
+    prof_src = os.path.join(nand_root, "system/save/8000000000000010/su/avators/profiles.dat")
+    if os.path.exists(prof_src):
+        prof_dst_dir = os.path.join(dest_dir, "system_profile")
+        os.makedirs(prof_dst_dir, exist_ok=True)
+        shutil.copy2(prof_src, os.path.join(prof_dst_dir, "profiles.dat"))
+
+    # Write manifest
+    manifest_path = os.path.join(dest_dir, "manifest.txt")
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        f.write("=====================================================\n")
+        f.write("Eden Nintendo Switch Save Library Backup\n")
+        f.write(f"Export Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        if profiles:
+            p_str = ", ".join([f"{n} ({u})" for u, n in profiles.items()])
+            f.write(f"Profiles: {p_str}\n")
+        f.write("=====================================================\n\n")
+        f.write(f"Total Games with Saves: {len(saved_games)}\n\n")
+        for g in saved_games:
+            dev_tag = " [Device Save]" if g["is_device"] else ""
+            f.write(f"- {g['game_name']} [{g['title_id']}]{dev_tag}: {g['files_count']} file(s)\n")
+
+    chmod_777_tree(dest_dir)
+    print(json.dumps({
+        "status": "ok",
+        "dest_dir": dest_dir,
+        "games_count": len(saved_games),
+        "games": [f"{g['game_name']} [{g['title_id']}]" for g in saved_games]
+    }))
+    sys.exit(0)
+
+elif cmd == "export-game":
+    title_id = sys.argv[2].upper()
+    dest_dir = os.path.abspath(sys.argv[3])
+    save_root, nand_root, rom_dirs = get_eden_paths()
+    title_db = get_title_db(rom_dirs)
+    saved_games = get_saved_games(save_root, title_db)
+
+    matching = [g for g in saved_games if g["title_id"] == title_id]
+    if not matching:
+        print(json.dumps({"status": "error", "message": f"No save found for Title ID {title_id}"}))
+        sys.exit(1)
+
+    game_info = matching[0]
+    os.makedirs(dest_dir, exist_ok=True)
+    shutil.copytree(game_info["path"], dest_dir, dirs_exist_ok=True)
+
+    info_path = os.path.join(dest_dir, "save_info.txt")
+    with open(info_path, "w", encoding="utf-8") as f:
+        f.write("Emulator: Nintendo Switch (Eden)\n")
+        f.write(f"Game: {game_info['game_name']}\n")
+        f.write(f"Title ID: {game_info['title_id']}\n")
+        f.write(f"Source User UUID: {game_info['user_uuid']}\n")
+        f.write(f"Is Device Save: {game_info['is_device']}\n")
+        f.write(f"Export Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+    chmod_777_tree(dest_dir)
+    print(json.dumps({
+        "status": "ok",
+        "dest_dir": dest_dir,
+        "title_id": game_info["title_id"],
+        "game_name": game_info["game_name"],
+        "files_count": game_info["files_count"]
+    }))
+    sys.exit(0)
+
+elif cmd == "analyze-import":
+    src_input = os.path.abspath(sys.argv[2])
+    save_root, nand_root, rom_dirs = get_eden_paths()
+    title_db = get_title_db(rom_dirs)
+
+    if not os.path.exists(src_input):
+        print(json.dumps({"status": "error", "message": f"Source does not exist: {src_input}"}))
+        sys.exit(1)
+
+    temp_extract = None
+    scan_dir = src_input
+
+    # Check for archive
+    if os.path.isfile(src_input):
+        temp_extract = tempfile.mkdtemp(prefix="eden_import_extract_")
+        try:
+            if src_input.endswith(".zip"):
+                shutil.unpack_archive(src_input, temp_extract, "zip")
+            elif src_input.endswith((".tar.gz", ".tgz")):
+                shutil.unpack_archive(src_input, temp_extract, "gztar")
+            elif src_input.endswith((".tar.bz2", ".tbz2")):
+                shutil.unpack_archive(src_input, temp_extract, "bztar")
+            elif src_input.endswith((".tar.xz", ".txz")):
+                shutil.unpack_archive(src_input, temp_extract, "xztar")
+            elif src_input.endswith(".7z"):
+                res = os.system(f"7z x -y -o'{temp_extract}' '{src_input}' >/dev/null 2>&1")
+                if res != 0:
+                    raise RuntimeError("Failed to extract .7z archive")
+            else:
+                shutil.unpack_archive(src_input, temp_extract)
+            scan_dir = temp_extract
+        except Exception as e:
+            if temp_extract and os.path.exists(temp_extract):
+                shutil.rmtree(temp_extract)
+            print(json.dumps({"status": "error", "message": f"Archive extraction failed: {str(e)}"}))
+            sys.exit(1)
+
+    tid_regex = re.compile(r"^[0-9a-fA-F]{16}$")
+    uuid_regex = re.compile(r"^[0-9a-fA-F]{32}$")
+    bracket_tid = re.compile(r"\[([0-9a-fA-F]{16})\]")
+
+    saves = []
+    meta_info = {}
+    system_profile_path = None
+
+    # Search for metadata files or profiles.dat
+    for root, _, files in os.walk(scan_dir):
+        if "profiles.dat" in files:
+            system_profile_path = os.path.join(root, "profiles.dat")
+        for mf in ["save_info.txt", "manifest.txt", "meta.json"]:
+            if mf in files:
+                try:
+                    with open(os.path.join(root, mf), "r", encoding="utf-8", errors="ignore") as f:
+                        txt = f.read()
+                        m = bracket_tid.search(txt) or re.search(r"Title\s*ID:\s*([0-9a-fA-F]{16})", txt, re.IGNORECASE)
+                        if m:
+                            meta_info[root] = m.group(1).upper()
+                except Exception:
+                    pass
+
+    # Walk directory to find Title ID folders
+    for root, dirs, files in os.walk(scan_dir):
+        real_files = [f for f in files if f not in ("save_info.txt", "manifest.txt", "meta.json", "profiles.dat")]
+        if not real_files:
+            continue
+        base = os.path.basename(root)
+        parent = os.path.basename(os.path.dirname(root))
+
+        # Title ID directory
+        if tid_regex.match(base):
+            tid = base.upper()
+            is_device = (parent == "0"*32)
+            src_uuid = parent if uuid_regex.match(parent) else ""
+            saves.append({
+                "title_id": tid,
+                "game_name": title_db.get(tid, f"Switch Game [{tid}]"),
+                "source_path": root,
+                "is_device": is_device,
+                "source_uuid": src_uuid,
+                "files_count": len(real_files)
+            })
+            continue
+
+        # Bracketed Title ID
+        m = bracket_tid.search(base)
+        if m:
+            tid = m.group(1).upper()
+            saves.append({
+                "title_id": tid,
+                "game_name": title_db.get(tid, f"Switch Game [{tid}]"),
+                "source_path": root,
+                "is_device": False,
+                "source_uuid": "",
+                "files_count": len(real_files)
+            })
+            continue
+
+        # Meta match
+        if root in meta_info:
+            tid = meta_info[root]
+            saves.append({
+                "title_id": tid,
+                "game_name": title_db.get(tid, f"Switch Game [{tid}]"),
+                "source_path": root,
+                "is_device": False,
+                "source_uuid": "",
+                "files_count": len(real_files)
+            })
+            continue
+
+    # Fallback to root directory name if not yet matched
+    if not saves:
+        base = os.path.basename(scan_dir.rstrip("/\\"))
+        m = bracket_tid.search(base) or (tid_regex.match(base) and bracket_tid.search(f"[{base}]"))
+        if m:
+            tid = m.group(1).upper()
+            real_files = [f for r, _, fs in os.walk(scan_dir) for f in fs if f not in ("save_info.txt", "manifest.txt", "meta.json", "profiles.dat")]
+            if real_files:
+                saves.append({
+                    "title_id": tid,
+                    "game_name": title_db.get(tid, f"Switch Game [{tid}]"),
+                    "source_path": scan_dir,
+                    "is_device": False,
+                    "source_uuid": "",
+                    "files_count": len(real_files)
+                })
+
+    # If still no saves detected, check for raw save files
+    raw_files = []
+    if not saves:
+        for r, _, fs in os.walk(scan_dir):
+            for f in fs:
+                if f not in ("save_info.txt", "manifest.txt", "meta.json", "profiles.dat"):
+                    raw_files.append(f)
+
+    print(json.dumps({
+        "status": "ok",
+        "scan_dir": scan_dir,
+        "temp_extract": temp_extract,
+        "saves": saves,
+        "raw_files": raw_files,
+        "system_profile": system_profile_path
+    }))
+    sys.exit(0)
+
+elif cmd == "execute-import":
+    scan_dir = os.path.abspath(sys.argv[2])
+    target_uuid = sys.argv[3].upper()
+    manual_title_id = sys.argv[4].upper() if len(sys.argv) > 4 and sys.argv[4] else ""
+
+    save_root, nand_root, rom_dirs = get_eden_paths()
+    title_db = get_title_db(rom_dirs)
+
+    # First re-analyze scan_dir to obtain target saves
+    tid_regex = re.compile(r"^[0-9a-fA-F]{16}$")
+    uuid_regex = re.compile(r"^[0-9a-fA-F]{32}$")
+    bracket_tid = re.compile(r"\[([0-9a-fA-F]{16})\]")
+    saves = []
+    meta_info = {}
+
+    for root, _, files in os.walk(scan_dir):
+        for mf in ["save_info.txt", "manifest.txt", "meta.json"]:
+            if mf in files:
+                try:
+                    with open(os.path.join(root, mf), "r", encoding="utf-8", errors="ignore") as f:
+                        txt = f.read()
+                        m = bracket_tid.search(txt) or re.search(r"Title\s*ID:\s*([0-9a-fA-F]{16})", txt, re.IGNORECASE)
+                        if m:
+                            meta_info[root] = m.group(1).upper()
+                except Exception:
+                    pass
+
+    for root, dirs, files in os.walk(scan_dir):
+        real_files = [f for f in files if f not in ("save_info.txt", "manifest.txt", "meta.json", "profiles.dat")]
+        if not real_files:
+            continue
+        base = os.path.basename(root)
+        parent = os.path.basename(os.path.dirname(root))
+        if tid_regex.match(base):
+            tid = base.upper()
+            saves.append({"title_id": tid, "source_path": root, "is_device": (parent == "0"*32)})
+            continue
+        m = bracket_tid.search(base)
+        if m:
+            saves.append({"title_id": m.group(1).upper(), "source_path": root, "is_device": False})
+            continue
+        if root in meta_info:
+            saves.append({"title_id": meta_info[root], "source_path": root, "is_device": False})
+            continue
+
+    # Fallback to root directory
+    if not saves:
+        base = os.path.basename(scan_dir.rstrip("/\\"))
+        m = bracket_tid.search(base) or (tid_regex.match(base) and bracket_tid.search(f"[{base}]"))
+        if m:
+            saves.append({"title_id": m.group(1).upper(), "source_path": scan_dir, "is_device": False})
+
+    # Fallback to manual Title ID if provided
+    if not saves and manual_title_id and tid_regex.match(manual_title_id):
+        saves.append({"title_id": manual_title_id, "source_path": scan_dir, "is_device": False})
+
+    if not saves:
+        print(json.dumps({"status": "error", "message": "No save data found to import."}))
+        sys.exit(1)
+
+    imported = []
+    base_save_space = os.path.join(save_root, "0000000000000000")
+    os.makedirs(base_save_space, exist_ok=True)
+
+    for item in saves:
+        tid = item["title_id"]
+        is_dev = item["is_device"]
+        s_path = item["source_path"]
+        
+        assigned_uuid = ("0"*32) if is_dev else target_uuid
+        dest_title_dir = os.path.join(base_save_space, assigned_uuid, tid)
+        
+        backup_path = None
+        # Non-destructive backup of existing game saves
+        if os.path.exists(dest_title_dir):
+            existing_files = [f for r, _, fs in os.walk(dest_title_dir) for f in fs]
+            if existing_files:
+                backup_path = f"{dest_title_dir}.bak_{int(time.time())}"
+                shutil.copytree(dest_title_dir, backup_path)
+                chmod_777_tree(backup_path)
+
+        os.makedirs(dest_title_dir, exist_ok=True)
+        # Copy files into dest_title_dir ignoring metadata
+        count = 0
+        for entry in os.listdir(s_path):
+            if entry in ("save_info.txt", "manifest.txt", "meta.json", "profiles.dat"):
+                continue
+            src_item = os.path.join(s_path, entry)
+            dst_item = os.path.join(dest_title_dir, entry)
+            if os.path.isdir(src_item):
+                shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src_item, dst_item)
+            count += 1
+
+        chmod_777_tree(dest_title_dir)
+        chmod_777_tree(os.path.join(base_save_space, assigned_uuid))
+        
+        game_title = title_db.get(tid, f"Switch Game [{tid}]")
+        imported.append({
+            "title_id": tid,
+            "game_name": game_title,
+            "files_count": count,
+            "backup_path": backup_path
+        })
+
+    # Ensure full permissions on save root and nand
+    chmod_777_tree(save_root)
+    chmod_777_tree(nand_root)
+
+    print(json.dumps({
+        "status": "ok",
+        "target_uuid": target_uuid,
+        "imported": imported
+    }))
+    sys.exit(0)
+
+PYEOF
+}
+
+# ------------------------------------------------------------------------------
+# Nintendo Switch (Eden) UI Workflows
+# ------------------------------------------------------------------------------
+
+eden_export_all_flow() {
+	local info_json
+	info_json=$(run_eden_engine info 2>/dev/null)
+	if [ -z "$info_json" ]; then
+		whiptail --title "ERROR" --msgbox "Failed to retrieve Eden environment information." 10 60
+		return 1
+	fi
+
+	local default_dest="$PWD/EDEN_NINTENDO_SWITCH_SAVE_FILES"
+	local dest_dir
+	dest_dir=$(whiptail --title "EXPORT ALL EDEN SAVES" \
+		--inputbox "Enter destination directory for full Switch save library backup:" 10 65 "$default_dest" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$dest_dir" ]; then
+		return 0
+	fi
+
+	dest_dir=$(expand_path "$dest_dir")
+
+	local res_json
+	res_json=$(run_eden_engine export-all "$dest_dir" 2>&1)
+	local exit_code=$?
+
+	if [ $exit_code -ne 0 ]; then
+		whiptail --title "EXPORT FAILED" --msgbox "Failed to export Eden saves:\n$res_json" 12 65
+		return 1
+	fi
+
+	local count
+	count=$(echo "$res_json" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('games_count', 0))" 2>/dev/null)
+	local games_list
+	games_list=$(echo "$res_json" | python3 -c "import sys, json; d=json.load(sys.stdin); print('\n'.join(['• ' + g for g in d.get('games', [])]))" 2>/dev/null)
+
+	whiptail --title "EXPORT SUCCESS" --msgbox "All Nintendo Switch save files exported successfully!\n\nDestination:\n$dest_dir\n\nTotal Games: $count\n$games_list\n\nPermissions (777) applied." 16 70
+	return 0
+}
+
+eden_export_specific_flow() {
+	local info_json
+	info_json=$(run_eden_engine info 2>/dev/null)
+	if [ -z "$info_json" ]; then
+		whiptail --title "ERROR" --msgbox "Failed to retrieve Eden environment information." 10 60
+		return 1
+	fi
+
+	local games_count
+	games_count=$(echo "$info_json" | python3 -c "import sys, json; d=json.load(sys.stdin); print(len(d.get('saved_games', [])))" 2>/dev/null)
+
+	if [ "$games_count" -eq 0 ] || [ -z "$games_count" ]; then
+		whiptail --title "NO SAVES FOUND" --msgbox "No game saves were found in Eden." 10 60
+		return 0
+	fi
+
+	# Generate menu list for whiptail
+	local menu_items=()
+	while IFS='|' read -r tid gname fcount; do
+		menu_items+=("$tid" "$gname ($fcount files)")
+	done < <(echo "$info_json" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+for g in d.get("saved_games", []):
+    print(f"{g[\"title_id\"]}|{g[\"game_name\"]}|{g[\"files_count\"]}")
+')
+
+	local chosen_tid
+	chosen_tid=$(whiptail --title "SELECT GAME TO EXPORT" \
+		--menu "Choose a Nintendo Switch game save to export:" 18 75 8 \
+		"${menu_items[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$chosen_tid" ]; then
+		return 0
+	fi
+
+	# Get sanitized game name
+	local safe_name
+	safe_name=$(echo "$info_json" | python3 -c "
+import sys, json, re
+d = json.load(sys.stdin)
+for g in d.get('saved_games', []):
+    if g['title_id'] == '$chosen_tid':
+        print(re.sub(r'[^a-zA-Z0-9_-]+', '_', g['game_name']).strip('_'))
+        break
+")
+
+	local default_dest="$PWD/EDEN_SAVE_${safe_name}_[${chosen_tid}]"
+	local dest_dir
+	dest_dir=$(whiptail --title "EXPORT GAME SAVE" \
+		--inputbox "Enter destination directory for this save:" 10 70 "$default_dest" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$dest_dir" ]; then
+		return 0
+	fi
+
+	dest_dir=$(expand_path "$dest_dir")
+
+	local res_json
+	res_json=$(run_eden_engine export-game "$chosen_tid" "$dest_dir" 2>&1)
+	if [ $? -ne 0 ]; then
+		whiptail --title "EXPORT FAILED" --msgbox "Failed to export save:\n$res_json" 12 65
+		return 1
+	fi
+
+	local gname
+	gname=$(echo "$res_json" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('game_name', ''))")
+	local fcount
+	fcount=$(echo "$res_json" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('files_count', 0))")
+
+	whiptail --title "EXPORT SUCCESS" --msgbox "Save exported successfully!\n\nGame: $gname\nTitle ID: $chosen_tid\nFiles: $fcount\n\nDestination:\n$dest_dir\n\nPermissions (777) applied." 14 65
+	return 0
+}
+
+eden_export_menu() {
+	check_emulator_running "eden" "Eden" || return 0
+
+	while true; do
+		local choice
+		choice=$(whiptail --title "EXPORT EDEN (NINTENDO SWITCH) SAVES" \
+			--menu "Select export type:" 13 65 3 \
+			"ALL-GAMES" "Export All Saves (Full Library Backup)" \
+			"SPECIFIC-GAME" "Export Specific Game Save" \
+			"BACK" "Back to Main Menu" 3>&1 1>&2 2>&3)
+
+		case "$choice" in
+		ALL-GAMES)
+			eden_export_all_flow
+			break
+			;;
+		SPECIFIC-GAME)
+			eden_export_specific_flow
+			break
+			;;
+		*)
+			break
+			;;
+		esac
+	done
+}
+
+eden_import_flow() {
+	check_emulator_running "eden" "Eden" || return 0
+
+	local default_src="$PWD/EDEN_NINTENDO_SWITCH_SAVE_FILES"
+	local src_input
+	src_input=$(whiptail --title "IMPORT EDEN (NINTENDO SWITCH) SAVES" \
+		--inputbox "Enter source directory (or archive: .zip, .tar.gz, .7z):" 10 70 "$default_src" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$src_input" ]; then
+		return 0
+	fi
+
+	src_input=$(expand_path "$src_input")
+
+	if [ ! -e "$src_input" ]; then
+		whiptail --title "ERROR" --msgbox "Source does not exist:\n$src_input" 10 60
+		return 1
+	fi
+
+	# Run analysis
+	local analysis_json
+	analysis_json=$(run_eden_engine analyze-import "$src_input" 2>&1)
+	if [ $? -ne 0 ]; then
+		whiptail --title "ANALYSIS ERROR" --msgbox "Failed to analyze source:\n$analysis_json" 12 65
+		return 1
+	fi
+
+	local temp_extract
+	temp_extract=$(echo "$analysis_json" | python3 -c "import sys, json; print(json.load(sys.stdin).get('temp_extract') or '')")
+	local scan_dir
+	scan_dir=$(echo "$analysis_json" | python3 -c "import sys, json; print(json.load(sys.stdin).get('scan_dir') or '')")
+	local saves_count
+	saves_count=$(echo "$analysis_json" | python3 -c "import sys, json; print(len(json.load(sys.stdin).get('saves', [])))")
+	local raw_count
+	raw_count=$(echo "$analysis_json" | python3 -c "import sys, json; print(len(json.load(sys.stdin).get('raw_files', [])))")
+
+	local manual_tid=""
+
+	if [ "$saves_count" -eq 0 ]; then
+		if [ "$raw_count" -gt 0 ]; then
+			# Raw save files detected without Title ID
+			# Prompt user to select which game this save belongs to
+			local info_json
+			info_json=$(run_eden_engine info 2>/dev/null)
+
+			local game_choices=()
+			while IFS='|' read -r tid gname; do
+				game_choices+=("$tid" "$gname")
+			done < <(echo "$info_json" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+for g in d.get("installed_games", []):
+    print(f"{g[\"title_id\"]}|{g[\"game_name\"]}")
+')
+			game_choices+=("MANUAL" "Enter Nintendo Switch Title ID Manually")
+
+			local sel
+			sel=$(whiptail --title "SELECT TARGET GAME FOR SAVE FILES" \
+				--menu "Raw save files detected ($raw_count files), but Title ID was not recognized.\n\nPlease select which game this save belongs to:" 18 75 8 \
+				"${game_choices[@]}" 3>&1 1>&2 2>&3)
+
+			if [ $? -ne 0 ] || [ -z "$sel" ]; then
+				[ -n "$temp_extract" ] && rm -rf "$temp_extract"
+				return 0
+			fi
+
+			if [ "$sel" = "MANUAL" ]; then
+				manual_tid=$(whiptail --title "ENTER TITLE ID" \
+					--inputbox "Enter the 16-character hexadecimal Title ID (e.g. 010055D009F78000):" 10 65 3>&1 1>&2 2>&3)
+				if [ $? -ne 0 ] || [ -z "$manual_tid" ]; then
+					[ -n "$temp_extract" ] && rm -rf "$temp_extract"
+					return 0
+				fi
+				manual_tid=$(echo "$manual_tid" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+			else
+				manual_tid="$sel"
+			fi
+		else
+			[ -n "$temp_extract" ] && rm -rf "$temp_extract"
+			whiptail --title "NO SAVES FOUND" --msgbox "No Nintendo Switch save files found in specified source:\n$src_input" 10 65
+			return 1
+		fi
+	fi
+
+	# Determine Target Eden Profile
+	local info_json
+	info_json=$(run_eden_engine info 2>/dev/null)
+	local prof_count
+	prof_count=$(echo "$info_json" | python3 -c "import sys, json; print(len(json.load(sys.stdin).get('profiles', [])))")
+
+	local target_uuid=""
+	local target_name=""
+
+	if [ "$prof_count" -gt 1 ]; then
+		# Multiple profiles exist, prompt user
+		local prof_menu=()
+		while IFS='|' read -r pu pn; do
+			prof_menu+=("$pu" "$pn")
+		done < <(echo "$info_json" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+for p in d.get("profiles", []):
+    print(f"{p[\"uuid\"]}|{p[\"name\"]}")
+')
+		target_uuid=$(whiptail --title "SELECT TARGET PROFILE" \
+			--menu "Multiple Eden profiles detected. Select target profile to import into:" 15 70 5 \
+			"${prof_menu[@]}" 3>&1 1>&2 2>&3)
+
+		if [ $? -ne 0 ] || [ -z "$target_uuid" ]; then
+			[ -n "$temp_extract" ] && rm -rf "$temp_extract"
+			return 0
+		fi
+		target_name=$(echo "$info_json" | python3 -c "import sys, json; d=json.load(sys.stdin); print(next((p['name'] for p in d.get('profiles', []) if p['uuid']=='$target_uuid'), 'User'))")
+	elif [ "$prof_count" -eq 1 ]; then
+		target_uuid=$(echo "$info_json" | python3 -c "import sys, json; print(json.load(sys.stdin)['profiles'][0]['uuid'])")
+		target_name=$(echo "$info_json" | python3 -c "import sys, json; print(json.load(sys.stdin)['profiles'][0]['name'])")
+	else
+		# Fresh Eden install, default fallback UUID
+		target_uuid="00000000000000010000000000000001"
+		target_name="Default Profile"
+	fi
+
+	# Prepare confirmation summary
+	local summary_text
+	summary_text=$(echo "$analysis_json" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+saves = d.get('saves', [])
+lines = []
+if saves:
+    lines.append(f'Found {len(saves)} game save(s) to import:')
+    for s in saves:
+        lines.append(f\"• {s['game_name']} [{s['title_id']}]: {s['files_count']} file(s)\")
+else:
+    lines.append('Importing raw save files:')
+    lines.append(f'• Target Title ID: $manual_tid')
+print('\n'.join(lines))
+")
+
+	whiptail --title "CONFIRM IMPORT" \
+		--yesno "Ready to import Nintendo Switch save data:\n\n$summary_text\n\nTarget Profile: $target_name ($target_uuid)\n\nExisting saves will be automatically backed up with timestamps.\nDo you want to proceed?" 16 75
+
+	if [ $? -ne 0 ]; then
+		[ -n "$temp_extract" ] && rm -rf "$temp_extract"
+		whiptail --title "IMPORT CANCELLED" --msgbox "Import cancelled." 8 45
+		return 0
+	fi
+
+	# Execute Import
+	local exec_json
+	exec_json=$(run_eden_engine execute-import "$scan_dir" "$target_uuid" "$manual_tid" 2>&1)
+	local exec_status=$?
+
+	[ -n "$temp_extract" ] && rm -rf "$temp_extract"
+
+	if [ $exec_status -ne 0 ]; then
+		whiptail --title "IMPORT FAILED" --msgbox "Failed to import saves:\n$exec_json" 12 65
+		return 1
+	fi
+
+	local success_summary
+	success_summary=$(echo "$exec_json" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+imported = d.get('imported', [])
+lines = []
+lines.append(f'Successfully imported {len(imported)} game(s) into profile: $target_name\n')
+for g in imported:
+    b_msg = ' (Existing save backed up)' if g.get('backup_path') else ''
+    lines.append(f\"• {g['game_name']} [{g['title_id']}] - {g['files_count']} files{b_msg}\")
+print('\n'.join(lines))
+")
+
+	whiptail --title "IMPORT SUCCESS" \
+		--msgbox "$success_summary\n\nPermissions (777) applied." 16 75
+	return 0
+}
+
+# ------------------------------------------------------------------------------
+# Main Application Menu
+# ------------------------------------------------------------------------------
+
+main_menu() {
+	# Initial path detection
+	local dolphin_path
+	dolphin_path=$(detect_dolphin_path)
+	local ppsspp_path
+	ppsspp_path=$(detect_ppsspp_path)
+	local xemu_path
+	xemu_path=$(detect_xemu_path)
+
+	while true; do
+		local choice
+		choice=$(whiptail --title "GAME SAVE FILE MANAGER" --menu "Select an option:" 18 70 8 \
+			"EXPORT-EDEN" "Export Eden (Nintendo Switch) Save Files" \
+			"EXPORT-GAMECUBE" "Export Dolphin (GameCube) Save Files" \
+			"EXPORT-PPSSPP" "Export PPSSPP (PSP) Save Files" \
+			"EXPORT-XEMU" "Export Xemu (Xbox) Save Files" \
+			"IMPORT-EDEN" "Import Eden (Nintendo Switch) Save Files" \
+			"IMPORT-GAMECUBE" "Import Dolphin (GameCube) Save Files" \
+			"IMPORT-PPSSPP" "Import PPSSPP (PSP) Save Files" \
+			"IMPORT-XEMU" "Import Xemu (Xbox) Save Files" 3>&1 1>&2 2>&3)
+
+		case "$choice" in
+		EXPORT-EDEN)
+			eden_export_menu
+			;;
+		EXPORT-GAMECUBE)
+			generic_export_saves "Dolphin (GameCube)" "$dolphin_path" "$PWD/GAMECUBE_SAVE_FILES" "dolphin-emu"
+			;;
+		EXPORT-PPSSPP)
+			generic_export_saves "PPSSPP (PSP)" "$ppsspp_path" "$PWD/PPSSPP_PSP_SAVE_FILES" "PPSSPP"
+			;;
+		EXPORT-XEMU)
+			generic_export_saves "Xemu (Xbox)" "$xemu_path" "$PWD/XEMU_XBOX_SAVE_FILES" "xemu"
+			;;
+		IMPORT-EDEN)
+			eden_import_flow
+			;;
+		IMPORT-GAMECUBE)
+			generic_import_saves "Dolphin (GameCube)" "$dolphin_path" "$PWD/GAMECUBE_SAVE_FILES" "dolphin-emu"
+			;;
+		IMPORT-PPSSPP)
+			generic_import_saves "PPSSPP (PSP)" "$ppsspp_path" "$PWD/PPSSPP_PSP_SAVE_FILES" "PPSSPP"
+			;;
+		IMPORT-XEMU)
+			generic_import_saves "Xemu (Xbox)" "$xemu_path" "$PWD/XEMU_XBOX_SAVE_FILES" "xemu"
+			;;
+		*)
+			# User pressed Cancel or ESC
+			break
+			;;
+		esac
+	done
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+	main_menu
+fi

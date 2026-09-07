@@ -1,0 +1,825 @@
+#!/bin/bash
+
+FUN_INSTALL_VSCODE_ONLINE() {
+
+	# VSCode Installation and Configuration
+
+	# needs curl & wget
+	sudo apt install -y curl wget
+
+	# Pre-seed the debconf database to automatically accept the Microsoft repository addition.
+	echo "code code/add-microsoft-repo boolean true" | sudo debconf-set-selections
+	# Clean the temporary worker directory before downloading.
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	# Download the latest stable VSCode .deb package. Exit if the download fails.
+	wget -O ./AUTO-INSTALLS-FILES/WORKER-TEMP/VS_CODE.deb 'https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64' || {
+		echo "ERROR: COULDNT DOWNLOAD VSCODE DEB PACKAGE"
+		exit 1
+	}
+	# Navigate into the worker directory to install the local package.
+	cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/ || exit 1
+	# Install the downloaded .deb package. Exit if the installation fails.
+	if sudo apt install -y "./VS_CODE.deb"; then
+		FUN_TRACK_CUSTOM_INSTALL "Visual Studio Code" "success"
+	else
+		echo "ERROR: COULDNT INSTALL VSCODE"
+		FUN_TRACK_CUSTOM_INSTALL "Visual Studio Code" "fail"
+		exit 1
+	fi
+	# Return to the original script directory.
+	cd "$CD_DIRNAME" || exit 1
+	# Clean up the temporary worker directory.
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	#
+	#  FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY
+	#
+	#  A helper function to robustly install a VSCode extension. It will attempt the installation up to 5 times,
+	#  with a 10-second delay between retries. This is useful for overcoming transient network issues.
+	#
+	#  Parameters:
+	#    $1: The full name of the VSCode extension to install (e.g., "rogalmic.bash-debug").
+	#
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY() {
+		local extension="$1"
+		local retries=5
+		local count=0
+		local delay=10
+		while [ $count -lt $retries ]; do
+			# Attempt to install the extension. If successful (exit code 0), return from the function.
+			# The `--no-sandbox` and `--user-data-dir` flags are necessary when running as root or in certain containerized environments.
+			if code --install-extension "$extension" --no-sandbox --user-data-dir "$HOME/.config/Code"; then
+				FUN_TRACK_CUSTOM_INSTALL "VSCode Ext: $extension" "success"
+				return 0
+			fi
+			# If it fails, print a message and wait before retrying.
+			echo "Failed to install $extension, retrying in $delay seconds... ($((count + 1))/$retries)"
+			sleep $delay
+			count=$((count + 1))
+		done
+		# If all retries fail, print an error message and return a non-zero exit code.
+		echo "ERROR: Could not install $extension after $retries attempts."
+		FUN_TRACK_CUSTOM_INSTALL "VSCode Ext: $extension" "fail"
+		return 1
+	}
+
+	# Install a list of essential VSCode extensions using the retry helper function.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "rogalmic.bash-debug"                    # For debugging Bash scripts.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "mads-hartmann.bash-ide-vscode"          # Provides language support for Bash.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "timonwong.shellcheck"                   # Integrates the ShellCheck linter.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "Remisa.shellman"                        # For viewing man pages inside VSCode.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "oderwat.indent-rainbow"                 # Makes indentation more readable.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "vscode-icons-team.vscode-icons"         # Provides a rich set of file icons.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "lkrms.inifmt"                           # A formatter for INI and other config files.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "github.copilot"                         # GitHub's AI pair programmer.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "github.copilot-chat"                    # Chat interface for GitHub Copilot.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "exodiusstudios.comment-anchors"         # For creating anchors in comments for easy navigation.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "tomoki1207.pdf"                         # A PDF viewer for VSCode.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "donjayamanne.githistory"                # For viewing Git history.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "davidanson.vscode-markdownlint"         # Linter for Markdown files.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "google.geminicodeassist"                # Google's Gemini Code Assist extension.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "tal7aouy.theme"                         # Theme for VSCode.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "github.github-vscode-theme"             # Theme for VSCode.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "eamodio.gitlens"                        # .git diffs at a glance and so much more
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "zhuangtongfa.material-theme"            # Material theme for VSCode.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "mkhl.shfmt"                             # Shell script formatter.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "foxundermoon.shell-format"              # Shell script formatter. ** we are now using "lumirelle.shell-format-rev" as default, but here for fallback
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "huangyaojun.toggle-readonly"            # read only mode toggle/un-toggle for files
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "ms-windows-ai-studio.windows-ai-studio" # AI Toolkit for Visual Studio Code [can use local AI models - Chat only - clean, web-like chat interface ]
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "continue.continue"                      # AI-powered code completion and generation, similar to GitHub Copilot but with support for multiple AI models and providers.
+	FUN_INSTALL_VSCODE_EXTENSION_WITH_RETRY "golang.go"                              # official language support for Go, including IntelliSense, code navigation, debugging, testing, formatting, and more
+
+	# ---------------------------------------------------------------------------
+	###     🔧 Centralized DIR for Extension Binaries: ~/.vscode/extensions/DEPENDENCY-BINARIES/  ###
+	# ---------------------------------------------------------------------------
+	# create a centralized DIR under '~/.vscode/extensions' for storing extension dependency binaries.
+	# (this central DIR essential to reliably refference a binary path for the extension settings configuration in the vscode-setup.sh script that runs on user login - which configures the path to the shellcheck, shell-formatting,  binary in the user settings.json file for the extensions to work properly)
+	# this central vscode extension binaries DIR will be reliable path despite extension updates and extention DIR name changes due to updates (as we will always place the latest shellcheck binary in there and reference that path in the extension settings) and also keeps the binaries organized in one place instead of scattered across different extension directories.
+
+	sudo mkdir -p "$HOME/.vscode/extensions/DEPENDENCY-BINARIES/"
+	sudo chmod -R 777 "$HOME/.vscode/extensions/DEPENDENCY-BINARIES/"
+	# ---------------------------------------------------------------------------
+
+	# ---------------------------------------------------------------------------
+	###     🔧 SHFMT INSTALLATION — (mkhl.shfmt) — BACKEND    ###
+	# ---------------------------------------------------------------------------
+	# This block downloads the necessary 'shfmt' binary, which is a backend for the 'shell-format' extension.
+	# It ensures the formatter works correctly.
+	{
+		# Find the directory of the Centralized Binaries for Extensions.
+		CENTRALIZED_EXTENSION_BINS_DIRECTORY=$(find "$HOME/.vscode/extensions" -type d -name "DEPENDENCY-BINARIES" | head -n 1)
+		if [[ -z "$CENTRALIZED_EXTENSION_BINS_DIRECTORY" ]]; then
+			echo "ERROR: Could not find the ~/.vscode/extensions/DEPENDENCY-BINARIES directory"
+			exit 1
+		fi
+		# Define the path for the binary and ensure it exists with the correct permissions.
+		BIN_DIRECTORY_PATH="$CENTRALIZED_EXTENSION_BINS_DIRECTORY"
+		sudo mkdir -p "$BIN_DIRECTORY_PATH"
+		sudo chmod 777 "$BIN_DIRECTORY_PATH"
+		# Clean up any old versions of the binary.
+		sudo rm -rf "$BIN_DIRECTORY_PATH/shfmt_*_linux_amd64" 2>/dev/null
+
+		# Dynamically fetch the latest release tag from the shfmt GitHub repository.
+		REPO_RELEASE_URL="https://github.com/mvdan/sh/releases"
+		echo "Fetching the latest release tag from $REPO_RELEASE_URL..."
+		LATEST_RELEASE_TAG=$(curl -s "$REPO_RELEASE_URL" | grep -oE '/mvdan/sh/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+' | sed 's+/mvdan/sh/releases/tag/++' | head -n 1 | tr -d '[:space:]')
+		echo "Latest Release Tag: $LATEST_RELEASE_TAG"
+		# Construct the download URL for the latest binary.
+		DOWNLOAD_URL_BINARY="https://github.com/mvdan/sh/releases/download/$LATEST_RELEASE_TAG/shfmt_${LATEST_RELEASE_TAG}_linux_amd64"
+		OUTPUT_BINARY_PATH="$BIN_DIRECTORY_PATH/shfmt_${LATEST_RELEASE_TAG}_linux_amd64"
+		# Download the latest binary.
+		echo "Downloading the latest binary to $OUTPUT_BINARY_PATH..."
+		sudo wget -O "$OUTPUT_BINARY_PATH" "$DOWNLOAD_URL_BINARY" || {
+			echo "ERROR: Could not download the shell-format binary"
+			exit 1
+		}
+		# Make the binary executable.
+		sudo chmod 777 "$OUTPUT_BINARY_PATH"
+		echo "Successfully downloaded and configured shfmt version $LATEST_RELEASE_TAG"
+	}
+
+	# ---------------------------------------------------------------------------
+	###      🔧 SHFMT INSTALLATION — (foxundermoon.shell-format) — BACKEND    ###
+	# ---------------------------------------------------------------------------
+	# This block downloads the necessary 'shfmt' binary, which is a backend for the 'shell-format' extension.
+	# It ensures the formatter works correctly.
+	{
+		# Find the directory of the Centralized Binaries for Extensions.
+		CENTRALIZED_EXTENSION_BINS_DIRECTORY=$(find "$HOME/.vscode/extensions" -type d -name "DEPENDENCY-BINARIES" | head -n 1)
+		if [[ -z "$CENTRALIZED_EXTENSION_BINS_DIRECTORY" ]]; then
+			echo "ERROR: Could not find the ~/.vscode/extensions/DEPENDENCY-BINARIES directory"
+			exit 1
+		fi
+
+		# Find the directory where the 'shell-format' extension was installed.
+		EXTENSION_DIRECTORY=$(find "$HOME/.vscode/extensions" -type d -name "foxundermoon.shell-format-*" | head -n 1)
+		if [[ -z "$EXTENSION_DIRECTORY" ]]; then
+			echo "ERROR: Could not find the foxundermoon.shell-format-* directory"
+			exit 1
+		fi
+		sudo chmod -R 777 "$CENTRALIZED_EXTENSION_BINS_DIRECTORY"
+		# Clean up any old versions of the binary.
+		sudo rm -rf "$CENTRALIZED_EXTENSION_BINS_DIRECTORY/shfmt_*_linux_amd64" 2>/dev/null
+
+		# Download a known-good version (v3.11.0) [default for foxundermoon.shell-format ver 7.2.8 - its hardcoded to search for that shfmt as a fallback] of the shfmt binary as a fallback or default.
+		echo "Downloading version v3.11.0 of the shell-format binary..."
+		sudo wget -P "$CENTRALIZED_EXTENSION_BINS_DIRECTORY" "https://github.com/mvdan/sh/releases/download/v3.11.0/shfmt_v3.11.0_linux_amd64"
+		sudo chmod 777 "$CENTRALIZED_EXTENSION_BINS_DIRECTORY/shfmt_v3.11.0_linux_amd64"
+
+		# Dynamically fetch the latest release tag from the shfmt GitHub repository.
+		REPO_RELEASE_URL="https://github.com/mvdan/sh/releases"
+		echo "Fetching the latest release tag from $REPO_RELEASE_URL..."
+		LATEST_RELEASE_TAG=$(curl -s "$REPO_RELEASE_URL" | grep -oE '/mvdan/sh/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+' | sed 's+/mvdan/sh/releases/tag/++' | head -n 1 | tr -d '[:space:]')
+		echo "Latest Release Tag: $LATEST_RELEASE_TAG"
+		# Construct the download URL for the latest binary.
+		DOWNLOAD_URL_BINARY="https://github.com/mvdan/sh/releases/download/$LATEST_RELEASE_TAG/shfmt_${LATEST_RELEASE_TAG}_linux_amd64"
+		OUTPUT_BINARY_PATH="$CENTRALIZED_EXTENSION_BINS_DIRECTORY/shfmt_${LATEST_RELEASE_TAG}_linux_amd64"
+		# Download the latest binary.
+		echo "Downloading the latest binary to $OUTPUT_BINARY_PATH..."
+		sudo wget -O "$OUTPUT_BINARY_PATH" "$DOWNLOAD_URL_BINARY" || {
+			echo "ERROR: Could not download the shell-format binary"
+			exit 1
+		}
+		# Make the binary executable.
+		sudo chmod 777 "$OUTPUT_BINARY_PATH"
+		echo "Successfully downloaded and configured shfmt version $LATEST_RELEASE_TAG"
+
+		# download one_ini_bg.wasm [ necessary for shell format to 7.2.8 + to work ]
+		sudo wget -O "$EXTENSION_DIRECTORY/dist/one_ini_bg.wasm" "https://unpkg.com/@one-ini/wasm@0.1.1/one_ini_bg.wasm"
+		sudo chmod 777 "$EXTENSION_DIRECTORY/dist/one_ini_bg.wasm"
+	}
+
+	# ---------------------------------------------------------------------------
+	### 🔧 SHELLCHECK INSTALLATION BLOCK — timonwong.shellcheck — BACKEND  ###
+	# ---------------------------------------------------------------------------
+	# This block downloads the necessary 'shellcheck' binary, which is a backend for the 'timonwong.shellcheck' extension.
+	# It ensures the shellcheck works correctly.
+	# the timonwong.shellcheck extension also has its own shellcheck binary in '~/.vscode/extensions/timonwong.shellcheck-*/binaries/linux/x64/shellcheck'
+	# but it could not the latest version, so we will download the latest version of shellcheck binary from github releases
+
+	{
+		# Find the directory of the Centralized Binaries for Extensions.
+		CENTRALIZED_EXTENSION_BINS_DIRECTORY=$(find "$HOME/.vscode/extensions" -type d -name "DEPENDENCY-BINARIES" | head -n 1)
+		if [[ -z "$CENTRALIZED_EXTENSION_BINS_DIRECTORY" ]]; then
+			echo "ERROR: Could not find the ~/.vscode/extensions/DEPENDENCY-BINARIES directory"
+			exit 1
+		fi
+
+		# Find the directory where the 'ShellCheck' extension was installed.
+		EXTENSION_DIRECTORY=$(find "$HOME/.vscode/extensions" -type d -name "timonwong.shellcheck-*" | head -n 1)
+		if [[ -z "$EXTENSION_DIRECTORY" ]]; then
+			echo "ERROR: Could not find the timonwong.shellcheck-* directory"
+			exit 1
+		fi
+		sudo chmod -R 777 "$CENTRALIZED_EXTENSION_BINS_DIRECTORY"
+		# Clean up any old versions of the binary.
+		sudo rm -rf "$CENTRALIZED_EXTENSION_BINS_DIRECTORY/shellcheck*" 2>/dev/null
+
+		# Download Latest version of ShellCheck binary from github releases into worker DIR. [https://github.com/koalaman/shellcheck]
+		echo "Downloading Latest version of the ShellCheck binary..."
+		# get latest release tag from github
+
+		LATEST_SHELLCHECK_RELEASE_TAG=$(curl -sL "https://api.github.com/repos/koalaman/shellcheck/releases/latest" | jq -r '.tag_name')
+		DOWNLOAD_URL_SHELLCHECK=https://github.com/koalaman/shellcheck/releases/download/${LATEST_SHELLCHECK_RELEASE_TAG}/shellcheck-${LATEST_SHELLCHECK_RELEASE_TAG}.linux.x86_64.tar.xz
+
+		# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+		sudo wget -P "./AUTO-INSTALLS-FILES/WORKER-TEMP/" "$DOWNLOAD_URL_SHELLCHECK" || {
+			echo "ERROR: COULDNT DOWNLOAD SHELLCHECK BINARY"
+			exit 1
+		}
+		sudo chmod 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/shellcheck-*.linux.x86_64.tar.xz
+
+		# extract shellcheck binary from tar.xz archive
+		sudo tar -xvf ./AUTO-INSTALLS-FILES/WORKER-TEMP/shellcheck-*.linux.x86_64.tar.xz -C ./AUTO-INSTALLS-FILES/WORKER-TEMP/ || {
+			echo "ERROR: COULDNT EXTRACT SHELLCHECK BINARY FROM ARCHIVE"
+			exit 1
+		}
+
+		# Make the binary DIR executable.
+		sudo chmod -R 777 "./AUTO-INSTALLS-FILES/WORKER-TEMP/shellcheck-"*/
+		# move shellcheck binary to extension bin directory
+		sudo mv "./AUTO-INSTALLS-FILES/WORKER-TEMP/shellcheck-"*/shellcheck "$CENTRALIZED_EXTENSION_BINS_DIRECTORY/" || {
+			echo "ERROR: COULDNT MOVE SHELLCHECK BINARY TO EXTENSION DIRECTORY"
+			exit 1
+		}
+		# Make the binary executable.
+		sudo chmod 777 "$CENTRALIZED_EXTENSION_BINS_DIRECTORY/shellcheck"
+
+		echo "Successfully downloaded and configured ShellCheck version $LATEST_SHELLCHECK_RELEASE_TAG"
+		# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	}
+
+	# ---------------------------------------------------------------------------
+	### 🔧 Continue extension - "continue.continue" extension — make a template config.json file  ###
+	# ---------------------------------------------------------------------------
+	# This block creates a template configuration file for the "continue.continue" extension, which provides AI-powered code completion and generation.
+	# The config file is placed in the extension's directory and contains placeholder values that users can customize with their own API keys and settings.
+	# I have the extension geared towards using local AI models via llama.cpp, so the template config includes example entries for local models. Users can modify this file to add their own models or change settings as needed.
+	{
+		# Define the path for the config file.
+		CONTINUE_CONFIG_DIR="$HOME/.continue"
+		CONTINUE_CONFIG_FILE="$CONTINUE_CONFIG_DIR/config.yaml"
+
+		# Create the config directory if it doesn't exist.
+		sudo mkdir -p "$CONTINUE_CONFIG_DIR"
+		sudo chmod -R 777 "$CONTINUE_CONFIG_DIR"
+
+		# Create a template config file with placeholder values.
+		cat <<-EOF >"$CONTINUE_CONFIG_FILE"
+			name: Continue Config
+			version: 0.0.1
+
+			models:
+			  # =========================
+			  # Model Definition Block
+			  # =========================
+			  - name: Gemma 3 4B (Chat)
+			    provider: llama.cpp              # Local inference backend
+			    model: gemma3                    # Model identifier served by llama.cpp
+			    apiBase: http://localhost:9090   # Local model server endpoint
+			    roles:
+			      - chat                         # Enables this model for chat usage
+				  #- autocomplete                 # uncomment to enable this model for autocomplete usage
+
+
+			  # =========================
+			  # Model Definition Block
+			  # =========================
+			  - name: Gemma 3 12B (Chat)
+			    provider: llama.cpp
+			    model: gemma3-12b
+			    apiBase: http://localhost:9090
+			    roles:
+			      - chat
+				  #- autocomplete                 # uncomment to enable this model for autocomplete usage
+
+
+			# ==========================================================
+			# Context Providers
+			# ==========================================================
+			# The $(context) section defines which automatic context
+			# sources Continue injects into the model prompt.
+			#
+			# These providers supply additional information such as:
+			#   - Open files
+			#   - The currently focused file
+			#   - Codebase search results
+			#   - Git diffs
+			#   - Terminal output
+			#   - Documentation
+			#
+			# If left empty (context: []):
+			#   → No automatic context is injected.
+			#   → The model only sees what you manually provide
+			#     (selected text, typed prompt, etc.).
+			#
+			# This gives you maximum control and minimal token usage.
+			#
+			# Example providers you could enable:
+			#
+			# context:
+			#   - provider: currentFile     # Injects the active editor file
+			#   - provider: open            # Injects all open tabs
+			#   - provider: gitDiff         # Injects current git changes
+			#   - provider: codebase        # Semantic search across project
+			#   - provider: terminal        # Recent terminal output
+			#
+			# Use sparingly — more context = more tokens + slower responses.
+			#
+			context: []
+		EOF
+
+		sudo chmod 777 "$CONTINUE_CONFIG_FILE"
+		# copy it to /etc/skel so that new users will have it by default
+		sudo mkdir -p /etc/skel/.continue/
+		sudo chmod -R 777 /etc/skel/.continue/
+		sudo cp -f "$CONTINUE_CONFIG_FILE" /etc/skel/.continue/config.yaml
+		sudo chmod 777 /etc/skel/.continue/config.yaml
+
+		echo "Created template config file at: $CONTINUE_CONFIG_FILE"
+	}
+	# ---------------------------------------------------------------------------
+	### 🔰 🐦 Go (Golang) Vscode IDE Setup  ###
+	# ---------------------------------------------------------------------------
+	#		   Automate the setup of the VS Code Go environment.
+	#          It triggers the VS Code Go extension by opening a dummy file,
+	#          installs necessary Go tools in the background, and ensures
+	#          the environment is ready for development.
+	{
+		# 1. Validation: Ensure the VS Code CLI is accessible.
+		# This is required to launch VS Code and trigger the extension activation.
+		if ! command -v code &>/dev/null; then
+			echo "❌ Error: 'code' command not found."
+			echo "   Please ensure VS Code is installed and the 'code' binary is in your PATH."
+			exit 1
+		fi
+
+		# 2. Trigger Mechanism: Create and open a temporary Go file.
+		# Opening a .go file forces the VS Code Go extension to load.
+		# This activation is necessary to register the language server and other hooks.
+		echo "⚠️    Creating '/tmp/vscode_activation_temp.go' to trigger vscode extension: GO (golang.go)"
+
+		cat <<EOF >/tmp/vscode_activation_temp.go
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("VS Code Go Extension Activated")
+}
+EOF
+
+		# Launch VS Code in the background with the dummy file. (will open a full GUI vscode instance)
+		code /tmp/vscode_activation_temp.go &
+		_PID=$!
+
+		echo "VS Code launched with PID: $_PID"
+
+		# 3. Tool Definitions: Define the standard suite of Go tools.
+		# These tools provide features like autocompletion (gopls), debugging (dlv),
+		# linting (staticcheck), and testing support.
+		REQUIRED_TOOLS=("gopls" "dlv" "staticcheck" "vscgo" "gotests" "gomodifytags" "impl" "goplay" "go-outline")
+		declare -A TOOL_PACKAGES
+		TOOL_PACKAGES["gopls"]="golang.org/x/tools/gopls@latest"
+		TOOL_PACKAGES["dlv"]="github.com/go-delve/delve/cmd/dlv@latest"
+		TOOL_PACKAGES["staticcheck"]="honnef.co/go/tools/cmd/staticcheck@latest"
+		TOOL_PACKAGES["vscgo"]="github.com/golang/vscode-go/vscgo@latest"
+		TOOL_PACKAGES["gotests"]="github.com/cweill/gotests/gotests@latest"
+		TOOL_PACKAGES["gomodifytags"]="github.com/fatih/gomodifytags@latest"
+		TOOL_PACKAGES["impl"]="github.com/josharian/impl@latest"
+		TOOL_PACKAGES["goplay"]="github.com/haya14busa/goplay/cmd/goplay@latest"
+		TOOL_PACKAGES["go-outline"]="github.com/ramya-rao-a/go-outline@latest"
+
+		GO_BIN_DIR="$(go env GOPATH)/bin"
+		TIMEOUT_SECONDS=600 # 10 minutes timeout to allow for slow network/compilation
+		START_TIME=$(date +%s)
+
+		echo "Checking for missing tools in: $GO_BIN_DIR"
+
+		# 4. Installation: Parallel headless install for missing tools.
+		# We explicitly check for missing binaries and install them in the background
+		# to speed up the provisioning process. Output is suppressed to keep logs clean.
+		for tool in "${REQUIRED_TOOLS[@]}"; do
+			if [[ ! -f "$GO_BIN_DIR/$tool" ]]; then
+				echo "🚀 Triggering headless install for: $tool (${TOOL_PACKAGES[$tool]})"
+				go install "${TOOL_PACKAGES[$tool]}" &>/dev/null &
+			fi
+		done
+
+		echo "Waiting for all tools to be ready..."
+
+		# 5. Verification: Poll for tool existence.
+		# The script enters a loop to check if all expected binaries have appeared in the GOPATH/bin.
+		while true; do
+			ALL_INSTALLED=true
+			MISSING_TOOLS=()
+
+			for tool in "${REQUIRED_TOOLS[@]}"; do
+				if [[ ! -f "$GO_BIN_DIR/$tool" ]]; then
+					ALL_INSTALLED=false
+					MISSING_TOOLS+=("$tool")
+				fi
+			done
+
+			if $ALL_INSTALLED; then
+				echo "✅ All required tools are now installed and ready!"
+				break
+			fi
+
+			CURRENT_TIME=$(date +%s)
+			ELAPSED=$((CURRENT_TIME - START_TIME))
+
+			if [[ $ELAPSED -ge $TIMEOUT_SECONDS ]]; then
+				echo "⚠️  Timeout reached (${TIMEOUT_SECONDS}s). Some tools failed to install."
+				echo "Missing: ${MISSING_TOOLS[*]}"
+				break
+			fi
+
+			echo "Progress: $((${#REQUIRED_TOOLS[@]} - ${#MISSING_TOOLS[@]}))/${#REQUIRED_TOOLS[@]} tools installed. Waiting... (${ELAPSED}s)"
+			sleep 5
+		done
+
+		# 6. Stabilization.
+		# A buffer period allows background processes (like file system writes or extension initialization)
+		# to fully complete before we shut things down.
+		sleep 90
+		sync
+
+		# 7. Cleanup & Termination.
+		echo "Stopping VS Code..."
+		if kill -0 $_PID 2>/dev/null; then
+			kill $_PID
+		else
+			echo "Process $_PID already exited."
+		fi
+
+		# WARNING: Aggressive cleanup.
+		# This forces ALL running VS Code instances to close. This is intended for
+		# isolated environments (CI/CD, fresh VMs) and may cause data loss if run locally.
+		pkill -9 code
+
+		echo "Removing temporary file..."
+		rm /tmp/vscode_activation_temp.go
+
+		# copy home Go folder to /etc/skel
+		sudo cp -rf "$HOME/go" /etc/skel/
+		sudo chmod -R 777 /etc/skel/go
+
+		echo "Done Setting up Go (Golang) Environment! and Vscode IDE for Go Development"
+	}
+	#-------------------------------------------------------------------------------------------------------------------
+
+	# Copy the installed VSCode extensions to `/etc/skel`. This ensures that any new user created on the system
+	# will automatically have these extensions available in their profile.
+	sudo mkdir -p /etc/skel/.vscode/
+	sudo cp -rf "$HOME/.vscode/extensions" /etc/skel/.vscode/
+	# Remove the JSON configuration files from the skeleton directory to allow fresh generation for each new user.
+	sudo rm /etc/skel/.vscode/extensions/*.json
+
+	# Modify the VSCode .desktop launcher file. This is a critical step to allow VSCode to run as the root user,
+	# which is common in environments like Cubic (ISO creator).
+	# The `--no-sandbox` flag disables the Chromium sandbox.
+	sudo sed -i 's+Exec=/usr/share/code/code %F+Exec=bash -c "code --no-sandbox --user-data-dir $HOME/.vscode"+g' /usr/share/applications/code.desktop
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Autostart Configuration for VSCode
+	# This section creates a script that runs automatically when a user logs in. It configures VSCode settings,
+	# particularly for the shell-format extension.
+	#-------------------------------------------------------------------------------------------------------------------
+	# The script will be placed in `~/.config/autostart` using a .desktop file.
+
+	# Ensure the user's local binary directory exists.
+	sudo mkdir -p "$HOME/.local/bin"
+	sudo chmod -R 777 "$HOME/.local/bin"
+
+	# Create the VSCode setup script using a heredoc. This script will be executed on user login.
+	cat <<'EOF' >"$HOME/.local/bin/vscode-setup.sh"
+#!/bin/bash
+
+# This script configures VSCode settings for the logged-in user, primarily setting the path for the shfmt and shellcheck binaries
+# used by the shell-format and shellcheck extensions.
+
+# Define key paths relative to the user's home directory.
+USER_HOME="/home/$(logname)"
+# directory of the Centralized Binaries for Extensions. This is where the shfmt ... shellcheck ... ETC... binaries should be located.
+CENTRALIZED_EXTENSION_BINS_DIRECTORY="$USER_HOME/.vscode/extensions/DEPENDENCY-BINARIES"
+SETTINGS_DIR="$USER_HOME/.vscode/User"
+READY=true
+
+# Verify that the VSCode extensions Dependency Binaries directory exists.
+if [ ! -d "$CENTRALIZED_EXTENSION_BINS_DIRECTORY" ]; then
+	echo "Error: VSCode extensions Dependency Binaries not found at $CENTRALIZED_EXTENSION_BINS_DIRECTORY"
+	READY=false
+fi
+
+# Find the path to the latest version of the shfmt binary within the extensions Dependency Binaries directory
+# $HOME/.vscode/extensions/DEPENDENCY-BINARIES/shfmt_v*_linux_amd64
+# for the bash script formatter
+USER_PATHS=$(find "$CENTRALIZED_EXTENSION_BINS_DIRECTORY" -type d 2>/dev/null)
+SHFMT_PATH=""
+for path in $USER_PATHS; do
+	# Sort by version and get the latest one.
+	SHFMT_PATH=$(find "$path" -type f -name "shfmt_v*_linux_amd64" 2>/dev/null | sort -V | tail -n 1)
+	[ -n "$SHFMT_PATH" ] && break
+done
+
+if [ -z "$SHFMT_PATH" ]; then
+	echo "Error: No suitable shfmt binary found!"
+	READY=false
+fi
+
+# Find the path to the shellcheck binary.
+SHELLCHECK_DIR=$(find "$CENTRALIZED_EXTENSION_BINS_DIRECTORY" -type d 2>/dev/null)
+SHELLCHECK_PATH=""
+if [[ -n "$SHELLCHECK_DIR" && -f "$SHELLCHECK_DIR/shellcheck" ]]; then
+	SHELLCHECK_PATH="$SHELLCHECK_DIR/shellcheck"
+else
+	echo "Warning: shellcheck binary not found."
+	# This is not a fatal error, so we don't set READY=false.
+fi
+
+# Ensure the user's settings directory exists, creating it if necessary.
+if [ ! -d "$SETTINGS_DIR" ]; then
+	echo "Info: Settings directory not found. Attempting to create $SETTINGS_DIR..."
+	mkdir -p "$SETTINGS_DIR" || {
+		echo "Error: Failed to create settings directory at $SETTINGS_DIR"
+		READY=false
+	}
+fi
+
+# If all checks passed, write the configuration to the user's settings.json file.
+if $READY; then
+	cat <<INNEREOF >"$SETTINGS_DIR/settings.json"
+{
+	// Insert a real tab character (\t) instead of spaces when you press Tab
+	"editor.insertSpaces": false,
+	// Do not auto-detect indentation from the file; always use your own settings
+	"editor.detectIndentation": false,
+	// Show each tab as 4 columns wide (just a display width, not extra characters)
+	"editor.tabSize": 4,
+	// Sets the icon theme for VS Codes workbench (file explorer, tabs, etc.) to "vscode-icons"
+	"workbench.iconTheme": "vscode-icons",
+    "[shellscript]": {
+        // "editor.defaultFormatter": "foxundermoon.shell-format"
+        "editor.defaultFormatter": "mkhl.shfmt"
+    },
+    "git.enableSmartCommit": true,
+    "git.confirmSync": false,
+    "shellformat.path": "$SHFMT_PATH",
+	"workbench.colorTheme": "One Dark Pro Night Flat",
+	    // Customize selection colors for better visibility and style:
+    "workbench.colorCustomizations": {
+        // stronger border between editor groups
+        "editorGroup.border": "#5c6bc0",
+        // Selection background: strong magenta stands out against blue/cyan syntax
+        "editor.selectionBackground": "#ff00aa32", // bright magenta with transparency
+        // Match highlight: neon cyan for contrast with magenta selection
+        "editor.selectionHighlightBackground": "#00fff739", // bright aqua with transparency
+        // Border around selection: pure white for maximum clarity
+        "editor.selectionBorder": "#FFFFFF",
+        // Make the current find match (the one with focus) very bright neon pink
+        "editor.findMatchBackground": "#ff00aa86",
+        // Make all other find matches a bright aqua glow (matching your highlight)
+        "editor.findMatchHighlightBackground": "#00fff747",
+        // Add a crisp white border around the current match for clarity
+        "editor.findMatchBorder": "#8441ff75"
+    },
+	// Enable minimap for easier code navigation
+    "editor.minimap.enabled": true,
+	// ShellCheck executable Binary Path
+	"shellcheck.executablePath": "$SHELLCHECK_PATH"
+}
+INNEREOF
+
+	# Fallback for OSS Code, Codium, etc.
+	FALLBACK_SETTINGS_DIR="/home/$(logname)/.config/Code/User"
+
+	# Ensure the fallback directory exists, creating it with parent directories if necessary.
+	if mkdir -p "$FALLBACK_SETTINGS_DIR"; then
+		# Set permissions to ensure user has full access. 755 is a safe standard.
+		chmod -R 777 "$FALLBACK_SETTINGS_DIR"
+
+		cat <<INNEREOF2 >"$FALLBACK_SETTINGS_DIR/settings.json"
+{
+	// Insert a real tab character (\t) instead of spaces when you press Tab
+	"editor.insertSpaces": false,
+	// Do not auto-detect indentation from the file; always use your own settings
+	"editor.detectIndentation": false,
+	// Show each tab as 4 columns wide (just a display width, not extra characters)
+	"editor.tabSize": 4,
+	// Sets the icon theme for VS Codes workbench (file explorer, tabs, etc.) to "vscode-icons"
+	"workbench.iconTheme": "vscode-icons",
+    "[shellscript]": {
+        // "editor.defaultFormatter": "foxundermoon.shell-format"
+        "editor.defaultFormatter": "mkhl.shfmt"
+    },
+    "git.enableSmartCommit": true,
+    "git.confirmSync": false,
+    "shellformat.path": "$SHFMT_PATH",
+	"workbench.colorTheme": "One Dark Pro Night Flat",
+	    // Customize selection colors for better visibility and style:
+    "workbench.colorCustomizations": {
+	 	// stronger border between editor groups
+        "editorGroup.border": "#5c6bc0",
+        // Selection background: strong magenta stands out against blue/cyan syntax
+        "editor.selectionBackground": "#ff00aa32", // bright magenta with transparency
+        // Match highlight: neon cyan for contrast with magenta selection
+        "editor.selectionHighlightBackground": "#00fff739", // bright aqua with transparency
+        // Border around selection: pure white for maximum clarity
+        "editor.selectionBorder": "#FFFFFF",
+        // Make the current find match (the one with focus) very bright neon pink
+        "editor.findMatchBackground": "#ff00aa86",
+        // Make all other find matches a bright aqua glow (matching your highlight)
+        "editor.findMatchHighlightBackground": "#00fff747",
+        // Add a crisp white border around the current match for clarity
+        "editor.findMatchBorder": "#8441ff75"
+    },
+	// Enable minimap for easier code navigation
+    "editor.minimap.enabled": true,
+	// ShellCheck executable Binary Path
+	"shellcheck.executablePath": "$SHELLCHECK_PATH"
+}
+INNEREOF2
+		echo "Updated fallback settings.json."
+	else
+		echo "Warning: Failed to create fallback directory $FALLBACK_SETTINGS_DIR. Skipping fallback settings."
+	fi
+
+	echo "Updated settings.json with shfmt path: $SHFMT_PATH and shellcheck path: $SHELLCHECK_PATH"
+else
+	echo "Setup incomplete. Check the above messages for issues."
+fi
+EOF
+	# Make the setup script executable.
+	sudo chmod 777 "$HOME/.local/bin/vscode-setup.sh"
+
+	# Ensure the autostart directory exists.
+	sudo mkdir -p "$HOME/.config/autostart"
+	sudo chmod -R 777 "$HOME/.config/autostart"
+
+	# Create the .desktop file that will trigger the setup script on graphical login.
+	cat <<'EOF' >"$HOME/.config/autostart/vscode-setup.desktop"
+[Desktop Entry]
+Type=Application
+Exec=bash -c "$HOME/.local/bin/vscode-setup.sh"
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=VSCode Setup Script
+Comment=Runs the VSCode setup script to configure shell-formatter
+EOF
+	sudo chmod 777 "$HOME/.config/autostart/vscode-setup.desktop"
+
+	# Copy the autostart script and its .desktop file to `/etc/skel`.
+	# This ensures that new users will also get this automatic configuration on their first login.
+	sudo mkdir -p "/etc/skel/.local/bin"
+	sudo mkdir -p "/etc/skel/.config/autostart"
+	sudo cp -rf "$HOME/.local/bin/vscode-setup.sh" /etc/skel/.local/bin
+	sudo cp -rf "$HOME/.config/autostart/vscode-setup.desktop" /etc/skel/.config/autostart
+	sudo chmod -R 777 /etc/skel/.local/bin /etc/skel/.config/autostart
+	# !SECTION: END Autostart Configuration for VSCode END -------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Autostart Configuration for VSCode keybindings.json (keyboard shortcuts)
+	# This section creates a script that runs automatically when a user logs in. It configures VSCode settings keyboard shortcuts
+	#-------------------------------------------------------------------------------------------------------------------
+	# The script will be placed in `~/.config/autostart` using a .desktop file.
+	# 2nd Autostart Configuration for VSCode [Keyboard Shortcuts]
+	# keybindings.json file Press: Ctrl+Shift+P --> Type: Preferences: Open Keyboard Shortcuts (JSON)
+	# Ensure the user's local binary directory exists.
+	sudo mkdir -p "$HOME/.local/bin"
+	sudo chmod -R 777 "$HOME/.local/bin"
+	# Create the VSCode setup script (FOR KEYBOARD SHORTCUTS) using a heredoc. This script will be executed on user login.
+	cat <<'EOF' >"$HOME/.local/bin/vscode-setup-keyboard-shortcuts.sh"
+#!/bin/bash
+# This script configures VSCode settings OF KEYBOARD SHORTCUTS for the logged-in user
+
+# Define key paths relative to the user's home directory.
+USER_HOME="/home/$(logname)"
+FALLBACK_SETTINGS_DIR="/home/$(logname)/.config/Code/User"
+KEYBOARD_SHORTCUTS_FILE="$USER_HOME/.vscode/User/keybindings.json"
+_FALLBACK_KEYBOARD_SHORTCUTS_FILE="/home/$(logname)/.config/Code/User/keybindings.json"
+READY=true
+
+# Verify that the VSCode keyboard shortcuts Directory exists.
+if [ ! -d "$(realpath $(dirname $KEYBOARD_SHORTCUTS_FILE))" ]; then
+    echo "Error: VSCode keyboard shortcuts DIR not found at: $(realpath $(dirname $KEYBOARD_SHORTCUTS_FILE))"
+    READY=false
+fi
+
+# If all checks passed, write the configuration to the user's settings.json file.
+if $READY; then
+
+    cat <<INNEREOF > $KEYBOARD_SHORTCUTS_FILE
+// Place your key bindings in this file to override the defaults
+[
+	{
+        "key": "ctrl+alt+f",
+        "command": "file-readonly-toggler.toggleReadonly",
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "ctrl+l",
+        "command": "expandLineSelection",
+        "when": "textInputFocus"
+    },
+    {
+        "key": "ctrl+l",
+        "command": "-continue.focusContinueInput"
+    },
+	{
+        "key": "ctrl+shift+l",
+        "command": "-continue.focusContinueInputWithoutClear"
+    }
+
+]
+INNEREOF
+
+    # handle Fallback canonical location of keyboard bindings shortuts file .json
+    # Ensure the fallback directory exists
+    mkdir -p "$FALLBACK_SETTINGS_DIR"
+    sudo chmod -R 777 "$FALLBACK_SETTINGS_DIR"
+
+    if [ -d "$FALLBACK_SETTINGS_DIR" ]; then
+        cat <<INNEREOF2 > $_FALLBACK_KEYBOARD_SHORTCUTS_FILE
+// Place your key bindings in this file to override the defaults
+[
+	{
+        "key": "ctrl+alt+f",
+        "command": "file-readonly-toggler.toggleReadonly",
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "ctrl+l",
+        "command": "expandLineSelection",
+        "when": "textInputFocus"
+    },
+    {
+        "key": "ctrl+l",
+        "command": "-continue.focusContinueInput"
+    },
+	{
+        "key": "ctrl+shift+l",
+        "command": "-continue.focusContinueInputWithoutClear"
+    }
+
+]
+INNEREOF2
+
+        sudo chmod 777 $_FALLBACK_KEYBOARD_SHORTCUTS_FILE
+        echo "Updated fallback keybindings.json."
+    else
+        echo "Warning: Failed to create fallback directory $FALLBACK_SETTINGS_DIR. Skipping fallback settings."
+    fi
+    echo "Updated keybindings.json with path: $KEYBOARD_SHORTCUTS_FILE"
+    sudo chmod 777 $KEYBOARD_SHORTCUTS_FILE
+
+fi
+EOF
+
+	# Make the setup script executable.
+	sudo chmod 777 "$HOME/.local/bin/vscode-setup-keyboard-shortcuts.sh"
+
+	# Ensure the autostart directory exists.
+	sudo mkdir -p "$HOME/.config/autostart"
+	sudo chmod -R 777 "$HOME/.config/autostart"
+
+	# Create the .desktop file that will trigger the setup script on graphical login.
+	cat <<'EOF' >"$HOME/.config/autostart/vscode-setup-keyboard-shortcuts.desktop"
+[Desktop Entry]
+Type=Application
+Exec=bash -c "$HOME/.local/bin/vscode-setup-keyboard-shortcuts.sh"
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=VSCode Setup Script
+Comment=Runs the VSCode setup to configure keyboard shortcuts 
+EOF
+	sudo chmod 777 "$HOME/.config/autostart/vscode-setup-keyboard-shortcuts.desktop"
+
+	# Copy the autostart script (for vscode keyboard shortcuts) and its .desktop file to `/etc/skel`.
+	# This ensures that new users will also get this automatic configuration on their first login.
+	sudo mkdir -p "/etc/skel/.local/bin"
+	sudo mkdir -p "/etc/skel/.config/autostart"
+	sudo cp -rf "$HOME/.local/bin/vscode-setup-keyboard-shortcuts.sh" /etc/skel/.local/bin
+	sudo cp -rf "$HOME/.config/autostart/vscode-setup-keyboard-shortcuts.desktop" /etc/skel/.config/autostart
+	sudo chmod -R 777 /etc/skel/.local/bin /etc/skel/.config/autostart
+
+	# !SECTION: Autostart Configuration for VSCode keybindings.json (keyboard shortcuts)
+
+	# execute the files once
+	sudo bash -c "$HOME/.local/bin/vscode-setup.sh"
+	sudo bash -c "$HOME/.local/bin/vscode-setup-keyboard-shortcuts.sh"
+
+	# fix ownership to the current user for both .vscode and .config/Code
+	sudo chown -R "$(logname):$(logname)" "$HOME/.vscode" "$HOME/.config/Code" 2>/dev/null
+	# ensure full permissions for these directories
+	sudo chmod -R 777 "$HOME/.vscode" "$HOME/.config/Code" 2>/dev/null
+
+}

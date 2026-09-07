@@ -1,0 +1,10 @@
+#!/bin/bash
+
+echo "        :::...KEEPING USB HDD ALIVE!!...:::"
+echo "        :::...KEEPING USB HDD ALIVE!!...:::"
+
+while true
+do
+    sudo dd if=/dev/disk/by-uuid/<uuid-of-device> of=/dev/null count=1 skip=$RANDOM >/dev/null 2>&1
+    sleep 300
+done

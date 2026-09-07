@@ -1,0 +1,358 @@
+#!/bin/bash
+
+# ==============================================================================
+# PIPER-TTS PROFILE & INSTANCE MANAGER
+#
+# Description:
+#   An interactive TUI to manage profiles for and launch Piper-TTS.
+#   Supports quick text-to-speech, recording, and model management.
+#
+# Style: LINUX-OASIS / Superior Pattern (Numeric Mapping)
+# ==============================================================================
+
+# 🎨 AESTHETICS (OASIS Industrial Theme) 🌸
+export NEWT_COLORS='
+root=white,black
+window=white,blue
+border=cyan,blue
+title=yellow,blue
+button=black,cyan
+actbutton=white,cyan
+checkbox=cyan,black
+actcheckbox=white,blue
+entry=black,cyan
+label=white,blue
+listbox=white,black
+actlistbox=black,cyan
+'
+
+# 🛠️ Configuration & Persistence ⚙️
+CONFIG_DIR="/bin/CUSTOM-PIPER-TTS-MANAGER-CONFIG"
+PROFILES_FILE="$CONFIG_DIR/piper_profiles.conf"
+MODELS_DIR="/usr/local/bin/xtts/models"
+
+# Ensure directories exist
+if [ ! -d "$CONFIG_DIR" ]; then
+	sudo mkdir -p "$CONFIG_DIR"
+	sudo chmod 777 -R "$CONFIG_DIR"
+fi
+if [ ! -f "$PROFILES_FILE" ]; then
+	sudo touch "$PROFILES_FILE"
+	sudo chmod 777 "$PROFILES_FILE"
+fi
+if [ ! -d "$MODELS_DIR" ]; then
+	sudo mkdir -p "$MODELS_DIR"
+	sudo chmod 777 "$MODELS_DIR"
+fi
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🛠️ INSTALLATION LOGIC 🛠️
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+FUN_INSTALL_PIPER_SYSTEM_WIDE() {
+	if ! whiptail --title "Install Piper-TTS" --yesno "Piper-TTS is not installed system-wide. Would you like to set it up now? ✨\n\nThis will:\n1. Create global environment in /usr/local/bin/xtts\n2. Install piper-tts and dependencies\n3. Add piper to system PATH (/etc/profile)" 15 60; then
+		echo "Installation cancelled. Exiting."
+		exit 1
+	fi
+
+	clear
+	echo -e "\e[1;48;5;27m 🛠️ Piper-TTS: Global Installation 🌸 \e[0m"
+
+	# 1. System Packages
+	echo "Installing system dependencies..."
+	sudo apt update
+	sudo apt install -y python3-venv python3-full alsa-utils mpv ffmpeg wget sed
+
+	# 2. Virtual Environment Setup
+	local VENV_ROOT="/usr/local/bin/xtts"
+	echo "Setting up global virtual environment in $VENV_ROOT..."
+	sudo mkdir -p "$VENV_ROOT"
+	sudo chmod -R 777 "$VENV_ROOT"
+
+	cd "$VENV_ROOT" || exit
+	python3 -m venv venv
+
+	# 3. Pip Installation
+	echo "Installing piper-tts..."
+	./venv/bin/pip install --upgrade pip
+	./venv/bin/pip install piper-tts
+
+	# 4. PATH Integration
+	echo "Integrating into system PATH..."
+	local PATHS_TO_ADD=("$VENV_ROOT/venv/bin")
+	local PROFILE_FILE="/etc/profile"
+
+	# Sanitized PATH update pattern
+	local PATH_BASE=$(echo -n "$PATH" | awk -v RS=: '$0 != "" && !a[$0]++ {printf "%s%s", (i++ ? ":" : ""), $0}')
+
+	for dir in "${PATHS_TO_ADD[@]}"; do
+		local LINE="export PATH=$PATH_BASE:$dir"
+		if ! grep -qsF "$LINE" "$PROFILE_FILE"; then
+			echo "$LINE" | sudo tee -a "$PROFILE_FILE" >/dev/null
+		fi
+		# Update current session
+		export PATH="$PATH:$dir"
+	done
+
+	sync
+	whiptail --title "Success" --msgbox "Piper-TTS has been installed successfully! 🌸\n\nPath: $VENV_ROOT/venv/bin/piper\nPlease restart your terminal or run 'source /etc/profile'." 10 60
+	PIPER_BIN="$VENV_ROOT/venv/bin/piper"
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🔍 PRE-FLIGHT CHECKS 🔍
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_CHECK_DEPENDENCIES() {
+	local MISSING_DEPS=()
+
+	# Define commands and their corresponding packages if they differ
+	declare -A PKG_MAP=(
+		["whiptail"]="whiptail"
+		["aplay"]="alsa-utils"
+		["mpv"]="mpv"
+		["curl"]="curl"
+		["jq"]="jq"
+	)
+
+	for CMD in "${!PKG_MAP[@]}"; do
+		local PACKAGE="${PKG_MAP[$CMD]}"
+		if ! command -v "$CMD" &>/dev/null; then
+			echo "dependency $CMD ($PACKAGE) is NOT installed .. installing"
+			sudo apt update
+			sudo apt install -y "$PACKAGE"
+
+			if ! dpkg -s "$PACKAGE" &>/dev/null; then
+				echo "Posibly didn't install dependency $PACKAGE .. exiting"
+				exit
+			fi
+		fi
+	done
+
+	PIPER_BIN="/usr/local/bin/xtts/venv/bin/piper"
+	if [ ! -f "$PIPER_BIN" ]; then
+		if command -v piper &>/dev/null; then
+			PIPER_BIN=$(which piper)
+		else
+			# Piper is missing, trigger installation
+			FUN_INSTALL_PIPER_SYSTEM_WIDE
+		fi
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🚀 QUICK SPEAK (AD-HOC) 🚀
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+FUN_QUICK_TTS() {
+	local model_list=()
+	readarray -t model_list < <(find "$MODELS_DIR" -maxdepth 1 -name "*.onnx")
+
+	if [ ${#model_list[@]} -eq 0 ]; then
+		whiptail --title "No Models Found" --msgbox "No .onnx models found in $MODELS_DIR.\nPlease download some voices first! 🍥" 0 0
+		return
+	fi
+
+	# 1. Select Model
+	local m_opts=()
+	local i=1
+	declare -A m_map
+	for m in "${model_list[@]}"; do
+		m_opts+=("$i" "$(basename "$m")")
+		m_map[$i]="$m"
+		((i++))
+	done
+	local m_choice=$(whiptail --title "Quick Speak - Select Model" --menu "Select a voice model to use immediately:" 0 0 10 "${m_opts[@]}" 3>&1 1>&2 2>&3)
+	[[ -z "$m_choice" ]] && return
+	local model="${m_map[$m_choice]}"
+	local config=""
+	[ -f "${model}.json" ] && config="${model}.json"
+
+	# 2. Input Method
+	local input_mode=$(whiptail --title "Quick Speak - Input" --menu "How to provide text?" 0 0 2 \
+		"1" "Type text directly" \
+		"2" "Load from a text file" 3>&1 1>&2 2>&3)
+	[[ -z "$input_mode" ]] && return
+
+	local tts_input=""
+	if [ "$input_mode" == "1" ]; then
+		tts_input=$(whiptail --title "Speak" --inputbox "What should I say?" 0 0 "Testing this voice real quick!" 3>&1 1>&2 2>&3)
+		[ -z "$tts_input" ] && return
+	else
+		local file_path=$(whiptail --title "Select Text File" --inputbox "Path to .txt file:" 0 0 "$PWD" 3>&1 1>&2 2>&3)
+		if [ ! -f "$file_path" ]; then
+			whiptail --msgbox "File not found! 💔" 0 0
+			return
+		fi
+		tts_input=$(cat "$file_path")
+	fi
+
+	# 3. Output Method
+	local output_mode=$(whiptail --title "Quick Speak - Output" --menu "Action:" 0 0 2 \
+		"1" "Play immediately (Real-time)" \
+		"2" "Save to .wav file" 3>&1 1>&2 2>&3)
+	[[ -z "$output_mode" ]] && return
+
+	# Execution
+	local CMD="$PIPER_BIN --model $model"
+	[ -n "$config" ] && CMD+=" --config $config"
+
+	clear
+	echo -e "\e[1;48;5;27m 🚀 Piper-TTS: Quick Speak Mode 🌸 \e[0m"
+	echo -e "Model: $(basename "$model")"
+	echo "----------------------------------------------------"
+
+	if [ "$output_mode" == "1" ]; then
+		echo "$tts_input" | $CMD --output-raw | aplay -r 22050 -f S16_LE -t raw
+	else
+		local out_file=$(whiptail --title "Save Audio" --inputbox "Enter filename:" 0 0 "${PWD}/test_output.wav" 3>&1 1>&2 2>&3)
+		[[ -z "$out_file" ]] && return
+		echo "$tts_input" | $CMD --output_file "$out_file"
+		whiptail --msgbox "Audio saved to: $out_file 💾" 0 0
+	fi
+	read -p "Done! Press Enter to return... ✨"
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ✨ PROFILE MANAGEMENT ✨
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+FUN_CREATE_PROFILE() {
+	local P_NAME P_MODEL P_CONFIG P_SPEED P_NOISE P_NOISE_W
+	P_NAME=$(whiptail --title "New Piper Profile" --inputbox "Enter a name for this profile:" 0 0 3>&1 1>&2 2>&3)
+	[ -z "$P_NAME" ] && return
+	P_NAME="${P_NAME//[ #|]/_}"
+
+	local model_list=()
+	readarray -t model_list < <(find "$MODELS_DIR" -maxdepth 1 -name "*.onnx")
+	if [ ${#model_list[@]} -eq 0 ]; then
+		P_MODEL=$(whiptail --title "Model Path" --inputbox "No models in $MODELS_DIR. Enter full path manually:" 0 0 "" 3>&1 1>&2 2>&3)
+	else
+		local m_opts=()
+		local i=1
+		declare -A m_map
+		for m in "${model_list[@]}"; do
+			m_opts+=("$i" "$(basename "$m")")
+			m_map[$i]="$m"
+			((i++))
+		done
+		local m_choice=$(whiptail --title "Select Model" --menu "Choose a voice model:" 0 0 10 "${m_opts[@]}" 3>&1 1>&2 2>&3)
+		[ -z "$m_choice" ] && return
+		P_MODEL="${m_map[$m_choice]}"
+	fi
+
+	[ -f "${P_MODEL}.json" ] && P_CONFIG="${P_MODEL}.json" || P_CONFIG=$(whiptail --title "Config Path" --inputbox "Enter full path to .json config (optional):" 0 0 "" 3>&1 1>&2 2>&3)
+
+	P_SPEED=$(whiptail --title "Parameters" --inputbox "Speed (Default 1.0):" 0 0 "1.0" 3>&1 1>&2 2>&3)
+	P_NOISE=$(whiptail --title "Parameters" --inputbox "Noise scale (Default 0.667):" 0 0 "0.667" 3>&1 1>&2 2>&3)
+	P_NOISE_W=$(whiptail --title "Parameters" --inputbox "Phoneme noise (Default 0.8):" 0 0 "0.8" 3>&1 1>&2 2>&3)
+
+	echo "${P_NAME}#${P_MODEL}#${P_CONFIG}#${P_SPEED}#${P_NOISE}#${P_NOISE_W}" >>"$PROFILES_FILE"
+	whiptail --msgbox "Profile '${P_NAME}' saved! 🌸" 0 0
+}
+
+FUN_RUN_TTS_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --msgbox "No profiles found." 0 0
+		return
+	fi
+	local options=()
+	declare -A profile_map
+	local i=1
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		options+=("$i" "$(echo "$line" | cut -d'#' -f1)")
+		profile_map[$i]="$line"
+		((i++))
+	done <"$PROFILES_FILE"
+
+	local p_idx=$(whiptail --title "Run Profile" --menu "Select a profile:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+	[[ -z "$p_idx" ]] && return
+
+	IFS='#' read -r name model config speed noise noise_w <<<"${profile_map[$p_idx]}"
+
+	local input_mode=$(whiptail --title "Input" --menu "Method:" 0 0 2 "1" "Text" "2" "File" 3>&1 1>&2 2>&3)
+	local tts_input=""
+	if [ "$input_mode" == "1" ]; then
+		tts_input=$(whiptail --title "Speak" --inputbox "Text:" 0 0 "Profile speak test!" 3>&1 1>&2 2>&3)
+	else
+		local f_path=$(whiptail --inputbox "File path:" 0 0 "$PWD" 3>&1 1>&2 2>&3)
+		[ -f "$f_path" ] && tts_input=$(cat "$f_path")
+	fi
+	[ -z "$tts_input" ] && return
+
+	local output_mode=$(whiptail --title "Output" --menu "Action:" 0 0 2 "1" "Play" "2" "Save" 3>&1 1>&2 2>&3)
+	local CMD="$PIPER_BIN --model $model --length_scale $speed --noise_scale $noise --noise_w $noise_w"
+	[ -n "$config" ] && CMD+=" --config $config"
+
+	clear
+	echo -e "\e[1;48;5;53m 🗣️ Piper-TTS: Profile Speak 🌸 \e[0m"
+	if [ "$output_mode" == "1" ]; then
+		echo "$tts_input" | $CMD --output-raw | aplay -r 22050 -f S16_LE -t raw
+	else
+		local out_f=$(whiptail --inputbox "Save to:" 0 0 "${PWD}/out.wav" 3>&1 1>&2 2>&3)
+		[ -n "$out_f" ] && echo "$tts_input" | $CMD --output_file "$out_f"
+	fi
+	read -p "Done! Press Enter... ✨"
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🗑️ MAINTENANCE 🗑️
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+FUN_DELETE_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then return; fi
+	local options=()
+	declare -A profile_map
+	local i=1
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		options+=("$i" "$(echo "$line" | cut -d'#' -f1)")
+		profile_map[$i]="$line"
+		((i++))
+	done <"$PROFILES_FILE"
+	local choice=$(whiptail --title "Delete Profile" --menu "Remove:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+	if [ -n "$choice" ]; then
+		local data="${profile_map[$choice]}"
+		if whiptail --title "Confirm" --yesno "Delete profile '$(echo "$data" | cut -d'#' -f1)'?" 0 0; then
+			local escaped=$(echo "$data" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+			sed -i "\|^${escaped}$|d" "$PROFILES_FILE"
+		fi
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ⚙️ MAIN LOOP 🍥
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_CHECK_DEPENDENCIES
+
+while true; do
+	MAIN_CHOICE=$(whiptail --title "PIPER-TTS MANAGER v1.1" --menu "Main Menu, Senpai! ✨" 0 0 8 \
+		"1" "🚀 Quick Speak (Ad-Hoc / Test Voice)" \
+		"2" "🎧 Run Saved Profile" \
+		"3" "✨ Create New Profile" \
+		"4" "🗑️  Delete Profile" \
+		"5" "📋 List Saved Profiles" \
+		"6" "📥 How to Download Models" \
+		"7" "❓ Help / About" \
+		"8" "🚪 Exit" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ "$MAIN_CHOICE" == "8" ]; then
+		echo "Exiting, bye-bye! 👋"
+		exit 0
+	fi
+
+	case $MAIN_CHOICE in
+	1) FUN_QUICK_TTS ;;
+	2) FUN_RUN_TTS_PROFILE ;;
+	3) FUN_CREATE_PROFILE ;;
+	4) FUN_DELETE_PROFILE ;;
+	5)
+		clear
+		echo -e "\e[1;48;5;53m Saved Piper Profiles \e[0m"
+		column -t -s '#' "$PROFILES_FILE" 2>/dev/null || cat "$PROFILES_FILE"
+		read -p "Press Enter to return... 🍥"
+		;;
+	6) whiptail --title "Download Models" --msgbox "Official Piper Voices: \nhttps://huggingface.co/rhasspy/piper-voices/tree/main \n\nPlace .onnx and .onnx.json files in: \n$MODELS_DIR" 0 0 ;;
+	7) whiptail --title "About" --msgbox "PIPER-TTS MANAGER TUI\n\nAd-Hoc testing & Profile management.\n\nAuthor: LINUX-OASIS style automation." 0 0 ;;
+	esac
+done

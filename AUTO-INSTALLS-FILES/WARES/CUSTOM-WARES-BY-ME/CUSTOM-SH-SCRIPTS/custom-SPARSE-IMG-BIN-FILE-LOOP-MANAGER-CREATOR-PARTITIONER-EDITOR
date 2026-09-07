@@ -1,0 +1,2048 @@
+#!/bin/bash
+# -----------------------------------------------------------------------------
+#
+#          SPARSE IMAGE FILE & LOOP DEVICE MANAGER
+#
+# A TUI-based utility for creating and managing sparse disk images (.img, .bin)
+# and their associated loop devices.
+#
+# Author: [Your Name/Alias]
+# Version: 1.0
+#
+# -----------------------------------------------------------------------------
+#
+# PURPOSE:
+# This script provides a user-friendly, menu-driven interface (via `whiptail`)
+# to simplify a variety of complex disk management tasks. It is designed to
+# handle the full lifecycle of disk images, including:
+#   - Creating new sparse image files of any size.
+#   - Converting existing files into sparse files to save disk space.
+#   - Partitioning images using `cgdisk`.
+#   - Formatting partitions with various filesystems (ext4, btrfs, ntfs, etc.).
+#   - Attaching images to system loop devices (`losetup`).
+#   - Unmounting and detaching loop devices cleanly.
+#   - Creating and managing systemd services for automounting at boot.
+#
+# REQUIREMENTS:
+# - Root privileges (the script will re-launch itself with `sudo` if needed).
+# - `whiptail` for the user interface.
+# - `parted` for partitioning.
+# - `mkfs.*` utilities for formatting (e.g., `mkfs.ext4`, `mkfs.vfat`).
+#
+#
+# ---  !!! CAUTION !!! ---
+# This script uses powerful, low-level disk utilities (`parted`, `mkfs`, `wipefs`).
+# Incorrect use can lead to IRREVERSIBLE DATA LOSS.
+# Always double-check your selections. Use with caution.
+#
+# -----------------------------------------------------------------------------
+
+#
+# SCRIPT INITIALIZATION
+#
+
+# 1. Root Privilege Check
+# Ensure the script is running with root privileges, as `losetup`, `parted`,
+# and `mount` require it. If not, it attempts to re-execute itself with `sudo`.
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[1;48;5;9m" "\e[1;38;5;16m" "Please run as root or with sudo." "\e[0m"
+	sudo "$0"
+	exit 1
+fi
+
+# 2. Dependency Check
+# Verifies that all required command-line tools are installed and available
+# in the system's PATH. The script will exit if any dependency is missing.
+for CMD in parted mkfs.vfat mkfs.msdos mkfs.exfat whiptail bc realpath md5sum; do
+	if ! command -v "$CMD" &>/dev/null; then
+		echo "Error: Required command '$CMD' is not installed. Please install it and try again."
+		exit 1
+	fi
+done
+
+# Set a trap to clean up temporary files on exit.
+trap 'rm -f /tmp/custom-SPARSE-*.tmp' EXIT
+
+#
+# --- UI & SPINNER HELPERS ---
+#
+
+RESET='\033[0m' # Resets all text attributes to the terminal default.
+
+# 🎀 🎀 Kawaii Braille Spinner Function 🎀 🎀
+# A colorful spinner using Unicode braille characters.
+#
+# Usage:
+#   fun_kawaii_braille_spinner "Your message..." &
+#   SPINNER_PID=$!
+#   # ... do work ...
+#   kill $SPINNER_PID
+#
+fun_kawaii_braille_spinner() {
+	local message="${1:-Processing...}"
+	local spin_chars=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+	local colors=('\e[91m' '\e[92m' '\e[93m' '\e[94m' '\e[95m' '\e[96m') # red, green, yellow, blue, magenta, cyan
+	local i=0 c=0
+
+	# Ensure cursor is visible on exit
+	trap 'tput cnorm; printf "\n"; exit' INT TERM
+
+	tput civis # Hide cursor
+	while :; do
+		i=$(((i + 1) % ${#spin_chars[@]})) # Rotate spinner characters
+		c=$(((c + 1) % ${#colors[@]}))     # Cycle through colors
+		printf "\r${colors[$c]}[%s]${RESET} %s " "${spin_chars[$i]}" "$message"
+		sleep 0.08
+	done
+}
+
+# 3. Unique Label Generation
+# These variables are used to create semi-random, unique labels for filesystems.
+# The process uses a nanosecond timestamp, which is then hashed to produce a short,
+# uppercase alphanumeric string. This helps in identifying partitions later.
+RRANDO_VAL=$(date +%s%N | base64 | md5sum | cut -c 1-3 | tr '[:lower:]' '[:upper:]')
+RRANDO_VAL_EXTENDED=$(date +%s%N | base64 | md5sum | cut -c 1-5 | tr '[:lower:]' '[:upper:]')
+
+#
+# --- CORE FUNCTIONS ---
+#
+
+# =============================================================================
+# FUNCTION: FUN_CREATE_CUSTOM_SPARSE_IMAGE_FILE
+#
+# PURPOSE:
+# Guides the user through creating a new sparse image file. A sparse file
+# is one that appears to be a certain size but does not allocate actual disk
+# space until blocks are written to it.
+#
+# WORKFLOW:
+# 1. Prompts for a file name (and sanitizes it).
+# 2. Prompts for the desired virtual size and unit (MB, GB, TB).
+# 3. Creates the empty sparse file using `truncate -s`.
+# 4. Asks the user if they want to proceed with formatting the new image.
+# =============================================================================
+FUN_CREATE_CUSTOM_SPARSE_IMAGE_FILE() {
+
+	# Prompt for the sparse image file name using whiptail.
+	SPARSE_IMAGE_FILE_NAME=$(whiptail --title "CREATE custom SPARSE FILE [[NAME]] 🥞 🥞" \
+		--inputbox "Input NAME For Sparse File" 0 0 "" 3>&1 1>&2 2>&3)
+	# Check if the user aborted the input (empty string).
+	if [ -z "$SPARSE_IMAGE_FILE_NAME" ]; then
+		echo "USER ABORTED: File name input cancelled."
+		return 1
+	fi
+	# Sanitize the file name by removing spaces.
+	SPARSE_IMAGE_FILE_NAME_SANITIZED=$(echo "$SPARSE_IMAGE_FILE_NAME" | tr -d '[:space:]')
+
+	# Prompt for size alignment unit (Megabytes, Gigabytes, Terabytes) using whiptail menu.
+	SPARSE_FILE_ALIGN_TO_M_G_T=$(whiptail --scrolltext --title "CREATE custom SPARSE FILE [[SIZE]]" \
+		--menu "[ Align Size To: M, G, T ]" 0 0 3 \
+		"1" "Align Size To [M] Megabytes = 1024 Kilobytes" \
+		"2" "Align Size To [G] Gigabytes = 1024 Megabytes" \
+		"3" "Align Size To [T] Terabytes = 1024 Gigabytes" 3>&1 1>&2 2>&3)
+	# Check if the user aborted the menu selection.
+	if [ -z "$SPARSE_FILE_ALIGN_TO_M_G_T" ]; then
+		echo "USER ABORTED: Size alignment selection cancelled."
+		return 1
+	fi
+
+	# Map the user's choice to the corresponding character (M, G, T) and a descriptive message.
+	case $SPARSE_FILE_ALIGN_TO_M_G_T in
+	1)
+		ALIGN_TO_CHAR=M
+		ALIGN_TO_MESSAGE="M = Megabytes"
+		;;
+	2)
+		ALIGN_TO_CHAR=G
+		ALIGN_TO_MESSAGE="G = Gigabytes"
+		;;
+	3)
+		ALIGN_TO_CHAR=T
+		ALIGN_TO_MESSAGE="T = Terabytes"
+		;;
+	esac
+
+	# Prompt for the numerical size input based on the chosen unit.
+	SIZE_INPUT=$(whiptail --scrolltext --title "🥞 🥞 Input [SIZE] For SPARSE FILE in [$ALIGN_TO_MESSAGE] 🥞 🥞" \
+		--inputbox "🥞 🥞 SIZE ALIGNED TO [$ALIGN_TO_MESSAGE] 🥞 🥞" 0 0 "" 3>&1 1>&2 2>&3)
+	# Check if the user aborted the size input.
+	if [ -z "$SIZE_INPUT" ]; then
+		echo "USER ABORTED: Size input cancelled."
+		return 1
+	fi
+
+	# Sanitize the size input, keeping only digits.
+	SIZE_INPUT_SANITIZED=$(echo "$SIZE_INPUT" | tr -d -c '[:digit:]' | tr -d '[:space:]')
+
+	# Validate that the sanitized size input is not empty.
+	if [ -z "$SIZE_INPUT_SANITIZED" ]; then
+		echo "Invalid size input. Please enter a valid number."
+		return 1
+	fi
+
+	# Prepare a confirmation message for the user before creating the sparse file.
+	cat <<-EOF >/tmp/custom-SPARSE-FINAL-CREATION-MESSAGE-CONFIRMATION.tmp
+		Will Now CREATE SPARSE FILE
+
+		FILE NAME: $SPARSE_IMAGE_FILE_NAME_SANITIZED.img
+		FILE SIZE: $SIZE_INPUT_SANITIZED - $ALIGN_TO_MESSAGE
+	EOF
+
+	# Display the confirmation message and proceed if confirmed.
+	if whiptail --title "🥞 🥞 Will Now CREATE SPARSE FILE" \
+		--yesno "$(cat /tmp/custom-SPARSE-FINAL-CREATION-MESSAGE-CONFIRMATION.tmp)" 0 0 3>&1 1>&2 2>&3; then
+		# Create the sparse file using 'truncate -s'.
+		truncate -s ${SIZE_INPUT_SANITIZED}${ALIGN_TO_CHAR} "$SPARSE_IMAGE_FILE_NAME_SANITIZED.img"
+		# Set file permissions to 777 (read, write, execute for all) for the newly created file.
+		sudo chmod 777 "$SPARSE_IMAGE_FILE_NAME_SANITIZED.img"
+	else
+		echo "USER ABORTED: File creation cancelled."
+		return 1
+	fi
+
+	# Prompt the user to format the newly created sparse file.
+	cat <<-EOF >/tmp/custom-SPARSE-FINAL-CREATION-MESSAGE-CONFIRMATION-TO-FORMAT.tmp
+		[FORMAT] NEWLY CREATED SPARSE FILE?
+
+		FILE NAME: $SPARSE_IMAGE_FILE_NAME_SANITIZED.img
+	EOF
+
+	# Display the formatting prompt and call the formatting function if confirmed.
+	if whiptail --title "[FORMAT] NEWLY CREATED SPARSE FILE??" \
+		--yesno "$(cat /tmp/custom-SPARSE-FINAL-CREATION-MESSAGE-CONFIRMATION-TO-FORMAT.tmp)" 0 0 3>&1 1>&2 2>&3; then
+		FUN_FORMAT_SPARSE_FILE_IMAGE_AT_CREATION_TIME "$SPARSE_IMAGE_FILE_NAME_SANITIZED.img"
+	else
+		echo "ALL DONE CREATING SPARSE FILE 🥞 🥞 (Skipped formatting)"
+	fi
+}
+
+# =============================================================================
+# FUNCTION: FUN_FORMAT_SPARSE_FILE_IMAGE_AT_CREATION_TIME
+#
+# PURPOSE:
+# Formats a newly created sparse image file with a user-selected filesystem.
+# This function is intended to be called internally by `FUN_CREATE_CUSTOM_SPARSE_IMAGE_FILE`.
+#
+# ARGUMENTS:
+#   $1 - The file path of the sparse image to format.
+#
+# WORKFLOW:
+# 1. Wipes any existing filesystem signatures from the image (`wipefs`).
+# 2. Creates a new partition table (`parted mklabel`).
+# 3. Creates a single partition that spans the entire image (`parted mkpart`).
+# 4. Attaches the image to a loop device, scanning for partitions (`losetup -fP`).
+# 5. Formats the first partition (`mkfs.*`).
+# 6. For Linux filesystems (ext4, btrfs), it temporarily mounts the partition
+#    to run `chmod -R 777` on the root, making it universally writable.
+# 7. Unmounts the partition and detaches the loop device.
+# =============================================================================
+FUN_FORMAT_SPARSE_FILE_IMAGE_AT_CREATION_TIME() {
+
+	# Regenerate random values for unique filesystem labels.
+	RRANDO_VAL=$(date +%s%N | base64 | md5sum | cut -c 1-3 | tr '[:lower:]' '[:upper:]')
+	RRANDO_VAL_EXTENDED=$(date +%s%N | base64 | md5sum | cut -c 1-5 | tr '[:lower:]' '[:upper:]')
+
+	local SPARSE_IMAGE_FILE_NAME=$1
+
+	# Prompt user to select a filesystem type.
+	FORMAT_FILESYSTEM_TYPE=$(whiptail --title "Select Filesystem To 🍱 🍱 [FORMAT] 🍱 🍱" --menu "Choose a filesystem type:" 0 0 0 \
+		"1" "EXT4" \
+		"2" "BTRFS" \
+		"3" "FAT32" \
+		"4" "exFAT" \
+		"5" "NTFS" 3>&1 1>&2 2>&3)
+
+	if [ -z "$FORMAT_FILESYSTEM_TYPE" ]; then
+		echo "USER ABORTED: Filesystem selection cancelled."
+		return 1
+	fi
+
+	# A temporary mount point is used for post-formatting operations, such as
+	# setting permissions on the root of the new filesystem.
+	MOUNT_POINT="/mnt/sparse_img_mount"
+	sudo mkdir -p "$MOUNT_POINT"
+
+	case $FORMAT_FILESYSTEM_TYPE in
+	1)
+		# --- EXT4 Formatting ---
+		whiptail --msgbox "Will Format Sparse Image File With EXT4 Filesystem :: Label :: SPRSXT4-$RRANDO_VAL_EXTENDED" 0 0
+		sudo wipefs --force -a "$SPARSE_IMAGE_FILE_NAME"
+		sudo parted -s "$SPARSE_IMAGE_FILE_NAME" mklabel gpt
+		sudo parted -s -a opt "$SPARSE_IMAGE_FILE_NAME" mkpart ext4 0% 100%
+		sudo chmod 777 "$SPARSE_IMAGE_FILE_NAME"
+		# Attach to a loop device and scan for partitions.
+		sudo losetup -fP "$SPARSE_IMAGE_FILE_NAME"
+
+		# sleep 1 # REPLACED: Polling ensures the partition node is ready before formatting
+		for i in {1..50}; do
+			ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$SPARSE_IMAGE_FILE_NAME" | cut -d ' ' -f1)
+			if [ -n "$ASSOCIATED_LOOPDEV" ]; then
+				ASSOCIATED_LOOPDEV_1STPART="${ASSOCIATED_LOOPDEV}p1"
+				[ -b "$ASSOCIATED_LOOPDEV_1STPART" ] && break
+			fi
+			sleep 0.1
+		done
+
+		if [ -b "$ASSOCIATED_LOOPDEV_1STPART" ]; then
+			echo "First partition found, formatting as EXT4."
+			sudo mkfs.ext4 -F -L SPRSXT4-$RRANDO_VAL_EXTENDED "$ASSOCIATED_LOOPDEV_1STPART"
+
+			# Mount partition to set root permissions.
+			# This step makes the filesystem writable by any user, which can be a
+			# security risk but is convenient for easily accessing the image.
+			sudo mount "$ASSOCIATED_LOOPDEV_1STPART" "$MOUNT_POINT"
+			sudo chmod -R 777 "$MOUNT_POINT"
+
+			# Unmount and detach to clean up.
+			sudo umount "$MOUNT_POINT"
+			sudo losetup -d "$ASSOCIATED_LOOPDEV"
+			sudo losetup -D # Detach any unused loop devices.
+		else
+			echo "Error: First partition not found for $ASSOCIATED_LOOPDEV_1STPART. Exiting."
+			exit 1
+		fi
+		;;
+
+	2)
+		# --- BTRFS Formatting ---
+		whiptail --msgbox "Will Format Sparse Image File With BTRFS Filesystem :: Label :: SPRSBTRFS-$RRANDO_VAL_EXTENDED" 0 0
+		sudo wipefs --force -a "$SPARSE_IMAGE_FILE_NAME"
+		sudo parted -s "$SPARSE_IMAGE_FILE_NAME" mklabel gpt
+		sudo parted -s -a opt "$SPARSE_IMAGE_FILE_NAME" mkpart btrfs 0% 100%
+		sudo chmod 777 "$SPARSE_IMAGE_FILE_NAME"
+
+		sudo losetup -fP "$SPARSE_IMAGE_FILE_NAME"
+
+		# sleep 1 # REPLACED: Polling for reliability
+		for i in {1..50}; do
+			ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$SPARSE_IMAGE_FILE_NAME" | cut -d ' ' -f1)
+			if [ -n "$ASSOCIATED_LOOPDEV" ]; then
+				ASSOCIATED_LOOPDEV_1STPART="${ASSOCIATED_LOOPDEV}p1"
+				[ -b "$ASSOCIATED_LOOPDEV_1STPART" ] && break
+			fi
+			sleep 0.1
+		done
+
+		if [ -b "$ASSOCIATED_LOOPDEV_1STPART" ]; then
+			echo "First partition found, formatting as BTRFS."
+			sudo mkfs.btrfs -f -L SPRSBTRFS-$RRANDO_VAL_EXTENDED "$ASSOCIATED_LOOPDEV_1STPART"
+
+			# Mount to set root permissions.
+			sudo mount "$ASSOCIATED_LOOPDEV_1STPART" "$MOUNT_POINT"
+			sudo chmod -R 777 "$MOUNT_POINT"
+			sudo umount "$MOUNT_POINT"
+
+			# Cleanup.
+			sudo losetup -d "$ASSOCIATED_LOOPDEV"
+			sudo losetup -D
+		else
+			echo "Error: First partition not found for $ASSOCIATED_LOOPDEV_1STPART. Exiting."
+			exit 1
+		fi
+		;;
+
+	3)
+		# --- FAT32 Formatting ---
+		whiptail --msgbox "Will Format Sparse Image File With FAT32 Filesystem :: Label :: SPRSFAT32-${RRANDO_VAL_EXTENDED:0:1}" 0 0
+		sudo wipefs --force -a "$SPARSE_IMAGE_FILE_NAME"
+		sudo parted -s "$SPARSE_IMAGE_FILE_NAME" mklabel msdos # FAT32 uses MBR partition table.
+		sudo parted -s -a opt "$SPARSE_IMAGE_FILE_NAME" mkpart primary fat32 0% 100%
+		sudo parted -s "$SPARSE_IMAGE_FILE_NAME" set 1 boot on # Set the boot flag.
+		sudo chmod 777 "$SPARSE_IMAGE_FILE_NAME"
+
+		sudo losetup -fP "$SPARSE_IMAGE_FILE_NAME"
+
+		# sleep 1 # REPLACED: Polling for reliability
+		for i in {1..50}; do
+			ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$SPARSE_IMAGE_FILE_NAME" | cut -d ' ' -f1)
+			if [ -n "$ASSOCIATED_LOOPDEV" ]; then
+				ASSOCIATED_LOOPDEV_1STPART="${ASSOCIATED_LOOPDEV}p1"
+				[ -b "$ASSOCIATED_LOOPDEV_1STPART" ] && break
+			fi
+			sleep 0.1
+		done
+
+		if [ -b "$ASSOCIATED_LOOPDEV_1STPART" ]; then
+			echo "First partition found, formatting as FAT32."
+			# FAT32 labels have length restrictions.
+			LABEL="SPRSFAT32-$(echo "$RRANDO_VAL" | cut -c1 | tr -d '[:space:]')"
+			sudo mkfs.fat -F 32 -n "$LABEL" "$ASSOCIATED_LOOPDEV_1STPART"
+		else
+			echo "Error: First partition not found for $ASSOCIATED_LOOPDEV_1STPART. Exiting."
+			exit 1
+		fi
+
+		# Detach the loop device. Since FAT32 has no concept of Linux permissions,
+		# there is no need to mount and chmod.
+		LOOPDEV_MOUNT_POINT=$(lsblk -f -n -o MOUNTPOINTS "$ASSOCIATED_LOOPDEV" | tr -d '[:space:]')
+		sudo umount "$LOOPDEV_MOUNT_POINT" 2>/dev/null
+		sudo losetup -d "$ASSOCIATED_LOOPDEV" 2>/dev/null
+		sudo losetup -D
+		;;
+
+	4)
+		# --- exFAT Formatting ---
+		whiptail --msgbox "Will Format Sparse Image File With exFAT Filesystem :: Label :: SPRSEXFAT-${RRANDO_VAL_EXTENDED:0:1}" 0 0
+		sudo wipefs --force -a "$SPARSE_IMAGE_FILE_NAME"
+		sudo parted -s "$SPARSE_IMAGE_FILE_NAME" mklabel msdos
+		# exFAT is often identified as 'ntfs' by parted for partition type.
+		sudo parted -s "$SPARSE_IMAGE_FILE_NAME" mkpart primary ntfs 0% 100%
+		sudo parted -s "$SPARSE_IMAGE_FILE_NAME" set 1 boot on
+		sudo chmod 777 "$SPARSE_IMAGE_FILE_NAME"
+
+		sudo losetup -fP "$SPARSE_IMAGE_FILE_NAME"
+
+		# sleep 1 # REPLACED: Polling for reliability
+		for i in {1..50}; do
+			ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$SPARSE_IMAGE_FILE_NAME" | cut -d ' ' -f1)
+			if [ -n "$ASSOCIATED_LOOPDEV" ]; then
+				ASSOCIATED_LOOPDEV_1STPART="${ASSOCIATED_LOOPDEV}p1"
+				[ -b "$ASSOCIATED_LOOPDEV_1STPART" ] && break
+			fi
+			sleep 0.1
+		done
+
+		if [ -b "$ASSOCIATED_LOOPDEV_1STPART" ]; then
+			echo "First partition found, formatting as exFAT."
+			LABEL="SPRSEXFAT-$(echo "$RRANDO_VAL" | cut -c1 | tr -d '[:space:]')"
+			sudo mkfs.exfat -n "$LABEL" "$ASSOCIATED_LOOPDEV_1STPART"
+		else
+			echo "Error: First partition not found for $ASSOCIATED_LOOPDEV_1STPART. Exiting."
+			exit 1
+		fi
+
+		LOOPDEV_MOUNT_POINT=$(lsblk -f -n -o MOUNTPOINTS "$ASSOCIATED_LOOPDEV" | tr -d '[:space:]')
+		sudo umount "$LOOPDEV_MOUNT_POINT" 2>/dev/null
+		sudo losetup -d "$ASSOCIATED_LOOPDEV" 2>/dev/null
+		sudo losetup -D
+		;;
+
+	5)
+		# --- NTFS Formatting ---
+		whiptail --msgbox "Will Format Sparse Image File With NTFS Filesystem :: Label :: SPRSNTFS-$RRANDO_VAL_EXTENDED" 0 0
+		sudo wipefs --force -a "$SPARSE_IMAGE_FILE_NAME"
+		sudo parted -s "$SPARSE_IMAGE_FILE_NAME" mklabel gpt
+		sudo parted -s -a opt "$SPARSE_IMAGE_FILE_NAME" mkpart ntfs 0% 100%
+		sudo chmod 777 "$SPARSE_IMAGE_FILE_NAME"
+
+		sudo losetup -fP "$SPARSE_IMAGE_FILE_NAME"
+
+		# sleep 1 # REPLACED: Polling for reliability
+		for i in {1..50}; do
+			ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$SPARSE_IMAGE_FILE_NAME" | cut -d ' ' -f1)
+			if [ -n "$ASSOCIATED_LOOPDEV" ]; then
+				ASSOCIATED_LOOPDEV_1STPART="${ASSOCIATED_LOOPDEV}p1"
+				[ -b "$ASSOCIATED_LOOPDEV_1STPART" ] && break
+			fi
+			sleep 0.1
+		done
+
+		if [ -b "$ASSOCIATED_LOOPDEV_1STPART" ]; then
+			echo "First partition found, formatting as NTFS."
+			sudo mkfs.ntfs --quick --force --label SPRSNTFS-$RRANDO_VAL "$ASSOCIATED_LOOPDEV_1STPART"
+		else
+			echo "Error: First partition not found for $ASSOCIATED_LOOPDEV_1STPART. Exiting."
+			exit 1
+		fi
+
+		LOOPDEV_MOUNT_POINT=$(lsblk -f -n -o MOUNTPOINTS "$ASSOCIATED_LOOPDEV" | tr -d '[:space:]')
+		sudo umount "$LOOPDEV_MOUNT_POINT" 2>/dev/null
+		sudo losetup -d "$ASSOCIATED_LOOPDEV" 2>/dev/null
+		sudo losetup -D
+		;;
+	esac
+}
+
+# =============================================================================
+# FUNCTION: FUN_FORMAT_SPARSE_FILE_IMAGE
+#
+# PURPOSE:
+# Formats an existing .img or .bin file with a user-selected filesystem.
+# This is the standalone version accessed from the main menu.
+#
+# WORKFLOW:
+# 1. Displays a list of existing image files in the current directory.
+# 2. Prompts the user to enter the path to the desired image file.
+# 3. Cleans up any existing loop device or mounts associated with the file.
+# 4. Follows the same formatting logic as the `_AT_CREATION_TIME` function.
+# =============================================================================
+FUN_FORMAT_SPARSE_FILE_IMAGE() {
+	export NEWT_COLORS='button=black,green textbox=yellow,black'
+
+	# Generate a formatted list of .img and .bin files in the current directory.
+	# It displays both the real and apparent sizes of the files.
+	IMG_BIN_FILES_IN_PWD=$(
+		printf "RealSize :: ApparentSize\n++++++++++++++++++++++++++++\n" # Header for the file list.
+		# Find .img or .bin files in the current directory (maxdepth 1).
+		for _VAL in $(find $PWD -maxdepth 1 -name "*.img" -o -name "*.bin" | sed s+$PWD/++g); do
+			# For each file, print its real size, apparent size, and filename.
+			printf "%-8s %-8s %-8s\n" "$(du -h $_VAL | cut -f1)" "$(du --apparent-size -h $_VAL | cut -f1)" "$_VAL"
+		done
+	)
+
+	IMAGE_FILE_PATH=$(whiptail --scrolltext --title "[FORMAT] 🍱 🍱 Input Sparse Image File [.IMG / .BIN] Absolute Path" --inputbox "$IMG_BIN_FILES_IN_PWD" 0 0 3>&1 1>&2 2>&3)
+	# Remove spaces from the input path.
+	IMAGE_FILE_PATH=$(echo "$IMAGE_FILE_PATH" | tr -d '[:space:]')
+
+	if [ -z "$IMAGE_FILE_PATH" ]; then
+		echo "USER ABORTED: Image file selection cancelled."
+		return 1
+	fi
+	# Verify that the specified file exists.
+	if ! [ -f "$IMAGE_FILE_PATH" ]; then
+		echo "Error: Specified file '$IMAGE_FILE_PATH' does not exist."
+		return 1
+	fi
+
+	FORMAT_FILESYSTEM_TYPE=$(whiptail --title "Select Filesystem To 🍱 🍱 [FORMAT] 🍱 🍱" --menu "Choose a filesystem type:" 0 0 0 \
+		"1" "EXT4" \
+		"2" "BTRFS" \
+		"3" "FAT32" \
+		"4" "exFAT" \
+		"5" "NTFS" 3>&1 1>&2 2>&3)
+	if [ -z "$FORMAT_FILESYSTEM_TYPE" ]; then
+		echo "USER ABORTED: Filesystem type selection cancelled."
+		return 1
+	fi
+
+	# Cleanup loop device if already attached
+	if losetup --all --noheadings --output NAME,BACK-FILE | grep -q "$IMAGE_FILE_PATH"; then
+		echo "🍣 🍣 Loop device is currently associated with the image file. Cleaning up..."
+		ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$IMAGE_FILE_PATH" | cut -d ' ' -f1)
+		MOUNT_POINTS=$(lsblk -no MOUNTPOINT "$ASSOCIATED_LOOPDEV"*)
+		for MOUNT_POINT in $MOUNT_POINTS; do
+			if [ -n "$MOUNT_POINT" ]; then
+				echo "Unmounting partition mounted at $MOUNT_POINT..."
+				sudo umount "$MOUNT_POINT" || echo "Failed to unmount $MOUNT_POINT"
+			fi
+		done
+		echo "Detaching loop device $ASSOCIATED_LOOPDEV..."
+		sudo losetup -d "$ASSOCIATED_LOOPDEV" || echo "Failed to detach $ASSOCIATED_LOOPDEV"
+	else
+		echo "🍣 🍣 No loop device is currently associated with $IMAGE_FILE_PATH"
+	fi
+
+	RRANDO_VAL=$(date +%s%N | base64 | md5sum | cut -c 1-3 | tr '[:lower:]' '[:upper:]')
+	RRANDO_VAL_EXTENDED=$(date +%s%N | base64 | md5sum | cut -c 1-5 | tr '[:lower:]' '[:upper:]')
+
+	# Temporary mount point
+	MOUNT_POINT="/mnt/sparse_img_mount"
+	sudo mkdir -p "$MOUNT_POINT"
+
+	case $FORMAT_FILESYSTEM_TYPE in
+	1) # EXT4
+		if whiptail --fullbuttons --yesno "Format Sparse Image File with EXT4 Filesystem? Label: SPRSXT4-$RRANDO_VAL_EXTENDED" 0 0; then
+			sudo wipefs --force -a "$IMAGE_FILE_PATH"
+			sudo parted -s "$IMAGE_FILE_PATH" mklabel gpt
+			sudo parted -s -a opt "$IMAGE_FILE_PATH" mkpart ext4 0% 100%
+			sudo chmod 777 "$IMAGE_FILE_PATH"
+
+			sudo losetup -fP "$IMAGE_FILE_PATH"
+			# sleep 1 # REPLACED: Polling for reliability
+			for i in {1..50}; do
+				ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$IMAGE_FILE_PATH" | cut -d ' ' -f1)
+				if [ -n "$ASSOCIATED_LOOPDEV" ]; then
+					ASSOCIATED_LOOPDEV_1STPART="${ASSOCIATED_LOOPDEV}p1"
+					[ -b "$ASSOCIATED_LOOPDEV_1STPART" ] && break
+				fi
+				sleep 0.1
+			done
+
+			sudo mkfs.ext4 -F -L SPRSXT4-$RRANDO_VAL_EXTENDED "$ASSOCIATED_LOOPDEV_1STPART"
+
+			# Mount, chmod 777 recursively, unmount, detach
+			sudo mount "$ASSOCIATED_LOOPDEV_1STPART" "$MOUNT_POINT"
+			sudo chmod -R 777 "$MOUNT_POINT"
+			sudo umount "$MOUNT_POINT"
+
+			sudo losetup -d "$ASSOCIATED_LOOPDEV"
+		else
+			echo "USER ABORTED: EXT4 formatting cancelled."
+		fi
+		;;
+	2) # BTRFS
+		if whiptail --fullbuttons --yesno "Format Sparse Image File with BTRFS Filesystem? Label: SPRSBTRFS-$RRANDO_VAL_EXTENDED" 0 0; then
+			sudo wipefs --force -a "$IMAGE_FILE_PATH"
+			sudo parted -s "$IMAGE_FILE_PATH" mklabel gpt
+			sudo parted -s -a opt "$IMAGE_FILE_PATH" mkpart btrfs 0% 100%
+			sudo chmod 777 "$IMAGE_FILE_PATH"
+
+			sudo losetup -fP "$IMAGE_FILE_PATH"
+			# sleep 1 # REPLACED: Polling for reliability
+			for i in {1..50}; do
+				ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$IMAGE_FILE_PATH" | cut -d ' ' -f1)
+				if [ -n "$ASSOCIATED_LOOPDEV" ]; then
+					ASSOCIATED_LOOPDEV_1STPART="${ASSOCIATED_LOOPDEV}p1"
+					[ -b "$ASSOCIATED_LOOPDEV_1STPART" ] && break
+				fi
+				sleep 0.1
+			done
+
+			sudo mkfs.btrfs -f -L SPRSBTRFS-$RRANDO_VAL_EXTENDED "$ASSOCIATED_LOOPDEV_1STPART"
+
+			sudo mount "$ASSOCIATED_LOOPDEV_1STPART" "$MOUNT_POINT"
+			sudo chmod -R 777 "$MOUNT_POINT"
+			sudo umount "$MOUNT_POINT"
+
+			sudo losetup -d "$ASSOCIATED_LOOPDEV"
+		else
+			echo "USER ABORTED: BTRFS formatting cancelled."
+		fi
+		;;
+	3) # FAT32
+		if whiptail --fullbuttons --yesno "Format Sparse Image File with FAT32 Filesystem? Label: SPRSFAT32-${RRANDO_VAL_EXTENDED:0:1}" 0 0; then
+			sudo wipefs --force -a "$IMAGE_FILE_PATH"
+			sudo parted -s "$IMAGE_FILE_PATH" mklabel msdos
+			sudo parted -s -a opt "$IMAGE_FILE_PATH" mkpart primary fat32 0% 100%
+			sudo parted -s "$IMAGE_FILE_PATH" set 1 boot on
+			sudo chmod 777 "$IMAGE_FILE_PATH"
+
+			sudo losetup -fP "$IMAGE_FILE_PATH"
+			# sleep 1 # REPLACED: Polling for reliability
+			for i in {1..50}; do
+				ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$IMAGE_FILE_PATH" | cut -d ' ' -f1)
+				if [ -n "$ASSOCIATED_LOOPDEV" ]; then
+					ASSOCIATED_LOOPDEV_1STPART="${ASSOCIATED_LOOPDEV}p1"
+					[ -b "$ASSOCIATED_LOOPDEV_1STPART" ] && break
+				fi
+				sleep 0.1
+			done
+
+			LABEL="SPRSFAT32-$(echo "$RRANDO_VAL" | cut -c1 | tr -d '[:space:]')"
+			sudo mkfs.fat -F 32 -n "$LABEL" "$ASSOCIATED_LOOPDEV_1STPART"
+			sudo losetup -d "$ASSOCIATED_LOOPDEV"
+		else
+			echo "USER ABORTED: FAT32 formatting cancelled."
+		fi
+		;;
+	4) # exFAT
+		if whiptail --fullbuttons --yesno "Format Sparse Image File with exFAT Filesystem? Label: SPRSEXFAT-${RRANDO_VAL_EXTENDED:0:1}" 0 0; then
+			sudo wipefs --force -a "$IMAGE_FILE_PATH"
+			sudo parted -s "$IMAGE_FILE_PATH" mklabel msdos
+			sudo parted -s "$IMAGE_FILE_PATH" mkpart primary ntfs 0% 100%
+			sudo parted -s "$IMAGE_FILE_PATH" set 1 boot on
+			sudo chmod 777 "$IMAGE_FILE_PATH"
+
+			sudo losetup -fP "$IMAGE_FILE_PATH"
+			# sleep 1 # REPLACED: Polling for reliability
+			for i in {1..50}; do
+				ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$IMAGE_FILE_PATH" | cut -d ' ' -f1)
+				if [ -n "$ASSOCIATED_LOOPDEV" ]; then
+					ASSOCIATED_LOOPDEV_1STPART="${ASSOCIATED_LOOPDEV}p1"
+					[ -b "$ASSOCIATED_LOOPDEV_1STPART" ] && break
+				fi
+				sleep 0.1
+			done
+
+			LABEL="SPRSEXFAT-$(echo "$RRANDO_VAL" | cut -c1 | tr -d '[:space:]')"
+			sudo mkfs.exfat -n "$LABEL" "$ASSOCIATED_LOOPDEV_1STPART"
+			sudo losetup -d "$ASSOCIATED_LOOPDEV"
+		else
+			echo "USER ABORTED: exFAT formatting cancelled."
+		fi
+		;;
+	5) # NTFS
+		if whiptail --fullbuttons --yesno "Format Sparse Image File with NTFS Filesystem? Label: SPRSNTFS-$RRANDO_VAL_EXTENDED" 0 0; then
+			sudo wipefs --force -a "$IMAGE_FILE_PATH"
+			sudo parted -s "$IMAGE_FILE_PATH" mklabel gpt
+			sudo parted -s -a opt "$IMAGE_FILE_PATH" mkpart ntfs 0% 100%
+			sudo chmod 777 "$IMAGE_FILE_PATH"
+
+			sudo losetup -fP "$IMAGE_FILE_PATH"
+			# sleep 1 # REPLACED: Polling for reliability
+			for i in {1..50}; do
+				ASSOCIATED_LOOPDEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$IMAGE_FILE_PATH" | cut -d ' ' -f1)
+				if [ -n "$ASSOCIATED_LOOPDEV" ]; then
+					ASSOCIATED_LOOPDEV_1STPART="${ASSOCIATED_LOOPDEV}p1"
+					[ -b "$ASSOCIATED_LOOPDEV_1STPART" ] && break
+				fi
+				sleep 0.1
+			done
+
+			sudo mkfs.ntfs --quick --force --label "SPRSNTFS-$RRANDO_VAL_EXTENDED" "$ASSOCIATED_LOOPDEV_1STPART"
+			sudo losetup -d "$ASSOCIATED_LOOPDEV"
+		else
+			echo "USER ABORTED: NTFS formatting cancelled."
+		fi
+		;;
+	esac
+}
+
+# =============================================================================
+# FUNCTION: FUN_MAKE_EXISTING_FILE_SPARSE
+#
+# PURPOSE:
+# Converts an existing file into a sparse file by de-allocating blocks
+# filled with zeros. This reduces the file's actual disk usage without
+# changing its apparent size.
+#
+# WORKFLOW:
+# 1. Displays a list of files in the current directory.
+# 2. Prompts the user to select a file.
+# 3. Uses `fallocate -d` to make the file sparse.
+# =============================================================================
+FUN_MAKE_EXISTING_FILE_SPARSE() {
+
+	# Set whiptail color scheme for UI elements.
+	export NEWT_COLORS='
+    button=black,green
+    textbox=yellow,black'
+
+	# Generate a formatted list of non-hidden files in the current directory.
+	# It displays both the real and apparent sizes of the files.
+	_FILES_IN_PWD_HIDDEN_FILES_EXCLUDED_FIND=$(
+		printf "%s\n\n" "FILES IN CURRENT DIR [${PWD}]"
+		printf "%s\n%s\n" "RealSize :: ApparentSize" "++++++++++++++++++++++++++++++"
+		for _VAL in $(find . -maxdepth 1 -name "*.*" -not -name ".*"); do
+			if [ -f "$_VAL" ]; then
+				printf "%-8s %-8s %-8s \n" "$(du -h "$_VAL" | cut -f1)" "$(du --apparent-size -h "$_VAL" | cut -f1)" "$_VAL"
+			fi
+		done
+	)
+
+	# Prompt the user to select the file to make sparse using an input box.
+	# The input box pre-fills with the list of files found.
+	IMAGE_FILE_PATH=$(whiptail --scrolltext --title "[MAKE] 🏺 🏺 Existing File Sparse :: Input [ANY] File's Absolute Path " --inputbox "$_FILES_IN_PWD_HIDDEN_FILES_EXCLUDED_FIND" 0 0 3>&1 1>&2 2>&3)
+
+	# remove spaces
+	IMAGE_FILE_PATH=$(echo "$IMAGE_FILE_PATH" | tr -d '[:space:]')
+	# Exit if the user aborts the file selection.
+	if [ -z "$IMAGE_FILE_PATH" ]; then
+		echo "USER ABORTED: File selection cancelled."
+		return 1
+	fi
+	# define file by absolute path
+	IMAGE_FILE_PATH=$(realpath "$IMAGE_FILE_PATH")
+	# Verify that the specified file exists.
+	if ! [ -f "$IMAGE_FILE_PATH" ]; then
+		echo "Error: Specified file '$IMAGE_FILE_PATH' does not exist."
+		return 1
+	fi
+
+	echo -e "\e[1;48;5;19m" "Making file sparse: $IMAGE_FILE_PATH \ndeallocate zero blocks..." "\e[0m"
+	echo "Running: nice -n10 ionice -c2 -n7 fallocate -d [FILE_PATH] — low CPU and I/O priority to reduce system impact."
+
+	# --- Spinner PID and Trap ---
+	local SPINNER_PID
+	local CMD_PREFIX=""
+	CMD_PREFIX="nice -n10 ionice -c2 -n7"
+
+	# Start a spinner in the background to indicate progress.
+	fun_kawaii_braille_spinner "Making file sparse [RE-sparsing]..." &
+	SPINNER_PID=$!
+
+	# Convert the specified file to a sparse file.
+	# 'fallocate -d' deallocates disk space for blocks of zeros, making the file sparse.
+	$CMD_PREFIX sudo fallocate -d "$IMAGE_FILE_PATH"
+
+	# Set file permissions to 777 (read, write, execute for all) for the modified file.
+	sudo chmod 777 "$IMAGE_FILE_PATH"
+
+	# Stop the spinner...
+	kill $SPINNER_PID
+	tput cnorm
+	printf "\r[Re-sparsing] deallocate zero blocks... Done.                \n"
+
+	local _FINISHED_RESPARSED_FILE_REPORT=$(
+		printf "%s\n\n" "[Re-sparsing] deallocate zero blocks complete for:\n  ${IMAGE_FILE_PATH}"
+		printf "%s\n%s\n" "RealSize :: ApparentSize" "++++++++++++++++++++++++++++++"
+		printf "%-8s %-8s %-8s \n" "$(du -h "$IMAGE_FILE_PATH" | cut -f1)" "$(du --apparent-size -h "$IMAGE_FILE_PATH" | cut -f1)" "$IMAGE_FILE_PATH"
+	)
+
+	whiptail --title "Success" --msgbox "$_FINISHED_RESPARSED_FILE_REPORT" 0 0
+
+	echo "🏺 🏺 ALL DONE [MAKING] Existing File Sparse 🏺 🏺"
+}
+
+# =============================================================================
+# FUNCTION: FUN_UNSPARSE_FILE
+#
+# PURPOSE:
+# Converts a sparse file back into a fully allocated file. It offers two
+# modes: a fast mode and a maximum safety mode.
+#
+# WORKFLOW:
+# 1. Prompts the user to select a file.
+# 2. Prompts the user to choose between "Fast Mode" and "Safe Mode".
+# 3. Prompts for block size and low-priority execution.
+# 4. Executes the chosen unsparse logic.
+#
+# FAST MODE:
+# - Uses a single `dd` command to read and write in-place.
+# - It's fast and resumable.
+#
+# SAFE MODE:
+# - Uses a temporary file for each block to guarantee data integrity.
+# - It reads a block, writes it to a temp file, syncs, then writes
+#   the temp file back to the main file, and syncs again.
+# - The progress checkpoint is only updated after a block is safely written.
+# - Includes pre- and post-operation checksum verification.
+# - This mode is much slower but provides maximum protection against data loss.
+# =============================================================================
+FUN_UNSPARSE_FILE() {
+	export NEWT_COLORS='
+    button=black,green
+    textbox=yellow,black'
+
+	# Generate a formatted list of files in the current directory.
+	_FILES_IN_PWD_HIDDEN_FILES_EXCLUDED_FIND=$(
+		printf "%s\n %s\n %s\n" "FILES IN CURRENT DIR [${PWD}]" "RealSize :: ApparentSize" "+++++++++++++++++++++++++++++++++++++++++++++++"
+		for _VAL in $(find $PWD -maxdepth 1 -not -iname '.*' | sed s+$PWD/++g); do
+			if [ -f "$_VAL" ]; then
+				printf "%-8s %-8s %-8s \n" "$(du -h "$_VAL" | sed s/"$_VAL"//g)" "$(du --apparent-size -h "$_VAL" | sed s/"$_VAL"//g)" "$_VAL"
+			fi
+		done
+	)
+
+	# Prompt the user to select the file to unsparse.
+	local FILE_TO_UNSPARSE
+	FILE_TO_UNSPARSE=$(whiptail --scrolltext --title "[UNSPARSE] 📦 📦 Input File's Absolute Path" --inputbox "$_FILES_IN_PWD_HIDDEN_FILES_EXCLUDED_FIND" 0 0 "" 3>&1 1>&2 2>&3)
+
+	# sanitize spaces
+	FILE_TO_UNSPARSE=$(echo "$FILE_TO_UNSPARSE" | tr -d '[:space:]')
+
+	if [ -z "$FILE_TO_UNSPARSE" ]; then
+		echo "USER ABORTED: File selection cancelled."
+		return 1
+	fi
+
+	if [ ! -f "$FILE_TO_UNSPARSE" ]; then
+		whiptail --msgbox "Error: File '$FILE_TO_UNSPARSE' not found." 0 0
+		return 1
+	fi
+
+	local FILE="$FILE_TO_UNSPARSE"
+	local IS_FILE_SPARSE=false
+	# first detect if file is sparse
+	if (($(du --apparent-size "$FILE" | cut -f1) > $(du "$FILE" | cut -f1))); then
+		echo "File is sparse — safe to unsparse."
+		IS_FILE_SPARSE=true
+	else
+		echo "File is already fully allocated."
+		if whiptail --yes-button "Skip" --no-button "Continue Anyway" --yesno "The selected file \n\n[ $FILE_TO_UNSPARSE ]\n\nis not sparse and appears to be fully allocated.\nNo action is needed.\n\nContinue Anyway? (This is generally safe but unnecessary)." 0 0; then
+			return 0 # User chose to skip
+		fi
+		IS_FILE_SPARSE=false
+	fi
+
+	# Prompt for Unsparse Mode
+	local UNSPARSE_MODE
+	UNSPARSE_MODE=$(whiptail --title "Unsparse Mode" --menu "Choose an unsparse method:" 0 0 0 \
+		"1" "Fast Mode (Recommended)" \
+		"2" "Safe Mode (Bulletproof)" 3>&1 1>&2 2>&3)
+
+	if [ -z "$UNSPARSE_MODE" ]; then
+		echo "USER ABORTED: Mode selection cancelled."
+		return 1
+	fi
+
+	# Prompt for block size
+	local BS_CHOICE
+	BS_CHOICE=$(whiptail --title "Block Size Selection" --menu "Choose block size (larger is faster for big files)" 0 0 0 \
+		"1" "4 MiB (Good default for HDDs)" \
+		"2" "8 MiB (Good for HDDs)" \
+		"3" "16 MiB (Recommended for SSDs)" \
+		"4" "32 MiB (Recommended for SSDs)" \
+		"5" "64 MiB (For very large files >50GB)" 3>&1 1>&2 2>&3)
+
+	local BS
+	case "$BS_CHOICE" in
+	1) BS=$((4 * 1024 * 1024)) ;;
+	2) BS=$((8 * 1024 * 1024)) ;;
+	3) BS=$((16 * 1024 * 1024)) ;;
+	4) BS=$((32 * 1024 * 1024)) ;;
+	5) BS=$((64 * 1024 * 1024)) ;;
+	*)
+		echo "USER ABORTED: Block size selection cancelled."
+		return 1
+		;;
+	esac
+
+	# Ask user if they want to use ionice and nice
+	local CMD_PREFIX=""
+	if whiptail --title "Reduce System Pressure?" --yesno "Run the unsparse process with low CPU and I/O priority?\n\nThis is recommended for systems in active use to prevent slowdowns, but the process will take longer." 0 0; then
+		CMD_PREFIX="nice -n 10 ionice -c3 "
+	fi
+
+	local SIZE
+	SIZE=$(stat -c %s "$FILE_TO_UNSPARSE")
+	local STATE_FILE="${FILE_TO_UNSPARSE}.unsparse.state"
+	local START_OFFSET
+	START_OFFSET=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
+
+	whiptail --title "Starting Unsparse" --msgbox "Starting unsparse process for '$FILE_TO_UNSPARSE'.\n\nTotal Size: $((SIZE / 1024 / 1024)) MiB\nBlock Size: $((BS / 1024 / 1024)) MiB\n\nThis process is resumable. If interrupted, just run it again." 0 0
+
+	# --- Spinner PID and Trap ---
+	local SPINNER_PID
+	trap 'kill $SPINNER_PID &>/dev/null; tput cnorm; echo; exit' INT TERM
+
+	# --- EXECUTE CHOSEN MODE ---
+	if [ "$UNSPARSE_MODE" -eq 1 ]; then
+		# --- FAST MODE ---
+		fun_kawaii_braille_spinner "Unsparsing (Fast Mode)..." &
+		SPINNER_PID=$!
+
+		if [[ "$IS_FILE_SPARSE" == false ]]; then
+			# For non-sparse files, use a dedicated read file descriptor to prevent self-overwrite corruption.
+			echo "File is not sparse. Using safe 'dd' method with a dedicated file descriptor."
+			exec 3<"$FILE_TO_UNSPARSE"
+			for ((OFFSET = START_OFFSET; OFFSET < SIZE; OFFSET += BS)); do
+				$CMD_PREFIX dd if="/proc/$$/fd/3" of="$FILE_TO_UNSPARSE" bs=$BS count=1 \
+					skip=$((OFFSET / BS)) seek=$((OFFSET / BS)) \
+					conv=notrunc status=none
+				echo $((OFFSET + BS)) >"$STATE_FILE"
+			done
+			exec 3<&- # Close the file descriptor
+		else
+			# For sparse files, a standard in-place dd is safe.
+			for ((OFFSET = START_OFFSET; OFFSET < SIZE; OFFSET += BS)); do
+				$CMD_PREFIX dd if="$FILE_TO_UNSPARSE" of="$FILE_TO_UNSPARSE" bs=$BS count=1 \
+					skip=$((OFFSET / BS)) seek=$((OFFSET / BS)) \
+					conv=notrunc status=none
+				echo $((OFFSET + BS)) >"$STATE_FILE"
+			done
+		fi
+
+		kill $SPINNER_PID
+		tput cnorm # Restore cursor
+		printf "\rUnsparsing (Fast Mode)... Done.                \n"
+
+	elif [ "$UNSPARSE_MODE" -eq 2 ]; then
+		# --- SAFE MODE ---
+		local TMPDIR="${FILE_TO_UNSPARSE}.unsparse.tmpdir"
+		local BACKUP_HASH="${FILE_TO_UNSPARSE}.sha256.before"
+		mkdir -p "$TMPDIR"
+
+		if ! whiptail --title "Checksum Verification" --yesno "Create a SHA256 checksum before starting?\n\nThis allows verifying data integrity after the operation but can take a long time for large files." 0 0; then
+			BACKUP_HASH="" # Skip checksum
+		fi
+
+		if [ -n "$BACKUP_HASH" ] && [ ! -f "$BACKUP_HASH" ]; then
+			fun_kawaii_braille_spinner "Creating SHA256 checksum..." &
+			SPINNER_PID=$!
+			sha256sum "$FILE_TO_UNSPARSE" >"$BACKUP_HASH"
+			kill $SPINNER_PID
+			tput cnorm
+			printf "\rCreating SHA256 checksum... Done.                \n"
+			echo -e "\e[48;5;184m" "\e[1:38;5;16m" "\n ✅ ✅ Checksum Created at: \n$BACKUP_HASH\n" "\e[0m "
+		fi
+
+		fun_kawaii_braille_spinner "Unsparsing (Safe Mode)..." &
+		SPINNER_PID=$!
+
+		TOTAL_BLOCKS=$(((SIZE + BS - 1) / BS))
+		CURRENT_BLOCK=$((START_OFFSET / BS))
+
+		# For Safe mode, using a dedicated FD is good practice for all cases.
+		exec 3<"$FILE_TO_UNSPARSE"
+
+		for ((idx = CURRENT_BLOCK; idx < TOTAL_BLOCKS; idx++)); do
+			OFFSET=$((idx * BS))
+			TMPFILE="$TMPDIR/block.$idx.tmp"
+
+			# 1. Read block to temp file
+			$CMD_PREFIX dd if="/proc/$$/fd/3" of="$TMPFILE" bs=$BS skip=$idx count=1 conv=notrunc status=none
+			sync
+			# 2. Write temp file back to target file
+			$CMD_PREFIX dd if="$TMPFILE" of="$FILE_TO_UNSPARSE" bs=$BS seek=$idx count=1 conv=notrunc status=none
+			sync
+			# 3. Update checkpoint only after successful sync
+			echo $(((idx + 1) * BS)) >"$STATE_FILE"
+			sync
+		done
+		exec 3<&- # Close the file descriptor
+
+		kill $SPINNER_PID
+		tput cnorm
+		printf "\rUnsparsing (Safe Mode)... Done.                \n"
+
+		# Cleanup for Safe Mode
+		rm -rf "$TMPDIR"
+
+		if [ -n "$BACKUP_HASH" ]; then
+			if whiptail --title "Verify Integrity" --yesno "Unsparse complete. Verify file integrity using the pre-run checksum?\n(This can take a long time)" 0 0; then
+				local VERIFY_OUTPUT
+				VERIFY_OUTPUT=$(sha256sum -c "$BACKUP_HASH" 2>&1)
+				if echo "$VERIFY_OUTPUT" | grep -q "OK"; then
+					whiptail --msgbox "✅ ✅ Integrity Verified: OK\n\n$VERIFY_OUTPUT" 0 0
+				else
+					whiptail --msgbox "❗ ❗ WARNING: Integrity Check FAILED!\n\n$VERIFY_OUTPUT" 0 0
+				fi
+			fi
+		fi
+	fi
+
+	# Finalization
+	trap - INT TERM # Clear the trap
+	rm -f "$STATE_FILE"
+	sync
+	whiptail --title "Success" --msgbox "Unsparse complete for '$FILE_TO_UNSPARSE'." 0 0
+	echo "📦 📦 ALL DONE [UNSPARSING] File 📦 📦"
+}
+
+# =============================================================================
+# FUNCTION: _FUN_CORE_MOUNT_LOGIC (Private Helper)
+#
+# PURPOSE:
+# Handles the core logic of attaching an image file to a loop device. This
+# does NOT mount the filesystem to a directory; it only makes the block
+# device and its partitions available to the system (e.g., as /dev/loopX).
+#
+# ARGUMENTS:
+#   $1 - The absolute path to the image file.
+#
+# WORKFLOW:
+# 1. Validates the file path.
+# 2. Checks if the file is already attached to a loop device. If so, it
+#    unmounts any partitions and detaches it to prevent conflicts.
+# 3. Uses `losetup -fP` to find the next free loop device and attach the
+#    image, scanning for partitions (`-P`).
+# =============================================================================
+_FUN_CORE_MOUNT_LOGIC() {
+	local IMAGE_FILE_PATH=$1
+
+	if [ -z "$IMAGE_FILE_PATH" ] || [ ! -f "$IMAGE_FILE_PATH" ]; then
+		whiptail --msgbox "Error: Invalid or non-existent file path provided." 0 0
+		return 1
+	fi
+
+	IMAGE_FILE_PATH=$(realpath "$IMAGE_FILE_PATH" | tr -d '[:space:]')
+
+	# Ensure the image is not already attached to prevent duplicate mounts.
+	if losetup --all --noheadings --output NAME,BACK-FILE | grep -q "$IMAGE_FILE_PATH"; then
+		echo "File already associated with a loop device. Unmounting before proceeding."
+
+		# Store all associated loop devices in an array
+		mapfile -t loop_devices < <(losetup --all --noheadings --output NAME,BACK-FILE |
+			grep "$IMAGE_FILE_PATH" |
+			awk '{print $1}')
+
+		# Unmount and detach each loop device safely
+		for dev in "${loop_devices[@]}"; do
+			echo "Unmounting and detaching $dev..."
+			sudo umount "$dev" 2>/dev/null || sudo umount -l "$dev" 2>/dev/null
+			sudo umount "$dev"* 2>/dev/null || sudo umount -l "$dev"* 2>/dev/null
+			sudo losetup -d "$dev" 2>/dev/null || true
+			sudo losetup -d "$dev"* 2>/dev/null || true
+		done
+		sudo losetup -D 2>/dev/null || true
+		# Refresh partition table
+		sudo partprobe
+	fi
+
+	echo "Attaching $IMAGE_FILE_PATH ..."
+	# -f finds the next free loop device.
+	# -P forces the kernel to scan the partition table on the new device.
+	sudo losetup -fP "$IMAGE_FILE_PATH"
+	echo "ALL DONE ...🍊 🍊 RAN ... sudo losetup -fP $IMAGE_FILE_PATH"
+}
+
+# =============================================================================
+# FUNCTION: FUN_MOUNT_IMG_BIN_FILE_IN_PWD
+#
+# PURPOSE:
+# A user-facing wrapper for `_FUN_CORE_MOUNT_LOGIC` that allows selecting
+# one or more image files from the current working directory to attach.
+# =============================================================================
+FUN_MOUNT_IMG_BIN_FILE_IN_PWD() {
+	export NEWT_COLORS='
+    button=black,green
+    textbox=yellow,black'
+
+	# Find all .img and .bin files in the current directory.
+	local file_list
+	readarray -t file_list < <(find "$PWD" -maxdepth 1 -type f \( -name "*.img" -o -name "*.bin" \))
+
+	if [ ${#file_list[@]} -eq 0 ]; then
+		whiptail --msgbox "!!! NO [.IMG/.BIN] FILES in Current directory [[ $PWD ]]" 0 0
+		return 1
+	fi
+
+	# Prepare a checklist for whiptail with file details.
+	local checklist_options=()
+	for file in "${file_list[@]}"; do
+		local filename
+		filename=$(basename "$file")
+		local real_size
+		real_size=$(du -h "$file" | cut -f1)
+		local apparent_size
+		apparent_size=$(du --apparent-size -h "$file" | cut -f1)
+		local description="REAL_SIZE:[$real_size] APPARENT_SIZE:[$apparent_size]"
+		checklist_options+=("$filename" "$description" "OFF")
+	done
+
+	# Show the checklist and get user's choices.
+	local IMAGE_FILE_CHOICES
+	IMAGE_FILE_CHOICES=$(whiptail --separate-output --checklist "Select file(s) to mount" 0 0 0 "${checklist_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$IMAGE_FILE_CHOICES" ]; then
+		echo "USER ABORTED . . . Nothing Done 🍊 🍊"
+		return 1
+	fi
+
+	# Set a trap to catch Ctrl+C and exit gracefully.
+	trap "echo NOTHING DONE ...🍊 🍊The script is terminated..USER ABORTED .Nothing Done; exit" SIGINT
+
+	# Call the core logic for each selected file.
+	for final_image_file in $IMAGE_FILE_CHOICES; do
+		_FUN_CORE_MOUNT_LOGIC "$PWD/$final_image_file"
+	done
+
+	unset NEWT_COLORS
+}
+
+# =============================================================================
+# FUNCTION: FUN_MOUNT_IMG_BIN_FILE_BY_INPUTTING_ABSOLUTE_PATH
+#
+# PURPOSE:
+# A user-facing wrapper for `_FUN_CORE_MOUNT_LOGIC` that allows the user
+# to manually enter the absolute path of an image file to attach.
+# =============================================================================
+FUN_MOUNT_IMG_BIN_FILE_BY_INPUTTING_ABSOLUTE_PATH() {
+	export NEWT_COLORS='
+    button=black,green
+    textbox=yellow,black'
+
+	# Pre-populate the input box with a list of local image files for convenience.
+	local IMG_BIN_FILES_IN_PWD
+	IMG_BIN_FILES_IN_PWD=$(
+		printf "%s\n%s\n" "RealSize :: ApparentSize" "++++++++++++++++++++++++++++++"
+		for _VAL in $(find . -maxdepth 1 -name "*.img" -o -name "*.bin"); do
+			if [ -f "$_VAL" ]; then
+				printf "%-8s %-8s %-8s \n" "$(du -h "$_VAL" | cut -f1)" "$(du --apparent-size -h "$_VAL" | cut -f1)" "$_VAL"
+			fi
+		done
+	)
+
+	local IMAGE_FILE_PATH
+	IMAGE_FILE_PATH=$(whiptail --scrolltext --backtitle "🍊 🍊[MOUNT]🍊 🍊(.IMG/.BIN) FILE CORRECTLY ::RUNS:: losetup -fP <.img/.bin>" --title "🍊 🍊[MOUNT]🍊 🍊 (.IMG/.BIN) FILE CORRECTLY-Input [.IMG/.BIN] file Absolute Path" \
+		--inputbox "$IMG_BIN_FILES_IN_PWD" 0 0 "" 3>&1 1>&2 2>&3)
+
+	# remove spaces from input
+	IMAGE_FILE_PATH=$(echo "$IMAGE_FILE_PATH" | tr -d '[:space:]')
+
+	if [ -z "$IMAGE_FILE_PATH" ]; then
+		echo "USER ABORTED . . . Nothing Done 🍊 🍊"
+		return 1
+	fi
+	# make sure file exists
+	if [ ! -f "$IMAGE_FILE_PATH" ]; then
+		whiptail --msgbox "Error: File '$IMAGE_FILE_PATH' not found." 0 0
+		return 1
+	fi
+	trap "echo NOTHING DONE ...🍊 🍊The script is terminated..USER ABORTED .Nothing Done; exit" SIGINT
+
+	_FUN_CORE_MOUNT_LOGIC "$IMAGE_FILE_PATH"
+
+	unset NEWT_COLORS
+}
+
+# =============================================================================
+# FUNCTION: FUN_UNMOUNT_IMG_BIN_FILE
+#
+# PURPOSE:
+# Unmounts any mounted partitions from an image file and detaches the
+# associated loop device.
+#
+# WORKFLOW (Current Implementation):
+# 1. Checks if any loop devices are backed by .img or .bin files.
+# 2. If so, it builds a complex regex to find these devices in `lsblk` output.
+# 3. It presents a checklist of all mounted loop-backed devices to the user.
+# 4. For each device selected by the user:
+#    a. It determines the root loop device (e.g., /dev/loop0 from /dev/loop0p1).
+#    b. It unmounts all mountpoints associated with that root device.
+#    c. It detaches the root loop device.
+# 5. If no devices are mounted, it runs `losetup -D` to clean up any unused
+#    (but still attached) loop devices.
+#
+# =============================================================================
+FUN_UNMOUNT_IMG_BIN_FILE() {
+	echo "[UNMOUNT] 🦀 🦀 UNMOUNT (.IMG/.BIN) FILE CORRECTLY 🦀 🦀"
+
+	# Get a list of all parent loop devices backed by .img or .bin files.
+	local loop_devices_with_img
+	mapfile -t loop_devices_with_img < <(losetup --list --noheadings --output NAME,BACK-FILE | grep -E "\.img$|\.bin$" | awk '{print $1}')
+
+	if [ ${#loop_devices_with_img[@]} -eq 0 ]; then
+		echo -e "\e[48;5;16m" "Ran :: losetup -D :: To detach all loop devices without mountpoints 🦀 🦀\n" "\e[0m"
+		sudo losetup -D
+		echo -e "\e[1;48;5;81m" "\e[1;38;5;16m" "NO .IMG .BIN files With Mount Points Found On The System" "\e[0m"
+		echo -ne "\e[1;48;5;81m" "\e[1;38;5;16m" "Press ANY KEY to return to the main menu... " "\e[0m"
+		read -n 1 -s -r -p ""
+		return
+	fi
+
+	# Get detailed info for these devices and their partitions from lsblk using the superior readarray/mapfile pattern.
+	# We only care about entries that have a mountpoint.
+	local mounted_lines=()
+	mapfile -t mounted_lines < <(lsblk --list -f -n -o NAME,FSTYPE,LABEL,MOUNTPOINTS "${loop_devices_with_img[@]}" | grep -v '^$' | awk '$NF ~ /./')
+
+	if [ ${#mounted_lines[@]} -eq 0 ]; then
+		whiptail --title "Info" --msgbox "No mounted partitions found for image-backed loop devices. Running cleanup." 0 0
+		sudo losetup -D
+		return
+	fi
+
+	# --- Prepare arrays for whiptail ---
+	local options=()
+	declare -A device_map # Associative array for reliable mapping
+	local i=1
+
+	for line in "${mounted_lines[@]}"; do
+		if [[ -n "$line" ]]; then
+			local dev_name
+			dev_name=$(echo "$line" | awk '{print $1}')
+			# The menu item will be the full line from lsblk for clarity.
+			options+=("$i" "$line" "OFF")
+			# Map the selection number to the device name (e.g., "loop0p1").
+			device_map[$i]="$dev_name"
+			((i++))
+		fi
+	done
+
+	if [ ${#options[@]} -eq 0 ]; then
+		whiptail --title "Info" --msgbox "No mounted partitions found to unmount." 0 0
+		sudo losetup -D
+		return
+	fi
+
+	HEIGHT=${#device_map[@]}
+	# --- Display the checklist ---
+	local CHECKLISTED_LOOPS_TO_UNMOUNT_CHOICES
+	CHECKLISTED_LOOPS_TO_UNMOUNT_CHOICES=$(whiptail --separate-output --title "🦀 🦀 Will Completely Unmount & Detach Anything Associated With Chosen Loop Device 🦀 🦀" \
+		--checklist "Select Loop Dev To [Unmount 🦀 🦀 Detach 🦀 🦀 Autoclear]" 0 0 "$HEIGHT" \
+		"${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$CHECKLISTED_LOOPS_TO_UNMOUNT_CHOICES" ]; then
+		echo "USER ABORTED"
+		return 1
+	fi
+
+	# --- Process selections ---
+	# Use a temporary associative array to track which root devices have been processed to avoid redundant operations.
+	declare -A processed_roots
+
+	# The output from whiptail is a space-separated string of quoted numbers, e.g., "1" "3".
+	# We use read -ra to handle this cleanly.
+	local sanitized_choices
+	read -ra sanitized_choices <<<"$CHECKLISTED_LOOPS_TO_UNMOUNT_CHOICES"
+
+	for choice_num in "${sanitized_choices[@]}"; do
+		# Retrieve the device name (e.g., loop0p1) from the map.
+		local dev_part_name="${device_map[$choice_num]}"
+		if [ -z "$dev_part_name" ]; then
+			echo "Warning: Invalid selection number '$choice_num'. Skipping."
+			continue
+		fi
+
+		# Correctly determine the root loop device (e.g., /dev/loop0 from /dev/loop0p1).
+		local root_loop_dev_name
+		root_loop_dev_name=$(lsblk -no pkname "/dev/$dev_part_name" | tr -d '[:space:]')
+		if [ -z "$root_loop_dev_name" ]; then
+			# This handles cases where the device is a root device itself (e.g. loop0)
+			root_loop_dev_name=$dev_part_name
+
+		fi
+		local root_loop_dev="/dev/$root_loop_dev_name"
+
+		# Check if we've already handled this root device.
+		if [[ -n "${processed_roots[$root_loop_dev]}" ]]; then
+			echo "Root device '$root_loop_dev' already processed. Skipping."
+			continue
+		fi
+
+		echo "Processing root device: $root_loop_dev"
+
+		# Unmount all mountpoints associated with the root device and all its partitions.
+		# lsblk with -r gives a flat list; sort -r unmounts nested paths correctly.
+		local mountpoints
+		mapfile -t mountpoints < <(lsblk -nr -o MOUNTPOINT "$root_loop_dev" | grep -v '^$' | sort -r)
+		if [ ${#mountpoints[@]} -gt 0 ]; then
+			for mountpoint in "${mountpoints[@]}"; do
+				echo "Unmounting '$mountpoint'..."
+				sudo umount "$mountpoint" || sudo umount -l "$mountpoint"
+			done
+		else
+			echo "No active mountpoints found for $root_loop_dev."
+		fi
+
+		# Detach the root loop device.
+		echo "Detaching loop device '$root_loop_dev'..."
+		sudo losetup -d "$root_loop_dev"
+
+		# Mark this root device as processed.
+		processed_roots["$root_loop_dev"]=1
+	done
+
+	# Final cleanup of any other unused loop devices.
+	sudo losetup -D
+	echo "🦀 🦀 🦀 🦀"
+}
+
+# =============================================================================
+# FUNCTION: _FUN_CORE_PARTITION_LOGIC (Private Helper)
+#
+# PURPOSE:
+# Provides the core logic for partitioning an image file using `cgdisk` and
+# then optionally formatting the newly created partitions.
+#
+# ARGUMENTS:
+#   $1 - The absolute path to the image file.
+#
+# WORKFLOW:
+# 1. Cleans up any existing loop device associations for the target file.
+# 2. Launches `cgdisk` to allow the user to interactively partition the image.
+# 3. After `cgdisk` exits, it re-attaches the image to a loop device with `-P`
+#    to ensure the kernel recognizes the new partition table.
+# 4. It then asks the user if they want to format any of the new partitions.
+# 5. If yes, it presents a checklist of available partitions.
+# 6. For each selected partition, it prompts for a filesystem type and formats
+#    it using the appropriate `mkfs` command.
+# 7. Finally, it detaches the loop device.
+# =============================================================================
+_FUN_CORE_PARTITION_LOGIC() {
+	local _FINAL_IMAGE_FILE_ABSOLUTE_PATH=$1
+
+	if [ -z "$_FINAL_IMAGE_FILE_ABSOLUTE_PATH" ] || [ ! -f "$_FINAL_IMAGE_FILE_ABSOLUTE_PATH" ]; then
+		whiptail --msgbox "Error: Invalid or non-existent file path provided for partitioning." 0 0
+		return 1
+	fi
+
+	# Clean up any existing mounts or loop devices for this file before partitioning.
+	if losetup --all --noheadings --output NAME,BACK-FILE | grep -q "$_FINAL_IMAGE_FILE_ABSOLUTE_PATH"; then
+		local loop_dev
+		loop_dev=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$_FINAL_IMAGE_FILE_ABSOLUTE_PATH" | cut -d ' ' -f1)
+		echo "Image is associated with $loop_dev. Cleaning up before partitioning."
+		sudo umount "$loop_dev"* 2>/dev/null
+		sudo losetup -d "$loop_dev" 2>/dev/null
+	fi
+	sudo losetup -D # Clean up any other detached loop devices
+
+	tput setab 243
+	tput setaf 192
+	echo -e "🍣 🍣 [IMAGE_FILE] ::::::: $(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+	tput sgr0
+
+	trap "echo NOTHING DONE ...The script is terminated..USER ABORTED .Nothing Done; exit" SIGINT
+
+	# Launch the interactive partition editor.
+	tput setab 23
+	echo "🍣 🍣 LAUNCHING ::::: sudo cgdisk $(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+	tput sgr0
+	sudo cgdisk "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+	tput sgr0
+
+	# Re-attach the loop device to read the new partition table.
+	echo "Attaching loop device to view new partitions..."
+	sudo losetup -fP "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")"
+	# sleep 0.5 # REPLACED: Polling for the loop device association is safer and faster
+	for i in {1..20}; do
+		ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV=$(losetup --all --noheadings --output NAME,BACK-FILE | grep "$(realpath "${_FINAL_IMAGE_FILE_ABSOLUTE_PATH}")" | cut -d ' ' -f1 | tr -d '[:space:]')
+		[ -n "$ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV" ] && break
+		sleep 0.1
+	done
+
+	if [ -z "$ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV" ]; then
+		whiptail --msgbox "Could not find associated loop device after partitioning. Aborting format step." 0 0
+		return 1
+	fi
+
+	# Display the new partition layout to the user.
+	local _LOOPS_DEV_DRIVE_INFO
+	_LOOPS_DEV_DRIVE_INFO=$(lsblk -f -o NAME,SIZE,FSTYPE,LABEL,UUID "${ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV}" | sed 's/├─//g' | sed 's/└─//g')
+
+	# Ask user if they want to format any of the new partitions.
+	if whiptail --scrolltext --backtitle "🍣 🍣 [FORMAT] ANY OF THE PARTITION(s) with a specific FS-TYPE ???" \
+		--title "🍣 🍣 [FORMAT] ANY OF THE PARTITION(s) with a specific FS-TYPE ???" \
+		--yes-button "[FORMAT] Partition(s)[FS]" --no-button "[EXIT]" \
+		--yesno "   [FORMAT] ANY OF THE PARTITION(s) with a specific FS-TYPE ??? \n \n$_LOOPS_DEV_DRIVE_INFO " 0 0; then
+
+		# Get a list of the newly created partitions.
+		local partitions_list
+		mapfile -t partitions_list < <(lsblk --noheadings -o NAME,SIZE,FSTYPE,LABEL,UUID "${ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV}" | grep 'part')
+
+		if [ ${#partitions_list[@]} -eq 0 ]; then
+			whiptail --msgbox "No partitions found to format." 0 0
+			sudo losetup -d "$ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV"
+			return 1
+		fi
+
+		# Create a checklist of partitions for the user to select.
+		local format_options=()
+		for part in "${partitions_list[@]}"; do
+			format_options+=("$(echo "$part" | awk '{print $1}')" "$(echo "$part" | awk '{$1=""; print $0}')" "OFF")
+		done
+
+		local PARTITIONS_TO_FORMAT_CHOICE
+		PARTITIONS_TO_FORMAT_CHOICE=$(whiptail --separate-output --checklist "🍣 🍣 FORMAT WHICH PARTITION(s) ??" 0 0 0 "${format_options[@]}" 3>&1 1>&2 2>&3)
+
+		if [ -z "$PARTITIONS_TO_FORMAT_CHOICE" ]; then
+			echo "USER ABORTED: No partitions selected for formatting."
+		else
+			# Loop through each partition selected by the user.
+			for part_name in $PARTITIONS_TO_FORMAT_CHOICE; do
+				local _CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV="/dev/$part_name"
+
+				# Ask for the filesystem type for the current partition.
+				local FORMAT_FILESYSTEM_TYPE
+				FORMAT_FILESYSTEM_TYPE=$(whiptail --title "🍣 🍣 Select FS-TYPE to [FORMAT] [$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV]  ????" \
+					--menu "Select FS-TYPE to format $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV" 0 0 5 \
+					1 "EXT4" 2 "BTRFS" 3 "FAT32" 4 "exFAT" 5 "NTFS" 3>&1 1>&2 2>&3)
+
+				if [ -z "$FORMAT_FILESYSTEM_TYPE" ]; then
+					echo "USER ABORTED formatting for $_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+					continue
+				fi
+
+				# Generate a new random value for the filesystem label.
+				local _HASHED_RANDOM_VAL
+				_HASHED_RANDOM_VAL=$(date +%s%N | md5sum | cut -c 1-5 | tr -d -c '[:alnum:]' | tr '[:lower:]' '[:upper:]')
+
+				# Wipe any old filesystem signatures before formatting.
+				sudo wipefs --force -a "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV"
+				case $FORMAT_FILESYSTEM_TYPE in
+				1) sudo mkfs.ext4 -F -L "EXT4-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV" ;;
+				2) sudo mkfs.btrfs -f -L "BTRFS-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV" ;;
+				3) sudo mkfs.fat -F 32 -n "FAT32-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV" ;;
+				4) sudo mkfs.exfat -n "EXFAT-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV" ;;
+				5) sudo mkfs.ntfs --force --quick --label "NTFS-$_HASHED_RANDOM_VAL" "$_CHOSEN_LOOP_PARTITION_TO_FORMAT_DEV_DEV" ;;
+				esac
+			done
+		fi
+	else
+		echo "CHOSEN TO NOT FORMAT ANY PARTITIONS."
+	fi
+
+	# Final cleanup.
+	echo "Detaching loop device $_FINAL_IMAGE_FILE_ABSOLUTE_PATH..."
+	sudo losetup -d "$ASSOCIATED_LOOPDEV_WITH_IMAGE_FILE_DEV"
+	echo "🍣 🍣 ALL DONE 🍣 🍣"
+	unset NEWT_COLORS
+}
+
+# =============================================================================
+# FUNCTION: FUN_PARTITIONATE_IMG_BIN_FILE_IN_PWD
+#
+# PURPOSE:
+# A user-facing wrapper for `_FUN_CORE_PARTITION_LOGIC` that allows selecting
+# an image file from the current working directory to partition.
+# =============================================================================
+FUN_PARTITIONATE_IMG_BIN_FILE_IN_PWD() {
+	export NEWT_COLORS='button=black,green textbox=yellow,black'
+
+	local file_list
+	mapfile -t file_list < <(find "$PWD" -maxdepth 1 -type f \( -name "*.img" -o -name "*.bin" \))
+
+	if [ ${#file_list[@]} -eq 0 ]; then
+		whiptail --msgbox "!!! NO [.IMG/.BIN] FILES in Current directory [[ $PWD ]]" 0 0
+		return 1
+	fi
+
+	local checklist_options=()
+	for file in "${file_list[@]}"; do
+		local filename
+		filename=$(basename "$file")
+		local real_size
+		real_size=$(du -h "$file" | cut -f1)
+		local apparent_size
+		apparent_size=$(du --apparent-size -h "$file" | cut -f1)
+		checklist_options+=("$filename" "REAL:${real_size} VIRTUAL:${apparent_size}" "OFF")
+	done
+
+	local IMAGE_FILE_CHOICE
+	IMAGE_FILE_CHOICE=$(whiptail --separate-output --checklist "Select an image file to partition" 0 0 0 "${checklist_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$IMAGE_FILE_CHOICE" ]; then
+		echo "USER ABORTED . . . Nothing Done 🍣 🍣"
+		return 1
+	fi
+
+	_FUN_CORE_PARTITION_LOGIC "$PWD/$IMAGE_FILE_CHOICE"
+}
+
+# =============================================================================
+# FUNCTION: FUN_PARTITIONATE_IMG_BIN_FILE_ABSOLUTE_PATH
+#
+# PURPOSE:
+# A user-facing wrapper for `_FUN_CORE_PARTITION_LOGIC` that allows the user
+# to manually enter the absolute path of an image file to partition.
+# =============================================================================
+FUN_PARTITIONATE_IMG_BIN_FILE_ABSOLUTE_PATH() {
+	export NEWT_COLORS='button=black,green textbox=yellow,black'
+
+	local IMAGE_FILE_ABSOLUTE_PATH
+	IMAGE_FILE_ABSOLUTE_PATH=$(whiptail --title "🍣 🍣 [PARTITION] 🍣 🍣 (.IMG/.BIN) INPUT FILE PATH" \
+		--inputbox "INPUT [*.img/*.bin] File ABSOLUTE PATH " 0 0 "" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$IMAGE_FILE_ABSOLUTE_PATH" ]; then
+		echo "USER ABORTED . . . Nothing Done 🍣 🍣"
+		return 1
+	fi
+
+	_FUN_CORE_PARTITION_LOGIC "$IMAGE_FILE_ABSOLUTE_PATH"
+}
+
+# =============================================================================
+# FUNCTION: FUN_REMOVE_AUTOMOUNT_SERVICE
+#
+# PURPOSE:
+# Finds and removes systemd services created by this script for automounting
+# or auto-attaching image files.
+#
+# WORKFLOW:
+# 1. Finds all `automount-*.service` and `autoattach-*.service` files in
+#    `/etc/systemd/system`.
+# 2. If none are found, it exits.
+# 3. Presents a checklist of found services for the user to select for removal.
+# 4. For each selected service:
+#    a. Stops and disables the systemd service.
+#    b. Reads the service file to find the paths of the associated `ExecStart`
+#       and `ExecStop` helper scripts.
+#    c. Deletes the service file and the helper scripts.
+# 5. Reloads the systemd daemon to apply the changes.
+# =============================================================================
+FUN_REMOVE_AUTOMOUNT_SERVICE() {
+	export NEWT_COLORS='button=black,red textbox=yellow,black'
+
+	# Find all service files created by this script.
+	local services
+	mapfile -t services < <(find /etc/systemd/system/ -maxdepth 1 -name "automount-*.service" -o -name "autoattach-*.service")
+
+	if [ ${#services[@]} -eq 0 ]; then
+		whiptail --title "Remove Automount Service" --msgbox "No automount services found to remove." 0 0
+		return 0
+	fi
+
+	# Create a checklist of services for whiptail.
+	local checklist_options=()
+	for service_file in "${services[@]}"; do
+		local service_name
+		service_name=$(basename "$service_file")
+		# Extract the description from the service file for a user-friendly display.
+		local description
+		description=$(grep -oP 'Description=\K.*' "$service_file")
+		checklist_options+=("$service_name" "$description" "OFF")
+	done
+
+	local SERVICES_TO_REMOVE
+	SERVICES_TO_REMOVE=$(whiptail --separate-output --title "Select Services to Remove" --checklist "Choose automount services to disable and remove" 0 0 0 "${checklist_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$SERVICES_TO_REMOVE" ]; then
+		echo "USER ABORTED . . . Nothing Done ⚙ ⚙"
+		return 1
+	fi
+
+	for service_name in $SERVICES_TO_REMOVE; do
+		local service_file="/etc/systemd/system/$service_name"
+
+		if ! whiptail --title "Confirm Removal" --yesno "Are you sure you want to permanently remove '$service_name' and its related scripts?" 0 0; then
+			continue
+		fi
+
+		echo "Disabling and stopping $service_name..."
+		sudo systemctl stop "$service_name"
+		sudo systemctl disable "$service_name"
+
+		# Intelligently find the helper scripts from the service definition.
+		local script_file
+		script_file=$(grep -oP 'ExecStart=\K.*' "$service_file")
+		local unscript_file
+		unscript_file=$(grep -oP 'ExecStop=\K.*' "$service_file")
+
+		echo "Removing service and script files..."
+		sudo rm -f "$service_file"
+		[ -n "$script_file" ] && sudo rm -f "$script_file"
+		[ -n "$unscript_file" ] && sudo rm -f "$unscript_file"
+
+		whiptail --msgbox "Successfully removed '$service_name'." 0 0
+	done
+
+	echo "Reloading systemd daemon..."
+	sudo systemctl daemon-reload
+	echo "Cleanup complete."
+}
+
+# =============================================================================
+# FUNCTION: FUN_AUTOMOUNT_IMAGE_AT_BOOT
+#
+# PURPOSE:
+# Creates a systemd service to automatically attach an image file to a loop
+# device and, optionally, mount one of its partitions at boot.
+#
+# WORKFLOW:
+# 1.  **File Selection**: Prompts the user to select one or more image files,
+#     offering to search the current directory, a specified directory, or take
+#     an absolute path.
+# 2.  **Partition Selection**: For each chosen image:
+#     a. Temporarily attaches the image to a loop device to inspect it.
+#     b. Detects partitions. If only one exists, it's auto-selected. If multiple
+#        exist, the user is prompted to choose one.
+#     c. Handles partition-less images (e.g., a "superfloppy" with a filesystem
+#        directly on the image).
+#     d. Offers an "attach only" option that sets up the loop device at boot
+#        without mounting any filesystem.
+# 3.  **Mount Configuration**: If mounting, it prompts for a mount point and
+#     any custom mount options.
+# 4.  **Script Generation**: Creates two helper scripts in `/usr/local/bin`:
+#     - `automount-*.sh`: The `ExecStart` script. It attaches the loop device,
+#       polls for the partition to become available, and then mounts it.
+#     - `autounmount-*.sh`: The `ExecStop` script. It unmounts the partition
+#       and detaches the loop device.
+# 5.  **Service Creation**: Creates a systemd `.service` file in `/etc/systemd/system`
+#     that calls the helper scripts.
+# 6.  **Service Management**: Reloads the systemd daemon, then enables and
+#     starts the new service, with error handling.
+# =============================================================================
+FUN_AUTOMOUNT_IMAGE_AT_BOOT() {
+	export NEWT_COLORS='button=black,green textbox=yellow,black'
+
+	# --- 1. File Selection UI ---
+	local file_list
+	mapfile -t file_list < <(find "$PWD" -maxdepth 1 -type f \( -name "*.img" -o -name "*.bin" \))
+
+	local IMAGE_FILE_CHOICES
+
+	# If no images are in the current directory, provide other options.
+	if [ ${#file_list[@]} -eq 0 ]; then
+		local choice
+		choice=$(whiptail --title "No Images Found in Current Directory" --menu "Choose how to select an image file:" 0 0 0 \
+			"1" "Enter the absolute path to a single image file." \
+			"2" "Enter a directory path to search for images." 3>&1 1>&2 2>&3)
+
+		case "$choice" in
+		1) # Get absolute path from user.
+			local single_file_path
+			single_file_path=$(whiptail --title "Enter Absolute Path" --inputbox "Enter the absolute path to the .img or .bin file:" 0 0 "" 3>&1 1>&2 2>&3)
+			if [ $? -ne 0 ] || [ -z "$single_file_path" ]; then
+				echo "USER ABORTED."
+				return 1
+			fi
+			if [[ ! -f "$single_file_path" ]] || [[ ! "$single_file_path" =~ \.(img|bin)$ ]]; then
+				whiptail --msgbox "Invalid input. Please provide a valid path to an existing .img or .bin file." 0 0
+				return 1
+			fi
+			IMAGE_FILE_CHOICES="$single_file_path"
+			;;
+		2) # Search a different directory.
+			local search_dir
+			search_dir=$(whiptail --title "Enter Directory Path" --inputbox "Enter the directory to search for .img/.bin files:" 0 0 "$PWD" 3>&1 1>&2 2>&3)
+			if [ $? -ne 0 ] || [ -z "$search_dir" ] || [ ! -d "$search_dir" ]; then
+				echo "USER ABORTED or invalid directory."
+				return 1
+			fi
+
+			mapfile -t file_list < <(find "$search_dir" -maxdepth 1 -type f \( -name "*.img" -o -name "*.bin" \))
+			if [ ${#file_list[@]} -eq 0 ]; then
+				whiptail --msgbox "No .img or .bin files found in '$search_dir'." 0 0
+				return 1
+			fi
+			# Fall through to the checklist logic below.
+			;;
+		*)
+			echo "USER ABORTED."
+			return 1
+			;;
+		esac
+	fi
+
+	# If a list of files was generated (either from PWD or a search dir), show a checklist.
+	if [ -z "$IMAGE_FILE_CHOICES" ]; then
+		local checklist_options=()
+		for file in "${file_list[@]}"; do
+			local filename
+			filename=$(basename "$file")
+			local real_size
+			real_size=$(du -h "$file" | cut -f1)
+			local apparent_size
+			apparent_size=$(du --apparent-size -h "$file" | cut -f1)
+			local description="REAL:[$real_size] VIRTUAL:[$apparent_size]"
+			checklist_options+=("$file" "$description" "OFF")
+		done
+
+		IMAGE_FILE_CHOICES=$(whiptail --separate-output --title "Select Image Files for Automount" --checklist "Choose files to process (absolute paths shown)" 0 0 0 "${checklist_options[@]}" 3>&1 1>&2 2>&3)
+		if [ $? -ne 0 ] || [ -z "$IMAGE_FILE_CHOICES" ]; then
+			echo "USER ABORTED."
+			return 1
+		fi
+	fi
+
+	# --- 2. Operation Mode Selection ---
+	local OPERATION_MODE
+	OPERATION_MODE=$(whiptail --title "Select Operation Mode" --menu "Choose how to handle the selected image(s) at boot:" 0 0 0 \
+		"1" "Auto-Attach Only (Device/Partitions will be available, not mounted)" \
+		"2" "Auto-Attach & Auto-Mount (Device/Partitions will be attached and mounted)" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$OPERATION_MODE" ]; then
+		echo "USER ABORTED: Operation mode not selected."
+		return 1
+	fi
+
+	# --- 3. Process Each Selected Image based on Mode ---
+	while IFS= read -r IMAGE_FILE_PATH; do
+		if [ -z "$IMAGE_FILE_PATH" ]; then continue; fi
+
+		local file_basename
+		file_basename=$(basename "$IMAGE_FILE_PATH")
+
+		if [ "$OPERATION_MODE" -eq 1 ]; then
+			# --- Clean up any existing association before inspection ---
+			local existing_dev
+			existing_dev=$(losetup -j "$IMAGE_FILE_PATH" | cut -d: -f1)
+			if [ -n "$existing_dev" ]; then
+				echo "Detaching existing loop device $existing_dev before proceeding."
+				sudo umount "$existing_dev"* 2>/dev/null
+				sudo losetup -d "$existing_dev"
+			fi
+
+			# --- MODE 1: AUTO-ATTACH ONLY (Partition-Aware) ---
+
+			local LOOP_DEV
+			LOOP_DEV=$(sudo losetup -fP "$IMAGE_FILE_PATH" --show)
+			if [ -z "$LOOP_DEV" ]; then
+				whiptail --msgbox "Failed to associate '$file_basename' with a loop device for inspection." 0 0
+				continue
+			fi
+			# sleep 0.5 # Wait for devices to settle # REPLACED: Polling for partitions is more reliable
+			for i in {1..20}; do
+				lsblk -lnpo NAME "$LOOP_DEV" | grep -q "${LOOP_DEV}p" && break
+				sleep 0.1
+			done
+
+			local attach_checklist_options=()
+			# Add the main device itself as an option
+			attach_checklist_options+=("$LOOP_DEV" "Entire device" "OFF")
+
+			# Add all partitions to the checklist
+			local partitions
+			mapfile -t partitions < <(lsblk -lnpo NAME,SIZE,FSTYPE,LABEL "$LOOP_DEV" | grep -v "^${LOOP_DEV}$" || true)
+			for part in "${partitions[@]}"; do
+				attach_checklist_options+=("$(echo "$part" | awk '{print $1}')" "Partition: $(echo "$part" | awk '{$1=""; print $0}')" "OFF")
+			done
+
+			# Detach the temporary loop device used for inspection
+			sudo umount "$LOOP_DEV"* 2>/dev/null
+			sudo losetup -d "$LOOP_DEV"
+			sudo partprobe
+
+			if [ ${#attach_checklist_options[@]} -gt 1 ]; then
+				local ATTACH_CHOICES
+				ATTACH_CHOICES=$(whiptail --separate-output --title "Select Devices to Auto-Attach" --checklist "Select devices/partitions from '$file_basename' to make available at boot." 0 0 0 "${attach_checklist_options[@]}" 3>&1 1>&2 2>&3)
+				if [ $? -ne 0 ] || [ -z "$ATTACH_CHOICES" ]; then
+					echo "USER ABORTED: No devices selected for auto-attach from $file_basename."
+					continue
+				fi
+			fi
+
+			whiptail --title "Mode: Auto-Attach Only" --msgbox "A single service will be created for the parent image '$file_basename' to ensure all selected devices/partitions are available at boot." 0 0
+
+			local SERVICE_NAME="autoattach-$(systemd-escape -p "$file_basename").service"
+			local SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
+
+			# Create a simple service that only attaches and detaches the loop device.
+			cat <<-EOF | sudo tee "$SERVICE_FILE"
+				[Unit]
+				Description=Auto-attach loop device for $file_basename
+				[Service]
+				Type=oneshot
+				RemainAfterExit=true
+				ExecStart=/usr/sbin/losetup -fP "$IMAGE_FILE_PATH"
+				ExecStop=/usr/sbin/losetup -d \$(/usr/sbin/losetup -j "$IMAGE_FILE_PATH" | cut -d: -f1)
+				[Install]
+				WantedBy=multi-user.target
+			EOF
+			sudo systemctl daemon-reload
+			sudo systemctl enable "$SERVICE_NAME"
+			sudo systemctl start "$SERVICE_NAME"
+			whiptail --msgbox "Service '$SERVICE_NAME' created successfully. '$file_basename' and its partitions will be attached at boot." 0 0
+
+		elif [ "$OPERATION_MODE" -eq 2 ]; then
+			# --- MODE 2: AUTO-ATTACH & AUTO-MOUNT ---
+			local LOOP_DEV
+			LOOP_DEV=$(sudo losetup -fP "$IMAGE_FILE_PATH" --show)
+			if [ -z "$LOOP_DEV" ]; then
+				whiptail --msgbox "Failed to associate '$file_basename' with a loop device." 0 0
+				continue
+			fi
+			# sleep 0.5 # REPLACED: Polling ensures the kernel has scanned the partition table
+			for i in {1..20}; do
+				lsblk -lnpo NAME "$LOOP_DEV" | grep -q "${LOOP_DEV}p" && break
+				sleep 0.1
+			done
+
+			local mount_checklist_options=()
+			local main_dev_fs
+			main_dev_fs=$(lsblk -dno FSTYPE "$LOOP_DEV")
+
+			if [ -n "$main_dev_fs" ]; then
+				mount_checklist_options+=("$LOOP_DEV" "Mount entire device (FS: $main_dev_fs)" "OFF")
+			else
+				mount_checklist_options+=("$LOOP_DEV" "Mount entire device (No FS detected)" "OFF")
+			fi
+
+			local partitions
+			mapfile -t partitions < <(lsblk -lnpo NAME,SIZE,FSTYPE,LABEL "$LOOP_DEV" | grep -v "^${LOOP_DEV}$" || true)
+			for part in "${partitions[@]}"; do
+				mount_checklist_options+=("$(echo "$part" | awk '{print $1}')" "$(echo "$part" | awk '{$1=""; print $0}')" "OFF")
+			done
+
+			sudo losetup -d "$LOOP_DEV"
+
+			if [ ${#mount_checklist_options[@]} -eq 0 ]; then
+				whiptail --msgbox "No mountable devices or partitions found for '$file_basename'." 0 0
+				continue
+			fi
+
+			local DEVICES_TO_MOUNT
+			DEVICES_TO_MOUNT=$(whiptail --separate-output --title "Select Partitions to Automount" --checklist "Choose one or more devices/partitions from '$file_basename' to mount at boot" 0 0 0 "${mount_checklist_options[@]}" 3>&1 1>&2 2>&3)
+
+			if [ $? -ne 0 ] || [ -z "$DEVICES_TO_MOUNT" ]; then
+				echo "USER ABORTED partition selection for $file_basename."
+				continue
+			fi
+
+			while IFS= read -r PARTITION_TO_MOUNT; do
+				if [ -z "$PARTITION_TO_MOUNT" ]; then continue; fi
+				local part_basename
+				part_basename=$(basename "$PARTITION_TO_MOUNT")
+
+				local MOUNT_OPTIONS
+				MOUNT_OPTIONS=$(whiptail --title "Mount Options for $part_basename" --inputbox "Enter any additional mount options (e.g., 'ro,nofail'), or leave blank for defaults." 0 0 "defaults,nofail" 3>&1 1>&2 2>&3)
+				if [ $? -ne 0 ]; then
+					echo "USER ABORTED mount options for $part_basename."
+					continue
+				fi
+				[ -z "$MOUNT_OPTIONS" ] && MOUNT_OPTIONS="defaults"
+
+				local MOUNT_POINT
+				MOUNT_POINT=$(whiptail --title "Enter Mount Point for $part_basename" --inputbox "Enter the absolute path for the mount point:" 0 0 "/mnt/$part_basename" 3>&1 1>&2 2>&3)
+				if [ $? -ne 0 ] || [ -z "$MOUNT_POINT" ]; then
+					whiptail --msgbox "Skipping automount setup for $part_basename due to cancelled mount point input." 0 0
+					continue
+				fi
+				sudo mkdir -p "$MOUNT_POINT"
+
+				local SERVICE_NAME="automount-$(systemd-escape -p "$part_basename").service"
+				local SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
+				local SCRIPT_NAME="automount-$(systemd-escape -p "$part_basename").sh"
+				local SCRIPT_FILE="/usr/local/bin/$SCRIPT_NAME"
+				local UNSCRIPT_NAME="autounmount-$(systemd-escape -p "$part_basename").sh"
+				local UNSCRIPT_FILE="/usr/local/bin/$UNSCRIPT_NAME"
+
+				cat <<-EOF | sudo tee "$SCRIPT_FILE"
+					#!/bin/bash
+					# Mount script for $IMAGE_FILE_PATH -> $PARTITION_TO_MOUNT
+					LOOP_DEV=\$(sudo losetup -fP "$IMAGE_FILE_PATH" --show)
+					if [ -z "\$LOOP_DEV" ]; then exit 1; fi
+					for i in {1..50}; do
+					    if [ -b "$PARTITION_TO_MOUNT" ]; then break; fi
+					    sleep 0.1
+					done
+					if [ ! -b "$PARTITION_TO_MOUNT" ]; then
+					    sudo losetup -d "\$LOOP_DEV"
+					    exit 1
+					fi
+					sudo mount -o "$MOUNT_OPTIONS" "$PARTITION_TO_MOUNT" "$MOUNT_POINT"
+				EOF
+
+				cat <<-EOF | sudo tee "$UNSCRIPT_FILE"
+					#!/bin/bash
+					# Unmount script for $IMAGE_FILE_PATH -> $PARTITION_TO_MOUNT
+					LOOP_DEV=\$(losetup -j "$IMAGE_FILE_PATH" | cut -d: -f1)
+					sudo umount "$MOUNT_POINT"
+					for i in {1..50}; do
+					    if ! mountpoint -q "$MOUNT_POINT"; then break; fi
+					    sleep 0.1
+					done
+					[ -n "\$LOOP_DEV" ] && sudo losetup -d "\$LOOP_DEV"
+				EOF
+
+				sudo chmod +x "$SCRIPT_FILE" "$UNSCRIPT_FILE"
+
+				cat <<-EOF | sudo tee "$SERVICE_FILE"
+					[Unit]
+					Description=Automount service for $file_basename ($PARTITION_TO_MOUNT)
+					After=local-fs.target
+					[Service]
+					Type=oneshot
+					RemainAfterExit=true
+					ExecStart=$SCRIPT_FILE
+					ExecStop=$UNSCRIPT_FILE
+					[Install]
+					WantedBy=multi-user.target
+				EOF
+
+				local error_occurred=0
+				sudo systemctl daemon-reload
+				if ! sudo systemctl enable "$SERVICE_NAME"; then
+					whiptail --msgbox "ERROR: Failed to enable service '$SERVICE_NAME'." 0 0
+					error_occurred=1
+				fi
+				if [ "$error_occurred" -eq 0 ] && ! sudo systemctl start "$SERVICE_NAME"; then
+					whiptail --msgbox "ERROR: Failed to start service '$SERVICE_NAME'. Check logs with 'journalctl -u $SERVICE_NAME'." 0 0
+					error_occurred=1
+				fi
+
+				if [ "$error_occurred" -eq 1 ]; then
+					echo "An error occurred. Cleaning up generated files for $part_basename..."
+					sudo rm -f "$SERVICE_FILE" "$SCRIPT_FILE" "$UNSCRIPT_FILE"
+					sudo systemctl daemon-reload
+					whiptail --msgbox "Cleanup complete. Service for $part_basename was not created." 0 0
+				else
+					whiptail --msgbox "Service '$SERVICE_NAME' created and enabled successfully. '$PARTITION_TO_MOUNT' will be mounted to '$MOUNT_POINT' at boot." 0 0
+				fi
+			done <<<"$DEVICES_TO_MOUNT"
+		fi
+	done <<<"$IMAGE_FILE_CHOICES"
+}
+
+# =============================================================================
+# FUNCTION: FUN_SHOW_HELP
+#
+# PURPOSE:
+# Displays a detailed help and usage screen, explaining what each main menu
+# option does.
+# =============================================================================
+FUN_SHOW_HELP() {
+	local HELP_TEXT
+	HELP_TEXT=$(
+		cat <<-'EOF'
+			    ---------------------------------
+			    SPARSE IMAGE FILE & LOOP DEVICE MANAGER - HELP
+			    ---------------------------------
+
+			    This utility provides a menu-driven interface for managing disk images and loop devices. Most operations require root privileges and the script will ask for sudo password if needed.
+
+			    --- !!! CAUTION !!! ---
+			    This script uses powerful, low-level disk utilities. Incorrect use can lead to IRREVERSIBLE DATA LOSS. Always double-check your selections.
+
+			    ---------------------------------
+			    MAIN MENU OPTIONS
+			    ---------------------------------
+
+			    1. [CREATE] SPARSE FILE:
+			    Guides you through creating a new sparse image file (.img). You will be prompted for a name and a virtual size (MB, GB, TB). A sparse file only takes up disk space as data is written to it.
+
+			    2. [MAKE] AN EXISTING FILE SPARSE:
+			    Converts a regular file into a sparse file. This process, also known as "punching holes," de-allocates blocks filled with zeros to save disk space.
+
+			    3. [UNSPARSE] A FILE:
+			    The reverse of making a file sparse. It converts a sparse file into a fully allocated file by writing data to the "holes." This is useful for certain applications or for preparing an image for burning to a physical device. It offers a 'Fast Mode' and a 'Safe Mode' with data integrity checks.
+
+			    4. [FORMAT] AN ENTIRE IMAGE FILE:
+			    Wipes an existing image file and creates a single partition with a filesystem of your choice (EXT4, BTRFS, NTFS, etc.). This is a quick way to prepare an image for use as a simple volume.
+
+			    5. & 6. [MOUNT] (.IMG/.BIN) FILE:
+			    Attaches an image file to a system loop device, making the disk and its partitions visible to the OS (e.g., as /dev/loopX). This does NOT mount the filesystem into a directory, but prepares it for mounting or other block-level operations. You can select from the current directory or provide an absolute path.
+
+			    7. & 8. [PARTITIONS] CREATE / MODIFY / FORMAT:
+			    Launches the 'cgdisk' interactive partition editor for the selected image file. After you have created partitions, the script will offer to format them with a filesystem of your choice.
+
+			    9. [UNMOUNT] (.IMG/.BIN) FILE:
+			    Safely unmounts all filesystems associated with a selected loop device and then detaches the device from the system, making it inactive.
+
+			    10. [AUTOMOUNT] CREATE SERVICE:
+			    Creates a systemd service to automatically handle an image at boot. You can choose to either:
+			      a) Auto-Attach Only: Makes the loop device available at boot. (Attaches the ENTIRE device but does NOT mount any partitions.)
+				   -  Auto-Attach Only; can only attach the entire device, not individual partitions, even if you select them, this is just the nature of how loop devices work (its not a bug)
+			      b) Auto-Attach & Mount: Attaches the device AND mounts a chosen partition to a specified directory.
+
+			    11. [REMOVE AUTOMOUNT] SERVICE:
+			    Finds and removes any systemd automount services that were previously created by this script. It will stop, disable, and delete the service file and its helper scripts.
+		EOF
+	)
+	whiptail --scrolltext --title "📖 📖 HELP & USAGE INFORMATION 📖 📖" --msgbox "$HELP_TEXT" 0 0
+}
+
+# =============================================================================
+#
+# --- MAIN PROGRAM LOOP ---
+#
+# The script enters an infinite `while` loop that serves as the main
+# controller for the program.
+#
+# 1. It sets a custom color scheme for the `whiptail` UI.
+# 2. It displays the main menu of options to the user.
+# 3. It captures the user's choice.
+# 4. If the user cancels, the script exits.
+# 5. Otherwise, it uses a `case` statement (emulated with `if/elif`) to call
+#    the appropriate function based on the user's selection.
+# 6. After a function completes, the loop repeats, displaying the main menu
+#    again until the user chooses to exit.
+#
+# =============================================================================
+while true; do
+
+	# Set a custom color scheme for the main menu.
+	export NEWT_COLORS='
+root=,cyan
+listbox=,brightgreen
+acttextbox=,blue
+actsellistbox=,brightblue
+sellistbox=,brightcyan
+'
+
+	# Display the main menu and capture the user's choice.
+	MAIN_CHOICEEEE=$(whiptail --title "◉ SPARSE FILE ◉ MANAGER ◉ CREATOR ◉ EDITOR ◉" --menu "Select Option" 0 0 0 \
+		"1" "[CREATE]      🥞 🥞 CREATE custom SPARSE FILE           " \
+		"2" "[MAKE]        🏺 🏺 MAKE AN EXISTING FILE SPARSE        " \
+		"3" "[UNSPARSE]    📦 📦 UNSPARSE A FILE (FILL IN HOLES)     " \
+		"4" "[FORMAT]      🍱 🍱 FORMAT ENTIRE IMAGE FILE (.IMG/.BIN) " \
+		"5" "[MOUNT \$PWD]  🍊 🍊 MOUNT (.IMG/.BIN) FILE in \$PWD      " \
+		"6" "[MOUNT PATH]  🍊 🍊 MOUNT (.IMG/.BIN) BY ABSOLUTE PATH   " \
+		"7" "[PART \$PWD]   🍣 🍣 CREATE/MODIFY/FORMAT PARTITIONS      " \
+		"8" "[PART PATH]   🍣 🍣 CREATE/MODIFY/FORMAT (ABS PATH)      " \
+		"9" "[UNMOUNT]     🦀 🦀 UNMOUNT (.IMG/.BIN) FILE CORRECTLY   " \
+		"10" "[AUTOMOUNT]   ⚙ ⚙ CREATE AUTOMOUNT IMAGE FILE SERVICE  " \
+		"11" "[REMOVE AUTO] ⚙ ⚙ REMOVE AN AUTOMOUNT SERVICE          " \
+		"12" "[HELP]        📖 📖 SHOW HELP & USAGE INFORMATION        " \
+		"13" "[EXIT]        🚪 🚪 EXIT PROGRAM                         " \
+		3>&1 1>&2 2>&3)
+
+	# Exit if the user presses Cancel or Esc.
+	if [ -z "$MAIN_CHOICEEEE" ]; then
+		echo "USER ABORTED"
+		exit
+	# Dispatch to the appropriate function based on the user's choice.
+	elif [ "$MAIN_CHOICEEEE" -eq 1 ]; then
+		FUN_CREATE_CUSTOM_SPARSE_IMAGE_FILE
+
+	elif [ "$MAIN_CHOICEEEE" -eq 2 ]; then
+		FUN_MAKE_EXISTING_FILE_SPARSE
+
+	elif [ "$MAIN_CHOICEEEE" -eq 3 ]; then
+		FUN_UNSPARSE_FILE
+
+	elif [ "$MAIN_CHOICEEEE" -eq 4 ]; then
+		FUN_FORMAT_SPARSE_FILE_IMAGE
+
+	elif [ "$MAIN_CHOICEEEE" -eq 5 ]; then
+		FUN_MOUNT_IMG_BIN_FILE_IN_PWD
+
+	elif [ "$MAIN_CHOICEEEE" -eq 6 ]; then
+		FUN_MOUNT_IMG_BIN_FILE_BY_INPUTTING_ABSOLUTE_PATH
+
+	elif [ "$MAIN_CHOICEEEE" -eq 7 ]; then
+		FUN_PARTITIONATE_IMG_BIN_FILE_IN_PWD
+
+	elif [ "$MAIN_CHOICEEEE" -eq 8 ]; then
+		FUN_PARTITIONATE_IMG_BIN_FILE_ABSOLUTE_PATH
+
+	elif [ "$MAIN_CHOICEEEE" -eq 9 ]; then
+		FUN_UNMOUNT_IMG_BIN_FILE
+
+	elif [ "$MAIN_CHOICEEEE" -eq 10 ]; then
+		FUN_AUTOMOUNT_IMAGE_AT_BOOT
+
+	elif [ "$MAIN_CHOICEEEE" -eq 11 ]; then
+		FUN_REMOVE_AUTOMOUNT_SERVICE
+
+	elif [ "$MAIN_CHOICEEEE" -eq 12 ]; then
+		FUN_SHOW_HELP
+	elif [ "$MAIN_CHOICEEEE" -eq 13 ]; then
+		echo "EXITING . . ."
+		exit
+	fi
+
+	# Unset the custom colors so they don't affect other terminal commands.
+	unset NEWT_COLORS
+done

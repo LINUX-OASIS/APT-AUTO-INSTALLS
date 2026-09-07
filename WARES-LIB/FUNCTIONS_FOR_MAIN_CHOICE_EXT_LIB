@@ -1,0 +1,1293 @@
+#!/bin/bash
+
+# Declare global variables for the supported Ubuntu release versions.
+declare -g _GLOBAL_MASTER_UBUNTU_RELEASE_VERSION_1='26.04'
+declare -g _GLOBAL_MASTER_UBUNTU_RELEASE_VERSION_2='24.04'
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - _FUN_CHOOSE_UBUNTU_VERSION
+# Function: _FUN_CHOOSE_UBUNTU_VERSION
+# Description: Prompts the user to select an Ubuntu version and validates it against the running system.
+# This ensures that version-specific configurations are applied correctly.
+function _FUN_CHOOSE_UBUNTU_VERSION {
+
+	# Display a whiptail menu for the user to choose the Ubuntu version.
+	_UBUNTU_VERSION_SELECTION=$(whiptail --title "CHOOSE UBUNTU VERSION" --menu "CHOOSE UBUNTU VERSION" 0 0 3 1 "UBUNTU [ $_GLOBAL_MASTER_UBUNTU_RELEASE_VERSION_1 ]" 2 "UBUNTU [ $_GLOBAL_MASTER_UBUNTU_RELEASE_VERSION_2 ]" 3 "[* EXIT *]" 3>&1 1>&2 2>&3)
+
+	# Perform a sanity check to ensure the selected version matches the actual system release.
+	__RELEASE_VERSION=$(cat /etc/lsb-release | grep -o "DISTRIB_RELEASE=[0-9][0-9].[0-9][0-9]" | sed s/DISTRIB_RELEASE=// | tr -d '[:space:]')
+
+	# Validate the selection for the non-LTS version.
+	if [[ $_UBUNTU_VERSION_SELECTION -eq 1 ]]; then
+		if [[ $__RELEASE_VERSION == "$_GLOBAL_MASTER_UBUNTU_RELEASE_VERSION_1" ]]; then
+			echo "Current Running UBUNTU version [$_GLOBAL_MASTER_UBUNTU_RELEASE_VERSION_1] & Selected Ubuntu release Version are the same: Continuing"
+		else
+			echo "Current Running UBUNTU version [$_GLOBAL_MASTER_UBUNTU_RELEASE_VERSION_1] & Selected Ubuntu release Version are DIFFERENT: EXITING"
+			exit
+		fi
+	fi
+
+	# Validate the selection for the LTS version.
+	if [[ $_UBUNTU_VERSION_SELECTION -eq 2 ]]; then
+		if [[ $__RELEASE_VERSION == "$_GLOBAL_MASTER_UBUNTU_RELEASE_VERSION_2" ]]; then
+			echo "Current Running UBUNTU version [$__RELEASE_VERSION] & Selected Ubuntu release Version are the same: Continuing"
+		else
+			echo "Current Running UBUNTU version [$__RELEASE_VERSION] & Selected Ubuntu release Version are DIFFERENT: EXITING"
+			exit
+		fi
+	fi
+
+	echo "chosen $_UBUNTU_VERSION_SELECTION"
+
+	# Handle the user's choice.
+	if [ -z "$_UBUNTU_VERSION_SELECTION" ]; then
+		exit
+	elif [ "$_UBUNTU_VERSION_SELECTION" -eq 1 ]; then
+		# Note on deb822 format for newer Ubuntu versions.
+		echo "ubuntu version $__RELEASE_VERSION"
+	elif [ "$_UBUNTU_VERSION_SELECTION" -eq 2 ]; then
+		echo "ubuntu version $__RELEASE_VERSION"
+	elif [ "$_UBUNTU_VERSION_SELECTION" -eq 3 ]; then
+		exit
+	fi
+
+}
+# !SECTION - _FUN_CHOOSE_UBUNTU_VERSION - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_0
+# Function: FUN_MAIN_CHOICE_0
+# Description: Copies the entire software suite to the /bin directory.
+function FUN_MAIN_CHOICE_0 {
+
+	echo "0. COPY THIS SOFTWARE SUITE TO /BIN [COPY ITSELF TO /BIN]"
+	FUN_CHOICE_BLOCK_INDICATOR "0. COPY THIS SOFTWARE SUITE TO /BIN [COPY ITSELF TO /BIN]"
+
+	# Clean the worker temp directory and copy the project to /bin.
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# delete the existing copy in /bin if it exists
+	sudo rm -rf /bin/"$(basename "$PWD" | tr -d '[:space:]')" 2>/dev/null
+
+	# copy the current working directory to /bin
+	if sudo cp -rf "$(echo $PWD | tr -d '[:space:]')" /bin; then
+		FUN_TRACK_CUSTOM_INSTALL "Software Suite to /bin" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "Software Suite to /bin" "fail"
+	fi
+}
+# !SECTION - FUN_MAIN_CHOICE_0 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_1
+# Function: FUN_MAIN_CHOICE_1
+# Description: Installs software and configurations for MATE desktops.
+function FUN_MAIN_CHOICE_1 {
+
+	echo "1. Mate Desktops [PARROT-OS/LINUX-MINT/UBUNTU] (Wares for all [MATE DE] Desktops"
+	FUN_CHOICE_BLOCK_INDICATOR "1.  Mate Desktops [PARROT-OS/LINUX-MINT/UBUNTU] (Wares for all [MATE DE] Desktops"
+
+	# Prompt the user to select a specific MATE DE distribution.
+	SELECTED_MATE_DE_DISTRO=$(whiptail --title "Select [MATE DE] Distro:" --menu "Select [MATE DE] Distro:" 0 0 3 \
+		1 "Linux Mint [MATE DE]" \
+		2 "Parrot Sec OS [MATE DE]" \
+		3 "UBUNTU [MATE DE]" 3>&1 1>&2 2>&3)
+
+	# Validate the user's selection.
+	if [ -z "$SELECTED_MATE_DE_DISTRO" ]; then
+		echo "USER ABORTED  ..  USER MUST SELECT A [MATE DESKTOP ENVIRONMENT] DISTRO"
+		exit
+	elif [ "$SELECTED_MATE_DE_DISTRO" -eq 1 ]; then
+		echo "SELECTED LINUX MINT - [MATE DE]"
+	elif [ "$SELECTED_MATE_DE_DISTRO" -eq 2 ]; then
+		echo ""
+	elif [ "$SELECTED_MATE_DE_DISTRO" -eq 3 ]; then
+		echo ""
+	fi
+
+	# Source the main installation library and execute the installation function.
+	source ./WARES-LIB/LINUX-GNOME-AND-MATE-DE-LIB/FOR_LINUX_GNOME_AND_MATE_DE_LIB_EXT_LIB
+	FUN_WARES_FOR_GNOME_AND_MATE_DE
+
+}
+# !SECTION - FUN_MAIN_CHOICE_1 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_2
+# Function: FUN_MAIN_CHOICE_2
+# Description: A "full send" option for MATE desktops, executing choices 1, 3, and 4.
+function FUN_MAIN_CHOICE_2 {
+
+	echo "2. [LINUX MINT MATE SPECIFIC !! FULL SEND] Executes options 1 3 4"
+	FUN_CHOICE_BLOCK_INDICATOR "2. [LINUX MINT MATE SPECIFIC !! FULL SEND] Executes options 1 3 4"
+
+	FUN_MAIN_CHOICE_1
+	FUN_MAIN_CHOICE_3
+	FUN_MAIN_CHOICE_4
+
+}
+# !SECTION - FUN_MAIN_CHOICE_2 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_3
+# Function: FUN_MAIN_CHOICE_3
+# Description: Installs manually downloaded .deb files.
+function FUN_MAIN_CHOICE_3 {
+
+	echo " 3.  Manually installed Wares Only  [.DEB Files Only] "
+	FUN_CHOICE_BLOCK_INDICATOR "3.  Manually installed Wares Only  [.DEB Files Only]"
+
+	# Check if the Ubuntu version has been selected; if not, prompt the user.
+	if [ -z "$_UBUNTU_VERSION_SELECTION" ]; then
+		_FUN_CHOOSE_UBUNTU_VERSION
+	fi
+
+	# Install .deb files based on the selected Ubuntu version.
+	if [ "$_UBUNTU_VERSION_SELECTION" -eq 1 ]; then
+		FUN_VERBOSE_INSTALLING " install [.DEB files]"
+		sudo apt install -y ./AUTO-INSTALLS-FILES/WARES/MANUAL-INSTALL-WARES/DEB-FILES/UBUNTU_VERSION_CHOICE_1/*.deb
+	elif [ "$_UBUNTU_VERSION_SELECTION" -eq 2 ]; then
+		FUN_VERBOSE_INSTALLING " install [.DEB files]"
+		sudo apt install -y ./AUTO-INSTALLS-FILES/WARES/MANUAL-INSTALL-WARES/DEB-FILES/UBUNTU_VERSION_CHOICE_2/*.deb
+	fi
+
+}
+# !SECTION - FUN_MAIN_CHOICE_3 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_4
+# Function: FUN_MAIN_CHOICE_4
+# Description: Copies MATE panel settings and app configs to /etc/skel.
+function FUN_MAIN_CHOICE_4 {
+	# Check for and install the p7zip-full dependency.
+	if ! apt list --installed p7zip-full 2>/dev/null | grep -w p7zip-full >/dev/null; then
+		echo "dependency p7zip-full is NOT installed .. installing"
+		sudo apt update
+		sudo apt install -y p7zip-full
+		if ! apt list --installed p7zip 2>/dev/null | grep -w p7zip-full >/dev/null; then
+			echo "Possibly didn't install dependency p7zip-full .. exiting"
+			exit
+		fi
+	fi
+
+	# Prompt for the MATE DE distribution if not already selected.
+	if [ -z "$SELECTED_MATE_DE_DISTRO" ]; then
+		SELECTED_MATE_DE_DISTRO=$(whiptail --title "Select [MATE DE] Distro:" --menu "Select [MATE DE] Distro:" 0 0 3 \
+			1 "Linux Mint [MATE DE]" \
+			2 "Parrot Sec OS [MATE DE]" \
+			3 "UBUNTU [MATE DE]" 3>&1 1>&2 2>&3)
+
+		if [ -z "$SELECTED_MATE_DE_DISTRO" ]; then
+			echo "USER ABORTED  ..  USER MUST SELECT A [MATE DESKTOP ENVIRONMENT] DISTRO"
+			exit
+		fi
+	fi
+
+	echo "4. - [MATE Desktops] COPY MATE PANEL SETTING & APP CONFIGS TO /ETC/SKEL {Depending On Chosen MATE DE Distro}"
+	FUN_CHOICE_BLOCK_INDICATOR "4.- [MATE Desktops] COPY MATE PANEL SETTING & APP CONFIGS TO /ETC/SKEL {Depending On Chosen MATE DE Distro}"
+
+	# Apply settings for Linux Mint MATE.
+	if [ "$SELECTED_MATE_DE_DISTRO" -eq 1 ]; then
+		# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+		7z x ./AUTO-INSTALLS-FILES/THEMES-N-DOTFILES/theme-templates-desktop-settings-mint-mate-thinkpad-460s.7z -oAUTO-INSTALLS-FILES/WORKER-TEMP
+
+		sudo cp -R ./AUTO-INSTALLS-FILES/WORKER-TEMP/Templates /etc/skel
+		sudo mkdir -p /etc/skel/.config/dconf/
+		sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/user /etc/skel/.config/dconf/
+		sudo mv ./AUTO-INSTALLS-FILES/WORKER-TEMP/kawaii-parrot.bashrc ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc
+		sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc /etc/skel && cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc /root
+	fi
+}
+# !SECTION - FUN_MAIN_CHOICE_4 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_UBUNTU_GNOME_VANILLA
+# Function: FUN_MAIN_CHOICE_UBUNTU_GNOME_VANILLA
+# Description: Installs software and configurations for Ubuntu GNOME desktop.
+function FUN_MAIN_CHOICE_UBUNTU_GNOME_VANILLA {
+	echo "UBUNTU_GNOME_VANILLA. [UBUNTU'S SPECIFIC] (Wares for Ubuntu Vanilla [GNOME DE])"
+	FUN_CHOICE_BLOCK_INDICATOR "UBUNTU_GNOME_VANILLA. [UBUNTU'S SPECIFIC]  (Wares for Ubuntu Vanilla [GNOME DE])"
+
+	_FUN_CHOOSE_UBUNTU_VERSION
+
+	# 🚀 Switch to Berkeley (OCF) APT Mirror
+	#   🔹 For Ubuntu 24.04+ (Noble Numbat) --- Targets the new DEB822 format:
+	# this only handles http://archive.ubuntu.com entries in the new sources file format (DEB822) used by newer Ubuntu versions, ensuring the mirror URL is updated correctly without affecting other lines:
+	# sudo sed -i 's|http://.*archive.ubuntu.com|https://mirrors.ocf.berkeley.edu|g' /etc/apt/sources.list.d/ubuntu.sources
+
+	# regex match to handle both HTTP and HTTPS formats in the sources file for the mirror URL, ensuring it works regardless of the original format:
+	#   Why this is better:
+	#    * The [s]\? part means "maybe there's an 's' here, maybe there isn't." It matches both http:// and https:// perfectly!
+	sudo sed -i 's|http[s]\?://.*archive.ubuntu.com|https://mirrors.ocf.berkeley.edu|g' /etc/apt/sources.list.d/ubuntu.sources
+	# 🔄 Apply APT Mirror Changes
+	sudo apt update
+
+	source ./WARES-LIB/LINUX-GNOME-AND-MATE-DE-LIB/FOR_LINUX_GNOME_AND_MATE_DE_LIB_EXT_LIB
+	FUN_WARES_FOR_GNOME_AND_MATE_DE
+}
+# !SECTION - FUN_MAIN_CHOICE_UBUNTU_GNOME_VANILLA - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_UBUNTU_GNOME_FULL_SEND
+# Function: FUN_MAIN_CHOICE_UBUNTU_GNOME_FULL_SEND
+# Description: A "full send" option for Ubuntu GNOME, executing choices 5, 3, and 7.
+function FUN_MAIN_CHOICE_UBUNTU_GNOME_FULL_SEND {
+
+	echo "UBUNTU_GNOME_FULL_SEND. [UBUNTU VANILLA SPECIFIC !!! Full  Send !!!] Executes options: UBUNTU_GNOME_VANILLA, 3, 7, 13, 14, [WOL]"
+	FUN_CHOICE_BLOCK_INDICATOR "UBUNTU_GNOME_FULL_SEND. [UBUNTU VANILLA SPECIFIC !!! Full  Send !!!] Executes options: UBUNTU_GNOME_VANILLA, 3, 7, 13, 14, [WOL]"
+
+	FUN_MAIN_CHOICE_UBUNTU_GNOME_VANILLA
+	FUN_MAIN_CHOICE_3
+	FUN_MAIN_CHOICE_7
+	FUN_MAIN_CHOICE_WOL
+
+	# it copies the custom scripts to /bin and the custom script directory to /bin
+	# within the file itself (./APT-AUTO-INSTALLS/WARES-LIB/LINUX-GNOME-AND-MATE-DE-LIB/FOR_LINUX_GNOME_AND_MATE_DE_LIB_EXT_LIB)
+	# same as if calling the dedicated function for it -- here for noting / documentation purposes
+
+	# it copies the wares included dir: ./APT-AUTO-INSTALLS/AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED to $HOME and /etc/skel
+	# within the file itself (./APT-AUTO-INSTALLS/WARES-LIB/LINUX-GNOME-AND-MATE-DE-LIB/FOR_LINUX_GNOME_AND_MATE_DE_LIB_EXT_LIB)
+	# same as if calling the dedicated function for it -- here for noting / documentation purposes
+
+}
+# !SECTION - FUN_MAIN_CHOICE_UBUNTU_GNOME_FULL_SEND - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_7
+# Function: FUN_MAIN_CHOICE_7
+# Description: Copies GNOME panel settings and app configs to /etc/skel.
+function FUN_MAIN_CHOICE_7 {
+	cd "$CD_DIRNAME" || exit
+	# Check for and install the p7zip-full dependency.
+	if ! apt list --installed 7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+		echo "dependency 7zip is NOT installed .. installing"
+		sudo apt update
+		sudo apt install -y 7zip
+		if ! apt list --installed 7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+			echo "Possibly didn't install dependency 7zip .. exiting"
+			exit
+		fi
+	fi
+
+	echo "7.- [UBUNTU VANILLA SPECIFIC] COPY GNOME PANEL SETTING & APP CONFIGS TO /ETC/SKEL"
+	FUN_CHOICE_BLOCK_INDICATOR "7.- [UBUNTU VANILLA SPECIFIC] COPY GNOME PANEL SETTING & APP CONFIGS TO /ETC/SKEL"
+
+	# Validate the Ubuntu release version.
+	__RELEASE_VERSION=$(cat /etc/lsb-release | grep "DISTRIB_RELEASE=" | sed s/DISTRIB_RELEASE=// | tr -d '[:space:]')
+
+	# Apply settings for Ubuntu 26.04
+	if [[ $__RELEASE_VERSION == *"$_GLOBAL_MASTER_UBUNTU_RELEASE_VERSION_1"* ]]; then
+		echo -e "Current Running UBUNTU version is [$__RELEASE_VERSION] \n"
+		# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+		7z x ./AUTO-INSTALLS-FILES/THEMES-N-DOTFILES/ubuntu-24.04-vanilla-panel-settings-theme-configs.7z -oAUTO-INSTALLS-FILES/WORKER-TEMP
+	fi
+
+	# Apply settings for Ubuntu 24.04.
+	if [[ $__RELEASE_VERSION == *"$_GLOBAL_MASTER_UBUNTU_RELEASE_VERSION_2"* ]]; then
+		echo -e "Current Running UBUNTU version is [$__RELEASE_VERSION] \n"
+		# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+		7z x ./AUTO-INSTALLS-FILES/THEMES-N-DOTFILES/ubuntu-24.04-vanilla-panel-settings-theme-configs.7z -oAUTO-INSTALLS-FILES/WORKER-TEMP
+	fi
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Templates /etc/skel
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/Templates "$HOME"
+	sudo mkdir -p /etc/skel/.config/dconf/
+
+	# an alternative to using the binary 'user' file is:
+	# dconf dump / > my-dconf-settings.txt
+	# dconf load / < my-dconf-settings.txt
+	{
+		sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/user /etc/skel/.config/dconf
+		# Try to copy the file up to 4 times, checking each time if it exists, is not empty, and matches the source checksum
+		SRC_SUM=$(md5sum "./AUTO-INSTALLS-FILES/WORKER-TEMP/user" | awk '{print $1}' | tr -d '[:space:]')
+		for i in {1..4}; do
+			sudo cp -rf "./AUTO-INSTALLS-FILES/WORKER-TEMP/user" "$HOME/.config/dconf/user"
+			if [ -s "$HOME/.config/dconf/user" ]; then
+				DEST_SUM=$(md5sum "$HOME/.config/dconf/user" | awk '{print $1}' | tr -d '[:space:]')
+				if [ "$SRC_SUM" = "$DEST_SUM" ]; then
+					echo "Verified: user file copied to $HOME/.config/dconf/user (attempt $i, checksum match)"
+					break
+				else
+					echo "Checksum mismatch after copy attempt $i, retrying..."
+				fi
+			else
+				echo "Copy attempt $i failed (file missing or empty), retrying..."
+			fi
+			sleep 1
+		done
+
+		# load the dconf settings from the dumped file (so settings take immediate effect & is registered in dconf database)
+		dconf load / <./AUTO-INSTALLS-FILES/WORKER-TEMP/my-dconf-settings.txt && FUN_TRACK_CUSTOM_INSTALL "Gnome Panel Settings & App Configs" "success" || FUN_TRACK_CUSTOM_INSTALL "Gnome Panel Settings & App Configs" "fail"
+	}
+
+	# 📝 Set default applications for common file types
+	# Updates the user's MIME association list (~/.config/mimeapps.list),
+	# so browsers open HTML files and File Roller handles all common archives.
+	{
+		# Here-doc indented with tabs ('<<-EOF'); leading tabs are stripped automatically
+		# '>/dev/null' hides stdout so the heredoc content isn't printed to the terminal,
+		# keeping output clean and less noisy. Errors (stderr) will still appear if any.
+		cat <<-EOF | sudo tee "$HOME/.config/mimeapps.list" >/dev/null
+			[Default Applications]
+			# Browser defaults
+			text/html=google-chrome.desktop
+			x-scheme-handler/http=google-chrome.desktop
+			x-scheme-handler/https=google-chrome.desktop
+			x-scheme-handler/about=google-chrome.desktop
+			x-scheme-handler/unknown=google-chrome.desktop
+			# .JSON files → GNOME Text Editor
+			application/json=org.gnome.TextEditor.desktop
+
+			# File Roller defaults for compressed archives
+			application/x-7z-compressed=org.gnome.FileRoller.desktop
+			application/vnd.rar=org.gnome.FileRoller.desktop
+			application/zip=org.gnome.FileRoller.desktop
+			application/x-tar=org.gnome.FileRoller.desktop
+			application/gzip=org.gnome.FileRoller.desktop
+			application/x-bzip2=org.gnome.FileRoller.desktop
+			application/x-xz=org.gnome.FileRoller.desktop
+			application/x-rar=org.gnome.FileRoller.desktop
+			application/x-compress=org.gnome.FileRoller.desktop
+			application/x-compressed-tar=org.gnome.FileRoller.desktop
+
+			# Media player
+			video/mp4=vlc.desktop
+			video/webm=vlc.desktop
+			video/x-matroska=vlc.desktop
+			audio/mp4=vlc.desktop
+
+			[Added Associations]
+			application/json=org.gnome.TextEditor.desktop;
+			# Ensure all archive types are associated with File Roller
+			application/x-7z-compressed=org.gnome.FileRoller.desktop;
+			application/vnd.rar=org.gnome.FileRoller.desktop;
+			application/zip=org.gnome.FileRoller.desktop;
+			application/x-tar=org.gnome.FileRoller.desktop;
+			application/gzip=org.gnome.FileRoller.desktop;
+			application/x-bzip2=org.gnome.FileRoller.desktop;
+			application/x-xz=org.gnome.FileRoller.desktop;
+			application/x-rar=org.gnome.FileRoller.desktop;
+			application/x-compress=org.gnome.FileRoller.desktop;
+			application/x-compressed-tar=org.gnome.FileRoller.desktop;
+			# Media player
+			video/mp4=vlc.desktop;
+			video/webm=vlc.desktop;
+			video/x-matroska=vlc.desktop;
+			audio/mp4=vlc.desktop;
+		EOF
+
+		# 🔒 Set read/write/execute permissions (currently 777 for convenience)
+		sudo chmod 777 "$HOME/.config/mimeapps.list"
+
+		# 📂 Copy to /etc/skel so new users inherit the same defaults
+		sudo mkdir -p /etc/skel/.config/
+		sudo cp -rf "$HOME/.config/mimeapps.list" /etc/skel/.config/
+		sudo chmod 777 /etc/skel/.config/mimeapps.list
+
+		# enable middle mouse button pasting 'primary paste' [ disaled in ubuntu 26.04 +] - this setting has been set to true in the panel setting dconf file (it can also be changed in 'gnome tweaks')
+		# gsettings set org.gnome.desktop.interface gtk-enable-primary-paste true
+	}
+
+	sudo mv ./AUTO-INSTALLS-FILES/WORKER-TEMP/kawaii-parrot.bashrc ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc /etc/skel
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc /root
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/.bashrc "$HOME"
+	sudo sed -i s/^HandleLidSwitch=ignore//g /etc/systemd/logind.conf
+	sudo sed -i s/^HandleLidSwitchExternalPower=ignore//g /etc/systemd/logind.conf
+	echo "HandleLidSwitch=ignore" | sudo tee -a /etc/systemd/logind.conf
+	echo "HandleLidSwitchExternalPower=ignore" | sudo tee -a /etc/systemd/logind.conf
+
+	# Disable automatic APT updates and upgrades. This gives the user full control over when updates are installed.
+	sudo sed -i 's/APT::Periodic::Update-Package-Lists "1";/APT::Periodic::Update-Package-Lists "0";/g' /etc/apt/apt.conf.d/20auto-upgrades
+	sudo sed -i 's/APT::Periodic::Unattended-Upgrade "1";/APT::Periodic::Unattended-Upgrade "0";/g' /etc/apt/apt.conf.d/20auto-upgrades
+	sync
+
+	# Fix ownership of all modified files in $HOME to ensure the user can manage them.
+	sudo chown -R "$(logname):$(logname)" "$HOME/Templates" "$HOME/.config" "$HOME/.bashrc" 2>/dev/null
+
+	# Disable sudo password asterisks, restore invisible layout safely and correctly.
+	# ==============================================================================
+	# SAFE SUDOERS INJECTION
+	# ==============================================================================
+	# WHY THIS IS SAFER:
+	# Writing directly to /etc/sudoers.d/ with 'tee' can brick your OS if you make a
+	# typo, locking you out of root privileges. This one-liner acts as an automated
+	# safety net. It creates a temporary file first, checks its syntax using 'visudo',
+	# sets safe permissions, and only deploys it to the system if it is 100% correct.
+	# /etc/sudoers.d/disable-asterisks must be owned by root and have permissions set to 440 to be valid.
+	# ==============================================================================
+	echo 'Defaults !pwfeedback' >/tmp/check-sudo &&
+		sudo chown root:root /tmp/check-sudo &&
+		sudo chmod 440 /tmp/check-sudo &&
+		sudo visudo -cf /tmp/check-sudo &&
+		sudo mv /tmp/check-sudo /etc/sudoers.d/disable-asterisks &&
+		sudo chown root:root /etc/sudoers.d/disable-asterisks &&
+		sudo chmod 440 /etc/sudoers.d/disable-asterisks ||
+		{
+			echo 'ABORTED: The file was NOT deployed to /etc/sudoers.d/ to prevent a system lockout.'
+			exit 1
+		}
+
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+}
+# !SECTION - FUN_MAIN_CHOICE_7 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_DEBIAN_GNOME
+# Function: FUN_MAIN_CHOICE_DEBIAN_GNOME
+# Description: Installs software for Debian with GNOME desktop.
+function FUN_MAIN_CHOICE_DEBIAN_GNOME {
+	echo "DEBIAN_GNOME. [ DEBIAN ] (Wares for DEBIAN [GNOME DE])"
+	FUN_CHOICE_BLOCK_INDICATOR "DEBIAN_GNOME. [ DEBIAN ] (Wares for DEBIAN [GNOME DE])"
+
+	# 🚀 Switch to Berkeley (OCF) APT Mirror
+
+	#   🔹 For Debian (all versions) --- Note: Debian uses deb.debian.org instead of the Ubuntu address: [COMMENTED - HERE FOR DOCUMENTATION]
+	# sudo sed -i 's|http://deb.debian.org|http://mirrors.ocf.berkeley.edu|g' /etc/apt/sources.list
+
+	# 🔄 Apply Changes
+	sudo apt update
+
+	source ./WARES-LIB/LINUX-GNOME-AND-MATE-DE-LIB/FOR_LINUX_GNOME_AND_MATE_DE_LIB_EXT_LIB
+	FUN_WARES_FOR_GNOME_AND_MATE_DE
+}
+# !SECTION - FUN_MAIN_CHOICE_DEBIAN_GNOME - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_9
+# Function: FUN_MAIN_CHOICE_9
+FUN_MAIN_CHOICE_9() {
+
+	FUN_CHOICE_BLOCK_INDICATOR "9. [FONTS] Install Comprehensive Font Set"
+
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "[FONTS] Install Comprehensive Font Set"
+
+	# --- Update package lists ----------------------------------------------------
+	sudo apt update
+
+	# --- Pre-seed Microsoft Core Fonts EULA --------------------------------------
+	# The `ttf-mscorefonts-installer` package prompts for license acceptance.
+	# We use debconf to pre-accept it so the installation runs without interaction.
+	echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+
+	# --- Install fonts -----------------------------------------------------------
+	sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+		fonts-noto \
+		fonts-noto-core \
+		fonts-noto-extra \
+		fonts-noto-ui-extra \
+		fonts-noto-cjk \
+		fonts-noto-cjk-extra \
+		fonts-noto-color-emoji \
+		fonts-dejavu \
+		fonts-dejavu-extra \
+		fonts-liberation \
+		fonts-liberation2 \
+		fonts-ubuntu \
+		fonts-urw-base35 \
+		fonts-sil-gentium \
+		fonts-sil-gentium-basic \
+		fonts-texgyre \
+		texlive-fonts-extra \
+		texlive-fonts-recommended \
+		ttf-mscorefonts-installer \
+		fonts-firacode \
+		fonts-cascadia-code \
+		fonts-inconsolata \
+		fonts-hack \
+		fonts-opensymbol
+
+	# Track installed fonts
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "fonts-noto fonts-noto-core fonts-noto-extra fonts-noto-ui-extra fonts-noto-cjk fonts-noto-cjk-extra fonts-noto-color-emoji fonts-dejavu fonts-dejavu-extra fonts-liberation fonts-liberation2 fonts-ubuntu fonts-urw-base35 fonts-sil-gentium fonts-sil-gentium-basic fonts-texgyre texlive-fonts-extra texlive-fonts-recommended ttf-mscorefonts-installer fonts-firacode fonts-cascadia-code fonts-inconsolata fonts-hack fonts-opensymbol"
+
+	# --- Done --------------------------------------------------------------------
+	echo "✅ All fonts installed successfully."
+
+}
+# !SECTION - FUN_MAIN_CHOICE_9 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_IMPORT_WIFI
+# Description: Installs a one-shot service to import Pre-Saved WiFi networks on first boot for headless/server installs
+FUN_MAIN_CHOICE_IMPORT_WIFI() {
+
+	# A non-interactive script to install the one-shot WiFi import systemd service.
+	#
+	# DESCRIPTION:
+	# This script is designed for use in automated setups. It creates and enables a
+	# systemd service that runs on each boot. The service waits for a WiFi adapter
+	# to become available, imports all network profiles from a specified file,
+	# and then disables itself to ensure it only runs once successfully.
+	# HEADLESS WIFI NETWORK IMPORTING
+	# USAGE:
+	# The script must be run with root privileges and requires one argument:
+	# sudo ./setup-headless-service.sh (or the function name if made into a function) /path/to/your/wifi_networks.txt
+	#
+
+	# Stop script execution immediately if any command fails.
+	set -e
+
+	# --- Section 1: Pre-flight Checks ---
+	# Verifies that the script is being run in a valid environment.
+
+	# 1. Check for root privileges.
+	# The script needs to write to /usr/local/bin and /etc/systemd/system,
+	# and needs to run systemctl commands, all of which require root.
+	if [[ $EUID -ne 0 ]]; then
+		echo "Error: This script must be run as root. Please use sudo." >&2
+		exit 1
+	fi
+
+	# 2. Check for the command-line argument.
+	# The first argument ($1) must be the path to the import file.
+	if [[ -z "$1" ]]; then
+		echo "Usage: sudo bash -c ${FUNCNAME[0]} \"/path/to/your/wifi_networks.txt\"" >&2
+		exit 1
+	fi
+
+	# --- Section 2: Variable Declarations ---
+	# Defines the key variables used throughout the script.
+
+	# The path to the file containing WiFi profiles, provided as a command-line argument.
+	IMPORT_FILE_PATH="$1"
+	# The official name of the systemd service.
+	SERVICE_NAME="wifi-import-once.service"
+	# The full path where the generated helper executable will be stored.
+	SCRIPT_PATH="/usr/local/bin/wifi-import-once.sh"
+	# The full path where the systemd service unit file will be stored.
+	SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
+
+	echo "--- WiFi Headless Import Service Setup ---"
+	echo "Import file specified: $IMPORT_FILE_PATH"
+
+	# --- Section 3: Configuration Validation ---
+	# Ensures the provided import file path is valid before proceeding.
+
+	echo "Validating configuration..."
+	# The file path must be absolute, as systemd services do not run from a user's
+	# working directory and need explicit paths to locate files.
+	if [[ "$IMPORT_FILE_PATH" != /* ]]; then
+		echo "Error: The import file path must be absolute (start with '/')." >&2
+		exit 1
+	fi
+	# The file must exist and contain data.
+	if [[ ! -f "$IMPORT_FILE_PATH" ]] || [[ ! -s "$IMPORT_FILE_PATH" ]]; then
+		echo "Error: The specified import file does not exist or is empty: $IMPORT_FILE_PATH" >&2
+		exit 1
+	fi
+	echo "Configuration validated successfully."
+
+	# --- Section 4: Content Generation for Service Files ---
+
+	# 4a. Define Helper Script Content using a HEREDOC.
+	# The 'EOF' is quoted ('cat <<'EOF'') to prevent the shell from expanding
+	# variables like $SSID within this block. Instead, placeholders like __IMPORT_FILE__
+	# are used and safely replaced later.
+	HELPER_SCRIPT_CONTENT=$(
+		cat <<'EOF'
+#!/bin/bash
+# This script is generated for one-time network import.
+# It will run on boot, import networks, and disable itself after successful execution.
+
+# NOTE: 'set -e' is intentionally left out to ensure the script attempts
+# to import all networks, even if one fails.
+
+IMPORT_FILE="__IMPORT_FILE__"
+SERVICE_NAME="__SERVICE_NAME__"
+
+logger "$SERVICE_NAME: Starting corrected one-time WiFi import."
+
+logger "$SERVICE_NAME: Checking for available WiFi interfaces..."
+INTERFACE_TO_USE=$(nmcli -t -f DEVICE,TYPE dev | grep ':wifi$' | cut -d: -f1 | head -n1)
+
+if [[ -z "$INTERFACE_TO_USE" ]]; then
+    logger "$SERVICE_NAME: No WiFi interface found. Will check again on next boot."
+    exit 0
+fi
+
+logger "$SERVICE_NAME: Found WiFi interface '$INTERFACE_TO_USE'. Proceeding with import."
+
+if [[ ! -f "$IMPORT_FILE" ]]; then
+    logger "$SERVICE_NAME: FATAL ERROR - Import file '$IMPORT_FILE' not found! Disabling service."
+    systemctl disable "$SERVICE_NAME"
+    exit 1
+fi
+
+import_count=0
+error_count=0
+
+# Use a temporary file to sanitize the input file, removing any '\r' characters.
+TEMP_INPUT_FILE=$(mktemp)
+tr -d '\r' < "$IMPORT_FILE" > "$TEMP_INPUT_FILE"
+
+
+while IFS='|' read -r -a F; do
+    # Skip empty or malformed lines
+    [[ ${#F[@]} -lt 2 ]] && continue
+
+    SSID="${F[0]}"
+    PASSWORD="${F[1]}"
+    # Set defaults
+    SECURITY="WPA"
+    BSSID=""
+    HIDDEN="no"
+    PRIORITY="0"
+
+    # Override defaults based on the number of fields
+    case ${#F[@]} in
+        5) SECURITY="${F[2]}"; BSSID="${F[3]}";;
+        6) SECURITY="${F[2]}"; BSSID="${F[3]}"; HIDDEN="${F[5]}";;
+        7) SECURITY="${F[2]}"; BSSID="${F[3]}"; HIDDEN="${F[5]}"; PRIORITY="${F[6]}";;
+    esac
+
+    # --- Sanity Checks ---
+    if [[ -z "$SSID" ]]; then
+        logger "$SERVICE_NAME: Skipping line with empty SSID."
+        ((error_count++))
+        continue
+    fi
+
+    if [[ "$SECURITY" != "OPEN" && -z "$PASSWORD" ]]; then
+        logger "$SERVICE_NAME: Skipping '$SSID' due to missing password for a secured network."
+        ((error_count++))
+        continue
+    fi
+
+    logger "$SERVICE_NAME: Processing network: '$SSID'..."
+
+    # Check if a connection with the same name already exists and delete it.
+    if nmcli -t -f NAME connection show | grep -q "^${SSID}$"; then
+        logger "$SERVICE_NAME: Deleting existing connection for '$SSID' to ensure a clean import."
+        nmcli connection delete "$SSID" >/dev/null 2>&1 || true
+    fi
+
+    # Build nmcli command in a safe array to handle special characters.
+    cmd_array=(nmcli connection add type wifi con-name "$SSID" ifname "$INTERFACE_TO_USE" ssid "$SSID")
+
+    case "$SECURITY" in
+        WPA)  cmd_array+=("wifi-sec.key-mgmt" "wpa-psk" "wifi-sec.psk" "$PASSWORD");;
+        WEP)  cmd_array+=("wifi-sec.key-mgmt" "wep" "wifi-sec.wep-key-type" "passphrase" "wifi-sec.wep-key0" "$PASSWORD");;
+        OPEN) cmd_array+=("wifi-sec.key-mgmt" "none");;
+        *)    cmd_array+=("wifi-sec.key-mgmt" "wpa-psk" "wifi-sec.psk" "$PASSWORD");;
+    esac
+
+    if [[ "$HIDDEN" == "yes" ]]; then
+        cmd_array+=("802-11-wireless.hidden" "yes")
+    fi
+
+    # Execute the 'add' command and check its exit status
+    if "${cmd_array[@]}"; then
+        logger "$SERVICE_NAME: Successfully added connection '$SSID'."
+        
+        # On success, apply optional modifications
+        if [[ -n "$BSSID" ]]; then
+            nmcli connection modify "$SSID" 802-11-wireless.bssid "$BSSID" || logger "$SERVICE_NAME: Warning - Failed to set BSSID for '$SSID'."
+        fi
+        if [[ -n "$PRIORITY" && "$PRIORITY" != "0" ]]; then
+            nmcli connection modify "$SSID" connection.autoconnect-priority "$PRIORITY" || logger "$SERVICE_NAME: Warning - Failed to set priority for '$SSID'."
+        fi
+        ((import_count++))
+    else
+        logger "$SERVICE_NAME: ERROR - Failed to import '$SSID'."
+        ((error_count++))
+        continue
+    fi
+done < "$TEMP_INPUT_FILE"
+
+rm "$TEMP_INPUT_FILE"
+
+logger "$SERVICE_NAME: Import task finished. Success: $import_count, Failed: $error_count."
+
+# Only disable the service if it actually processed something.
+if [[ $import_count -gt 0 || $error_count -gt 0 ]]; then
+    logger "$SERVICE_NAME: Disabling service after execution."
+    systemctl disable "$SERVICE_NAME"
+fi
+
+exit 0
+EOF
+	)
+
+	# 4b. Safely inject dynamic values into the script content by replacing placeholders.
+	# This uses shell parameter expansion to find and replace all occurrences of the placeholder.
+	HELPER_SCRIPT_CONTENT=${HELPER_SCRIPT_CONTENT//__IMPORT_FILE__/$IMPORT_FILE_PATH}
+	HELPER_SCRIPT_CONTENT=${HELPER_SCRIPT_CONTENT//__SERVICE_NAME__/$SERVICE_NAME}
+
+	# 4c. Define Service Unit Content.
+	# The double quotes around the main string allow for shell expansion of $SCRIPT_PATH.
+	SERVICE_UNIT_CONTENT=$(
+		printf '%s' \
+			"[Unit]
+# A human-readable description of the service.
+Description=One-shot WiFi Network Importer for Headless Setup
+# Specifies that this service should only start after the network stack is ready.
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+# 'oneshot' means the service starts, runs a single task, and then terminates.
+Type=oneshot
+# The full path to the command that will be executed.
+ExecStart=$SCRIPT_PATH
+# Ensures that systemd considers the service active even after the script exits.
+RemainAfterExit=true
+
+[Install]
+# Tells systemd to hook this service into the multi-user boot target.
+WantedBy=multi-user.target
+"
+	)
+
+	# --- Section 5: Installation Process ---
+
+	# 5a. Clean up any existing version of the service.
+	# This makes the script idempotent (re-runnable).
+	if [[ -f "$SERVICE_PATH" ]]; then
+		echo "Existing service found. Stopping and removing it before re-installation..."
+		# Stop the service if it's currently running.
+		systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+		# Disable the service from starting automatically on boot.
+		systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
+		# Delete the old script and service files.
+		rm -f "$SERVICE_PATH" "$SCRIPT_PATH"
+		echo "Old service removed."
+	fi
+
+	# 5b. Write the new helper script and service files.
+	echo "●─────────────────────────────●"
+	echo "Writing helper script to $SCRIPT_PATH..."
+	echo "$HELPER_SCRIPT_CONTENT" >"$SCRIPT_PATH"
+
+	echo "●─────────────────────────────●"
+	echo "Writing systemd service to $SERVICE_PATH..."
+	echo "$SERVICE_UNIT_CONTENT" >"$SERVICE_PATH"
+
+	# 5c. Set permissions and enable the new service.
+	echo "●─────────────────────────────●"
+	echo "Setting script permissions..."
+	# The helper script must be marked as executable to run.
+	chmod +x "$SCRIPT_PATH"
+
+	echo "●─────────────────────────────●"
+	echo "Reloading systemd daemon and enabling service..."
+	# Tell systemd to re-read its configuration files from disk.
+	systemctl daemon-reload
+	# Enable the service to start automatically on the next boot.
+	systemctl enable "$SERVICE_NAME"
+
+	echo "●─────────────────────────────●"
+	echo "Installation Complete!"
+	echo "Service '$SERVICE_NAME' has been installed and enabled."
+	echo "It will run on the next boot to import networks from '$IMPORT_FILE_PATH'."
+	echo "●─────────────────────────────●"
+	set +e
+}
+# !SECTION - FUN_MAIN_CHOICE_IMPORT_WIFI - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_10
+# Function: FUN_MAIN_CHOICE_10
+# Description: Installs a collection of gaming emulators.
+function FUN_MAIN_CHOICE_10 {
+
+	echo "10  INSTALL ALL GAMING CONSOLES ONLY "
+	FUN_CHOICE_BLOCK_INDICATOR "10  INSTALL ALL GAMING CONSOLES ONLY"
+	source ./WARES-LIB/GAMING_CONSOLES_ONLINE_INSTALLATION_LIB
+	_FUN_INSTALL_ALL_GAMING_CONSOLES_ONLINE
+}
+# !SECTION - FUN_MAIN_CHOICE_10 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_11
+# Function: FUN_MAIN_CHOICE_11
+# Description: Installs the Intel OpenCL runtime.
+function FUN_MAIN_CHOICE_11 {
+
+	echo " 11  INSTALL [INTEL OPENCL RUNTIME]"
+	FUN_CHOICE_BLOCK_INDICATOR "11  INSTALL [INTEL OPENCL RUNTIME]"
+
+	FUN_VERBOSE_INSTALLING "[INTEL OPENCL] intel-opencl-icd"
+	sudo apt-get install -y intel-opencl-icd
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "intel-opencl-icd"
+}
+# !SECTION - FUN_MAIN_CHOICE_11 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_12
+# Function: FUN_MAIN_CHOICE_12
+# Description: Provides a menu to install gaming emulators individually.
+function FUN_MAIN_CHOICE_12 {
+
+	echo "12. [UBUNTU'S SPECIFIC] INSTALL GAMING CONSOLES INDIVIDUALLY"
+	FUN_CHOICE_BLOCK_INDICATOR "12. [UBUNTU'S SPECIFIC] INSTALL GAMING CONSOLES INDIVIDUALLY"
+
+	source ./WARES-LIB/GAMING_CONSOLES_ONLINE_INSTALLATION_LIB
+	_FUN_INSTALL_GAMING_ONLINE_INTERACTIVE_MENU
+}
+# !SECTION - FUN_MAIN_CHOICE_12 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_13
+# Function: FUN_MAIN_CHOICE_13
+# Description: Installs custom shell scripts to /bin and adds them to the system's PATH.
+function FUN_MAIN_CHOICE_13 {
+	FUN_CHOICE_BLOCK_INDICATOR "13. install CUSTOM-SH-SCRIPTS to /bin/CUSTOM-SH-SCRIPTS & /bin"
+
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " install CUSTOM-SH-SCRIPTS to /bin/CUSTOM-SH-SCRIPTS & /bin"
+
+	# Remove any existing custom scripts directory from /bin.
+	sudo rm -rf /bin/CUSTOM-SH-SCRIPTS 2>/dev/null
+
+	# Copy the custom scripts directory to /bin.
+	sudo cp -r $CD_DIRNAME/AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS /bin
+	sudo chmod -R 777 /bin/CUSTOM-SH-SCRIPTS
+
+	# ==============================================================================
+	# set correct $PATH variables
+	# Description: This script section appends custom directory paths to the system-wide
+	#              /etc/profile file. This ensures that these directories are
+	#              included in the PATH for all users during login.
+	#              It also updates the PATH for the current shell session.
+	# ==============================================================================
+
+	# Define an array of directory paths to be added to the system PATH.
+	PATHS_TO_ADD=(
+		"/bin/CUSTOM-SH-SCRIPTS"
+	)
+	# Target configuration file for system-wide environment variables.
+	PROFILE_FILE="/etc/profile"
+	echo "Checking $PROFILE_FILE for custom path configurations..."
+
+	# FIX 1: Sanitize the existing PATH *once* before the loop starts.
+	# This creates a stable, clean base that won't grow infinitely inside the loop.
+	PATH_BASE=$(echo -n "$PATH" | awk -v RS=: '$0 != "" && !a[$0]++ {printf "%s%s", (i++ ? ":" : ""), $0}')
+
+	for dir in "${PATHS_TO_ADD[@]}"; do
+		# FIX 2: Use the stable PATH_BASE so LINE is identical on every run.
+		LINE="export PATH=$PATH_BASE:$dir"
+
+		# Check if the directory configuration already exists in the profile file.
+		if ! grep -qsF "$LINE" "$PROFILE_FILE"; then
+			echo "Appending $dir to $PROFILE_FILE..."
+			echo "$LINE" | sudo tee -a "$PROFILE_FILE" >/dev/null
+		else
+			echo "Information: $dir already exists in $PROFILE_FILE. Skipping."
+		fi
+
+		# Update the PATH for the current active shell session.
+		case ":${PATH}:" in
+		*":$dir:"*)
+			# Directory is already present in the current PATH.
+			;;
+		*)
+			# Directory is missing; append it to the current PATH.
+			export PATH="$PATH:$dir"
+			;;
+		esac
+	done
+
+	echo "Update process finished."
+	echo "Updated current session PATH: $PATH"
+	# Clean up script-specific variables to maintain a clean environment.
+	unset PATHS_TO_ADD PROFILE_FILE dir LINE PATH_BASE
+
+	# END set correct $PATH variables for /bin/CUSTOM-SH-SCRIPTS ==============================================================================
+
+	# Copy the scripts directly to /bin for easier access.
+	sudo cp $CD_DIRNAME/AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS/* /bin
+	sudo chmod -R 777 /bin/custom-*
+	FUN_TRACK_CUSTOM_INSTALL "Custom Admin Scripts (40+ Utils)" "success"
+}
+# !SECTION - FUN_MAIN_CHOICE_13 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_14
+# Function: FUN_MAIN_CHOICE_14
+# Description: Copy the `WARES-INCLUDED` directory, containing various documents and resources, to the user's home & /etc/skel so that all new users receive a copy.
+function FUN_MAIN_CHOICE_14() {
+	FUN_CHOICE_BLOCK_INDICATOR "14. copy WARES_INCLUDED from AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED to $HOME & /etc/skel to make available to all users"
+
+	# Copy the `WARES-INCLUDED` directory, containing various documents and resources, to the user's home
+	# directory and to /etc/skel so that all new users receive a copy.
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "copy WARES_INCLUDED from AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED to $HOME & /etc/skel to make available to all users"
+	sudo rm -rf /etc/skel/WARES-INCLUDED 2>/dev/null
+	sudo rm -rf "$HOME/WARES-INCLUDED" 2>/dev/null
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED /etc/skel
+	if sudo cp -rf ./AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED "$HOME"; then
+		FUN_TRACK_CUSTOM_INSTALL "WARES-INCLUDED Docs/Resources" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "WARES-INCLUDED Docs/Resources" "fail"
+	fi
+	sudo chmod -R 777 "$HOME/WARES-INCLUDED" /etc/skel/WARES-INCLUDED
+}
+# !SECTION - FUN_MAIN_CHOICE_14 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+#-------------------------------------------------------------------------------------------------------------------
+# SECTION: FUN_MAIN_CHOICE_WOL
+# Description: This section handles the copying of the "WAKE ON LAN TARGETS" directory
+# Copy Wake On Lan Targets Directory & its contents to /bin
+#-------------------------------------------------------------------------------------------------------------------
+function FUN_MAIN_CHOICE_WOL {
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " INSTALLING -> COPY WAKE ON LAN TARGETS DIRECTORY & ITS CONTENTS TO /bin "
+	cd "$CD_DIRNAME" || exit
+
+	sudo cp -rf ./AUTO-INSTALLS-FILES/CUSTOM-WAKE-ON-LAN-TARGETS/ /bin/
+	if sudo chmod -R 777 /bin/CUSTOM-WAKE-ON-LAN-TARGETS/; then
+		FUN_TRACK_CUSTOM_INSTALL "Wake On LAN Targets" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "Wake On LAN Targets" "fail"
+	fi
+}
+# !SECTION: END Copy Wake On Lan Targets Directory & its contents to /bin --------------------------------------------------------------------------------
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_17
+# function: FUN_MAIN_CHOICE_17
+# Description: install fully VSCODE
+
+function FUN_MAIN_CHOICE_17 {
+
+	FUN_CHOICE_BLOCK_INDICATOR "17. install fully VSCODE"
+
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " install fully VSCODE"
+	FUN_VERBOSE_INSTALLING "INSTALLING VSCODE ---"
+
+	# Source the centralized library and call the online installation function
+	source ./WARES-LIB/VSCODE_ONLINE_INSTALLATION_LIB
+	FUN_INSTALL_VSCODE_ONLINE
+
+	# Check and report the installation status of VSCode.
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "code"
+
+}
+# !SECTION - FUN_MAIN_CHOICE_17 - END OF THE SECTION
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###
+
+# SECTION - FUN_MAIN_CHOICE_POST_INSTALL_WORKFLOW_UBUNTU
+# Function: FUN_MAIN_CHOICE_POST_INSTALL_WORKFLOW_UBUNTU
+# Description: Applies post-installation tweaks and settings specific to Ubuntu versions.
+function FUN_MAIN_CHOICE_POST_INSTALL_WORKFLOW_UBUNTU {
+	FUN_CHOICE_BLOCK_INDICATOR "POST INSTALL WORKFLOW FOR UBUNTU"
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "POST INSTALL WORKFLOW FOR UBUNTU"
+
+	cd "$CD_DIRNAME" || exit
+
+	##########
+	########## RDP Remote Access Configurator (Mirrored & Headless) - START
+	# This script prepares both 'Desktop Sharing' (Mirrored) and 'Remote Login' (Headless).
+	# MIRRORED: Access the active desktop session via port 3390.
+	# HEADLESS: New virtual session with dynamic resizing via port 3389 (requires local logout).
+
+	_REMOTE_USER="$(logname)"
+	_USER_ID=$(id -u "$_REMOTE_USER")
+	_REMOTE_PASS="password"
+
+	# Environment variables for user-level D-Bus communication
+	_USER_ENV="XDG_RUNTIME_DIR=/run/user/$_USER_ID DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$_USER_ID/bus"
+	_CERT_DIR="/home/$_REMOTE_USER/.local/share/gnome-remote-desktop/certificates"
+
+	echo "Configuring RDP services for user: $_REMOTE_USER (UID: $_USER_ID)"
+
+	# 0. Ensure Certificates exist for Mirrored mode
+	if [ ! -f "$_CERT_DIR/rdp-tls.crt" ]; then
+		echo "Generating self-signed certificates for Mirrored RDP..."
+		sudo -u "$_REMOTE_USER" mkdir -p "$_CERT_DIR"
+		sudo -u "$_REMOTE_USER" openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
+			-subj "/C=US/ST=State/L=City/O=Organization/CN=$_REMOTE_USER" \
+			-keyout "$_CERT_DIR/rdp-tls.key" \
+			-out "$_CERT_DIR/rdp-tls.crt"
+		sudo -u "$_REMOTE_USER" chmod 600 "$_CERT_DIR/rdp-tls.key"
+	fi
+
+	# 1. Configure Mirrored RDP (User-level)
+	echo "Configuring Mirrored RDP (Port 3390)..."
+	# Using 'sudo -i -u' ensures a full login shell environment, which helps with Keyring access.
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV gsettings set org.gnome.desktop.remote-desktop.rdp enable false
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV grdctl rdp enable
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV grdctl rdp disable-view-only
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV grdctl rdp set-port 3390
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV grdctl rdp disable-port-negotiation
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV grdctl rdp set-tls-cert "$_CERT_DIR/rdp-tls.crt"
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV grdctl rdp set-tls-key "$_CERT_DIR/rdp-tls.key"
+
+	# Sync gsettings for the GUI
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV gsettings set org.gnome.desktop.remote-desktop.rdp auth-methods "['credentials']"
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV gsettings set org.gnome.desktop.remote-desktop.rdp view-only false
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV gsettings set org.gnome.desktop.remote-desktop.rdp port 3390
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV gsettings set org.gnome.desktop.remote-desktop.rdp negotiate-port false
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV gsettings set org.gnome.desktop.remote-desktop.rdp enable true
+
+	# 2. Configure Headless RDP (System-level)
+	echo "Configuring Headless RDP (System-level, Port 3389)..."
+	sudo systemctl enable gnome-remote-desktop.service
+	sudo grdctl --system rdp enable
+	sudo grdctl --system rdp set-port 3389
+	sudo grdctl --system rdp disable-port-negotiation
+	sudo grdctl --system rdp disable-view-only
+
+	# 3. Set Credentials for both modes
+	echo "Setting RDP credentials for user: $_REMOTE_USER"
+	# Clear first to ensure a clean state in the keyring
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV grdctl rdp clear-credentials
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV grdctl rdp set-credentials "$_REMOTE_USER" "$_REMOTE_PASS"
+
+	# Headless credentials (stored at system level)
+	sudo grdctl --system rdp set-credentials "$_REMOTE_USER" "$_REMOTE_PASS"
+
+	# 4. Open Firewall Ports and enable User Lingering
+	echo "Configuring Firewall and Lingering..."
+	sudo ufw allow 3389/tcp
+	sudo ufw allow 3390/tcp
+	sudo loginctl enable-linger "$_REMOTE_USER"
+
+	# 5. Reload and Restart services
+	echo "Restarting services..."
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV systemctl --user daemon-reload
+	sudo systemctl daemon-reload
+	sudo -i -u "$_REMOTE_USER" env $_USER_ENV systemctl --user restart gnome-remote-desktop.service
+	sudo systemctl restart gnome-remote-desktop.service
+
+	echo "--------------------------------------------------------"
+	echo "RDP Configured successfully!"
+	echo "Port 3389: Headless (Remote Login)"
+	echo "Port 3390: Mirrored (Desktop Sharing)"
+	echo "Username: $_REMOTE_USER"
+	echo "Password: $_REMOTE_PASS"
+	echo "--------------------------------------------------------"
+	echo "If GUI still shows blank credentials, please try connecting anyway."
+	echo "The backend status confirms the username and password ARE set."
+	echo "--------------------------------------------------------"
+	########## RDP Remote Access Configurator - END
+
+	########## set grub timeout 1 sec
+	# Sets the GRUB bootloader timeout to 1 second for faster boot times.
+	echo "Setting GRUB timeout to 1 second..."
+	# This will modify /etc/default/grub to set the timeout to [ ${NEW_TIMEOUT} ] Seconds and update GRUB. A backup will be created
+	# create backup if not already present
+	if [ ! -f /etc/default/grub.bak.timeout.standard ]; then
+		sudo cp /etc/default/grub /etc/default/grub.bak.timeout.standard
+	fi
+
+	local NEW_TIMEOUT="1"
+	if grep -q "^GRUB_TIMEOUT=" /etc/default/grub; then
+		sudo sed -i.bak -E "s/^\s*(#\s*)?GRUB_TIMEOUT=.*/GRUB_TIMEOUT=${NEW_TIMEOUT}/" /etc/default/grub
+	else
+		echo "GRUB_TIMEOUT=${NEW_TIMEOUT}" | sudo tee -a /etc/default/grub >/dev/null
+	fi
+	if grep -q "^GRUB_TIMEOUT_STYLE=" /etc/default/grub; then
+		sudo sed -i.bak -E "s/^\s*(#\s*)?GRUB_TIMEOUT_STYLE=.*/GRUB_TIMEOUT_STYLE=menu/" /etc/default/grub
+	else
+		echo "GRUB_TIMEOUT_STYLE=menu" | sudo tee -a /etc/default/grub >/dev/null
+	fi
+	if grep -q "^GRUB_RECORDFAIL_TIMEOUT=" /etc/default/grub; then
+		sudo sed -i.bak -E "s/^\s*(#\s*)?GRUB_RECORDFAIL_TIMEOUT=.*/GRUB_RECORDFAIL_TIMEOUT=${NEW_TIMEOUT}/" /etc/default/grub
+	else
+		echo "GRUB_RECORDFAIL_TIMEOUT=${NEW_TIMEOUT}" | sudo tee -a /etc/default/grub >/dev/null
+	fi
+	sudo update-grub
+	sudo grub-editenv /boot/grub/grubenv unset recordfail || true
+	echo "GRUB timeout set to ${NEW_TIMEOUT} second(s)."
+
+	# now we set grub timeout invasively to 1 sec (almost always absolutely necessary)
+	# ⚠️ Advanced Method — Direct GRUB Header Patch
+
+	# This method directly patches the core GRUB script:
+	#   /etc/grub.d/00_header
+
+	# It modifies the hardcoded fallback:
+	#   set timeout=\${GRUB_RECORDFAIL_TIMEOUT:-30}
+
+	# This ensures GRUB uses your configured value from
+	#   /etc/default/grub  (GRUB_TIMEOUT)
+	# even when recordfail or EFI fallback occurs.
+
+	# Note: /etc/grub.d/00_header is a template used by update-grub.
+	# System updates may overwrite it, reverting this change.
+
+	# Use only if editing /etc/default/grub has no effect [which is basically always the case ]
+
+	sudo cp /etc/grub.d/00_header /etc/grub.d/00_header.bak.invasive
+	sudo sed -i "s/\${GRUB_RECORDFAIL_TIMEOUT:-30}/\${GRUB_RECORDFAIL_TIMEOUT:-\${GRUB_TIMEOUT}}/g" /etc/grub.d/00_header
+	sudo sed -i "s/set timeout=\${GRUB_RECORDFAIL_TIMEOUT:-30}/set timeout=\${GRUB_TIMEOUT}/g" /etc/grub.d/00_header
+	sudo update-grub
+	sudo grub-editenv /boot/grub/grubenv unset recordfail || true
+	########## set grub timeout 1 sec END
+
+	########## vtoyboot - START
+	# run modified vtoyboot to be able to boot the entire virtual image from ventoy
+	sudo find ./AUTO-INSTALLS-FILES/POST-INSTALL-WORKFLOW-RESOURCES/vtoyboot-* -type f -name "vtoyboot.sh" -exec sudo bash {} \;
+	########## vtoyboot - END
+
+	# ■■■■■■■■  BleachBit-Style System Cleaner START ■■■■■■■■
+	# ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+	sync
+
+	# Native System Cleaner (No BleachBit Dependency)
+	# Replicates aggressive cleaning using standard Linux tools.
+	#
+	# WARNING: This script deletes data.
+	# It performs cleaning of:
+	# - Browser Caches, Cookies, History (Firefox, Chrome, Brave)
+	# - System Logs, Temporary Files, Trash
+	# - Package Manager Caches (APT, DNF, Pacman)
+	# - Unused Dependencies
+	#
+	# Usage:
+	#   chmod +x clean_system.sh
+	#   ./clean_system.sh
+
+	set -e
+
+	echo "========================================================"
+	echo "      NATIVE SYSTEM CLEANER (User + Root)"
+	echo "========================================================"
+	echo "This script will clean system and user caches/logs."
+	echo ""
+	echo "WARNING: This will delete browser history, cookies, and cache."
+	echo "It will also clear system-wide temporary files and logs."
+	# the CTRl+C and read -r have been commented so it runs without firther user interaction
+	# echo "Press Ctrl+C to cancel or Enter to continue..."
+	# read -r
+
+	# Function to clean user-specific data
+	clean_user_data() {
+		echo "--------------------------------------------------------"
+		echo "Cleaning User Data for: $USER"
+		echo "--------------------------------------------------------"
+
+		# Close browsers to prevent file locking/corruption
+		echo "[USER] Closing active browsers (Firefox, Chrome, Chromium, Brave)..."
+		pkill -if "firefox|google-chrome|chromium|brave" || true
+		sleep 4 # Give them a moment to shut down gracefully
+
+		# Standard User Caches
+		echo "[USER] Cleaning General Cache (~/.cache)..."
+		# We use find to avoid "argument list too long" errors and to be more selective
+		find ~/.cache -mindepth 1 -delete 2>/dev/null || true
+
+		echo "[USER] Emptying Trash..."
+		rm -rf ~/.local/share/Trash/* 2>/dev/null || true
+
+		echo "[USER] Cleaning Thumbnails..."
+		rm -rf ~/.thumbnails/* 2>/dev/null || true
+		rm -rf ~/.cache/thumbnails/* 2>/dev/null || true
+
+		# Browser Cleaning (Common Paths)
+		# Firefox
+		if [ -d "$HOME/.mozilla/firefox" ]; then
+			echo "[USER] Cleaning Firefox Data..."
+			# Target Cache, startupCache, and thumbnails
+			find "$HOME/.mozilla/firefox" -type d -name "*cache2*" -exec rm -rf {} + 2>/dev/null || true
+			find "$HOME/.mozilla/firefox" -type d -name "startupCache" -exec rm -rf {} + 2>/dev/null || true
+			find "$HOME/.mozilla/firefox" -type d -name "thumbnails" -exec rm -rf {} + 2>/dev/null || true
+			# To clean cookies/history (sqlite files), uncomment below:
+			# find "$HOME/.mozilla/firefox" -name "*.sqlite" -delete 2>/dev/null || true
+		fi
+
+		# Chromium-based (Chrome, Brave, Chromium)
+		declare -a CHROMIUM_PATHS=(
+			"$HOME/.config/google-chrome"
+			"$HOME/.config/chromium"
+			"$HOME/.config/BraveSoftware/Brave-Browser"
+		)
+
+		for path in "${CHROMIUM_PATHS[@]}"; do
+			if [ -d "$path" ]; then
+				echo "[USER] Cleaning Chromium-based data at: $path"
+				find "$path" -type d -name "Cache" -exec rm -rf {}/* + 2>/dev/null || true
+				find "$path" -type d -name "Code Cache" -exec rm -rf {}/* + 2>/dev/null || true
+				find "$path" -type d -name "GPUCache" -exec rm -rf {}/* + 2>/dev/null || true
+				# To clean cookies/history (LevelDB/Sqlite), uncomment below:
+				# find "$path" -type f -name "History" -delete 2>/dev/null || true
+				# find "$path" -type f -name "Cookies" -delete 2>/dev/null || true
+			fi
+		done
+	}
+
+	# Function to clean system-wide data (Requires Sudo)
+	clean_system_data() {
+		echo "--------------------------------------------------------"
+		echo "Cleaning System Data (Root Privileges Required)"
+		echo "--------------------------------------------------------"
+
+		# Package Manager Cleanup
+		if command -v apt-get &>/dev/null; then
+			echo "[ROOT] Cleaning APT Cache & Unused Dependencies..."
+			sudo apt-get clean
+			sudo apt-get autoremove -y
+			sudo apt-get autoclean
+		elif command -v dnf &>/dev/null; then
+			echo "[ROOT] Cleaning DNF Cache..."
+			sudo dnf clean all
+			sudo dnf autoremove -y
+		elif command -v pacman &>/dev/null; then
+			echo "[ROOT] Cleaning Pacman Cache..."
+			sudo pacman -Scc --noconfirm
+		fi
+
+		# Logs
+		if command -v journalctl &>/dev/null; then
+			echo "[ROOT] Pruning Systemd Journal (keeping last 2 days)..."
+			sudo journalctl --vacuum-time=2d
+		fi
+
+		echo "[ROOT] Cleaning Old Logs in /var/log..."
+		# Deletes rotated logs (.gz, .1, etc) but keeps current active .log files if you prefer
+		# To be aggressive like BleachBit, we can delete older rotated files:
+		sudo find /var/log -type f \( -name "*.gz" -o -name "*.1" -o -name "*.old" \) -delete
+
+		# Temporary Files (Safer approach than rm -rf /tmp/*)
+		echo "[ROOT] Cleaning /tmp (files older than 1 day)..."
+		# -mindepth 1 ensures we don't delete the /tmp directory itself
+		sudo find /tmp -mindepth 1 -mtime +1 -delete 2>/dev/null || true
+
+		echo "[ROOT] Cleaning /var/tmp (files older than 7 days)..."
+		sudo find /var/tmp -mindepth 1 -mtime +7 -delete 2>/dev/null || true
+	}
+
+	# Main Execution Flow
+	clean_user_data
+	clean_system_data
+
+	set +e
+
+	echo ""
+	echo "========================================================"
+	echo "      CLEANING COMPLETE"
+	echo "========================================================"
+
+	FUN_TRACK_CUSTOM_INSTALL "Ubuntu Post-Install Workflow (RDP, GRUB, System Cleaner)" "success"
+}
+# ■■■■■■■■  END BleachBit-Style System Cleaner  ■■■■■■■■
+# ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+
+# !SECTION - FUN_MAIN_CHOICE_POST_INSTALL_WORKFLOW_UBUNTU END
+
+###-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:######-=+-+=-###:[]:<>:[]:###

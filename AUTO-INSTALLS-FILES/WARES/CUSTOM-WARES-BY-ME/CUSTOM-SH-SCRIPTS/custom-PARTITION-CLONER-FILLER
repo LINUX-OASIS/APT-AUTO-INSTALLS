@@ -1,0 +1,657 @@
+#!/bin/bash
+
+# ===================================================================================
+#
+#         EXT4/BTRFS/FAT32 Partition Cloner, Resizer, and Copier
+#
+# ===================================================================================
+#
+# PURPOSE:
+# This script provides an interactive UI to clone or copy a source partition.
+#
+# CLONING & COPYING METHODS:
+# 1. Block-Level Clone (`dd`):
+#    - Works for any filesystem.
+#    - Performs a raw, block-for-block copy.
+#    - The destination partition MUST be equal to or larger than the source.
+#
+# 2. Filesystem-Level Copy (`rsync` or `btrfs send/receive`):
+#    - Intelligently copies data, not empty space.
+#    - Allows copying to a smaller partition if the data fits.
+#    - For EXT4/FAT32, it formats the destination and copies files with `rsync`.
+#    - For BTRFS, it uses the native `send/receive` feature.
+#
+# !!! IMPORTANT WARNING !!!
+# This script performs DESTRUCTIVE operations. ALL methods will
+# IRREVERSIBLY ERASE ALL DATA on the selected destination partition.
+# PROCEED WITH EXTREME CAUTION.
+#
+# ===================================================================================
+
+# --- Aesthetics (Industrial Theme) ---
+export NEWT_COLORS='
+root=black,lightgray
+border=gray,black
+window=yellow,black
+shadow=black,gray
+title=black,lightyellow
+textbox=white,black
+textbox_border=gray,black
+entry=black,lightgray
+entry_border=gray,black
+checkbox=black,lightgray
+checkbox_border=gray,black
+radio=black,lightgray
+radio_border=gray,black
+button=black,yellow
+button_border=gray,black
+compactbutton=black,lightyellow
+compactbutton_border=gray,black
+listbox=white,black
+listbox_border=gray,black
+actlistbox=black,lightyellow
+helpline=black,gray
+roottext=lightgray,black
+emptyscale=black,gray
+fullscale=black,lightyellow
+disabled=gray,black
+'
+
+# --- Dependency Check ---
+check_dependencies() {
+	local required_cmds=("whiptail" "lsblk" "awk" "grep" "dd" "btrfs" "resize2fs" "sync" "fsck.vfat" "mktemp" "df" "rsync" "mkfs.ext4" "mkfs.vfat")
+	local missing_cmds=()
+	for cmd in "${required_cmds[@]}"; do
+		if ! command -v "$cmd" &>/dev/null; then
+			missing_cmds+=("$cmd")
+		fi
+	done
+	if [ ${#missing_cmds[@]} -gt 0 ]; then
+		whiptail --title "FATAL: Missing Dependencies" --msgbox "The following required commands are not installed or not in your PATH:\n\n- ${missing_cmds[*]}Please install the necessary packages (e.g., dosfstools, e2fsprogs) and try again." 0 0 3>&1 1>&2 2>&3
+		exit 1
+	fi
+}
+
+# --- Root Privilege Check ---
+check_root() {
+	if [ "$EUID" -ne 0 ]; then
+		echo -e "\e[48;5;196m" "Error: This script must be run as root. Please use sudo." "\e[0m"
+		echo -e "\e[48;5;196m" "Trying to relaunch with sudo" "\e[0m"
+		sudo "$0"
+		if [ "$EUID" -ne 0 ]; then
+			exit 1
+		fi
+	fi
+}
+
+# --- Abort Handler ---
+handle_abort() {
+	echo -e "\n\nOperation aborted by user."
+	if mountpoint -q "$SOURCE_MOUNT_POINT"; then sudo umount "$SOURCE_MOUNT_POINT"; fi
+	if mountpoint -q "$DEST_MOUNT_POINT"; then sudo umount "$DEST_MOUNT_POINT"; fi
+	if mountpoint -q "$TEMP_MOUNT_POINT"; then sudo umount "$TEMP_MOUNT_POINT"; fi
+	if [ -d "$SOURCE_MOUNT_POINT" ]; then sudo rmdir "$SOURCE_MOUNT_POINT"; fi
+	if [ -d "$DEST_MOUNT_POINT" ]; then sudo rmdir "$DEST_MOUNT_POINT"; fi
+	if [ -d "$TEMP_MOUNT_POINT" ]; then sudo rmdir "$TEMP_MOUNT_POINT"; fi
+	exit 130
+}
+
+# --- About/Help Function ---
+show_about_info() {
+	whiptail --title "About & Help" --msgbox "This script provides an interactive UI to clone, copy, or resize EXT4, BTRFS, and FAT32 partitions.\n\n\
+--- CLONING METHODS ---\n\
+1. Block-Level Clone ('dd'):\n\
+   - A raw, bit-for-bit copy.\n\
+   - Destination MUST be equal to or larger than the source.\n\n\
+2. Filesystem-Level Copy ('rsync'/'btrfs-snapshot'):\n\
+   - Intelligently copies only used data.\n\
+   - Can copy to a smaller partition if the data fits.\n\n\
+--- RESIZE FUNCTIONALITY ---\n\
+The 'Resize' option expands an EXT4 or BTRFS filesystem to fill its current partition. It is useful after cloning a small partition to a larger one.\n\
+- It only supports EXPANDING the filesystem.\n\
+- It does NOT resize the partition itself. Use tools like 'gparted' or 'fdisk' for that.\n\n\
+!!! WARNING !!!\n\
+This script performs DESTRUCTIVE operations (cloning erases the destination). Proceed with extreme caution." 0 0 3>&1 1>&2 2>&3
+}
+
+# --- Reusable Partition Selection Function ---
+# Displays a menu of partitions and returns the user's selection.
+# ARGS: $1: Whiptail menu title
+#       $2: Grep pattern to filter partitions (e.g., "ext4|btrfs"). Use an empty string for no filter.
+select_partition() {
+	local title="$1"
+	local grep_pattern="$2"
+
+	local cmd="lsblk --list -n -o NAME,FSTYPE,LABEL,SIZE"
+	if [ -n "$grep_pattern" ]; then
+		cmd+=" | grep -E '$grep_pattern'"
+	fi
+
+	# Use eval to execute the command string with the pipe.
+	readarray -t partitions < <(eval "$cmd")
+
+	if [ ${#partitions[@]} -eq 0 ]; then
+		whiptail --title "No Partitions Found" --msgbox "No partitions matching the criteria were found." 0 0 3>&1 1>&2 2>&3
+		return 1
+	fi
+
+	local options=()
+	for line in "${partitions[@]}"; do
+		if [ -n "$line" ]; then
+			read -r name fstype label size <<<"$line"
+			if [ -z "$size" ]; then
+				size="$label"
+				label="-"
+			fi
+			if [ -z "$label" ]; then label="-"; fi
+			if [ -z "$fstype" ]; then fstype="-"; fi
+
+			local _tag="/dev/$name"
+			local _item
+			_item=$(printf "%-7s %-15s %-8s" "$fstype" "$label" "$size")
+			options+=("$_tag" "$_item")
+		fi
+	done
+
+	local menu_height=${#partitions[@]}
+	local choice
+	choice=$(whiptail --title "$title" --menu "$title:" 0 0 "$menu_height" "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ -z "$choice" ]; then
+		return 1 # User aborted
+	else
+		echo "$choice" # Return the selected device path
+		return 0
+	fi
+}
+
+# --- Filesystem-Level Copy (rsync) ext4---
+rsync_smart_copy() {
+	local SOURCE_DEV="$1"
+	local DEST_DEV="$2"
+	local fs_type="$3"
+	echo "Starting Filesystem-Level Copy for $fs_type..."
+
+	# --- Step 0: Define cleanup function ---
+	cleanup_ext4_mounts_rsync() {
+		echo
+		echo "⚠️  Cleanup triggered (signal, exit, or interrupt)."
+		echo "Cleaning up temporary snapshot and mount points..."
+
+		# --- Unmount and remove temporary mounts ---
+		for MNT in "$SOURCE_MOUNT_POINT" "$DEST_MOUNT_POINT"; do
+			if [ -n "$MNT" ] && mountpoint -q "$MNT"; then
+				echo "Unmounting $MNT..."
+				sudo umount "$MNT" &>/dev/null ||
+					sudo umount -l "$MNT" &>/dev/null ||
+					sudo umount -f "$MNT" &>/dev/null
+			fi
+			if [ -n "$MNT" ] && ! mountpoint -q "$MNT"; then
+				sudo rmdir "$MNT" &>/dev/null
+				echo "✅ Unmounted and removed: $MNT"
+			else
+				[ -n "$MNT" ] && echo "⚠️  Still mounted after force attempts: $MNT"
+			fi
+		done
+
+		echo "✨ Cleanup complete — all temporary resources released."
+
+	}
+
+	# --- Register trap handlers ---
+	trap cleanup_ext4_mounts_rsync EXIT INT TERM HUP SIGINT SIGTERM
+	# ----------------------------------------
+
+	SOURCE_MOUNT_POINT=$(mktemp -d)
+	if ! sudo mount "$SOURCE_DEV" "$SOURCE_MOUNT_POINT"; then
+		whiptail --title "FATAL: Mount Failed" --msgbox "Failed to mount the source partition to check its size." 0 0 3>&1 1>&2 2>&3
+		sudo rmdir "$SOURCE_MOUNT_POINT" 2>/dev/null &&
+			echo "✅ Deleted Directory '$SOURCE_MOUNT_POINT'." ||
+			echo "⚠️  Directory deletion may have failed or already gone."
+		return
+	fi
+
+	# --- Step 1: Verify source size fits into destination ---
+	local source_used_bytes
+	local dest_total_bytes
+	source_used_bytes=$(df -B1 --output=used "$SOURCE_MOUNT_POINT" | tail -n 1 | tr -d ' ')
+	dest_total_bytes=$(lsblk -b -n -o SIZE "$DEST_DEV")
+
+	if [[ "$dest_total_bytes" -lt "$source_used_bytes" ]]; then
+		whiptail --title "FATAL: Insufficient Space" --msgbox "The destination partition is too small for the data on the source partition.\n\nData size:  $source_used_bytes bytes\nDest. size: $dest_total_bytes bytes" 0 0 3>&1 1>&2 2>&3
+		sudo umount "$SOURCE_MOUNT_POINT"
+		sudo rmdir "$SOURCE_MOUNT_POINT"
+		return
+	fi
+
+	# --- Step 2: Confirm and Format Destination ---
+	if ! whiptail --title "WARNING: DATA DESTRUCTION" --yesno "This will format the destination [$DEST_DEV] as $fs_type and copy all files to it.\n\nAre you absolutely sure you want to proceed?" 0 0 3>&1 1>&2 2>&3; then
+		echo "User aborted."
+		sudo umount "$SOURCE_MOUNT_POINT"
+		sudo rmdir "$SOURCE_MOUNT_POINT"
+		return
+	fi
+
+	echo "Formatting destination as $fs_type..."
+	if [ "$fs_type" == "ext4" ]; then
+		sudo wipefs -a --force "$DEST_DEV"
+		sudo mkfs.ext4 -F "$DEST_DEV"
+	elif [ "$fs_type" == "vfat" ]; then
+		sudo wipefs -a --force "$DEST_DEV"
+		sudo mkfs.vfat -F 32 "$DEST_DEV"
+	fi
+
+	# Inform the OS of partition table changes and wait for udev to settle
+	sudo partprobe
+	sudo sync
+	sleep 2 # Add a short delay to ensure the system recognizes the new filesystem
+
+	# --- Step 3: Prepare mounts ---
+	DEST_MOUNT_POINT=$(mktemp -d)
+	sudo mount "$DEST_DEV" "$DEST_MOUNT_POINT"
+
+	# Set permissive permissions on the destination mount point before copying.
+	echo "Setting permissions on destination mount point..."
+	sudo chmod 777 "$DEST_MOUNT_POINT"
+
+	# --- Step 4: Copy source EXT4 to destination ---
+	CMD_NICENESS_ARRAY=(ionice -c 2 -n 7 nice -n 10)
+	echo -e "\e[1;48;5;33m" "Starting rsync with ionice/nice for low system impact... \n""\e[0m"
+	echo -e "\e[1;48;5;33m" "Executing: ${CMD_NICENESS_ARRAY[*]} sudo rsync -aAXH --info=progress2 $SOURCE_MOUNT_POINT/ $DEST_MOUNT_POINT/" "\e[0m"
+
+	echo "Copying files with rsync... (This may take a while)"
+	if "${CMD_NICENESS_ARRAY[@]}" sudo rsync -aAXH --info=progress2 "$SOURCE_MOUNT_POINT/" "$DEST_MOUNT_POINT/"; then
+		sync && sudo sync
+
+		# --- Step 5: Post-Copy Operations ---
+		echo "Performing filesystem check on destination..."
+		sudo e2fsck -f "$DEST_DEV"
+		sync && sudo sync
+		echo "Resizing filesystem on destination to fill partition..."
+		sudo resize2fs "$DEST_DEV"
+		sync && sudo sync
+		echo "Post-copy operations completed."
+
+		# --- Manual cleanup (if no interrupt occurred) ---
+		trap - EXIT INT TERM HUP SIGINT SIGTERM # disable trap. This prevents the trap from firing a second time on normal exit
+		# trigger manual cleanup function
+		cleanup_ext4_mounts_rsync
+		# unset the cleanup function to avoid accidental reuse
+		unset -f cleanup_ext4_mounts_rsync
+
+		whiptail --title "Success" --msgbox "File copy operation completed successfully." 0 0 3>&1 1>&2 2>&3
+	else
+		whiptail --title "ERROR" --msgbox "Rsync operation failed. Check the console for errors." 0 0 3>&1 1>&2 2>&3
+	fi
+
+}
+
+# ============================================================
+# --- BTRFS Flattening Clone Function ---
+# Performs a filesystem-level clone of a BTRFS source device to a destination device.
+# This function:
+#   1. Validates that the destination is (or will be) formatted as BTRFS.
+#   2. Checks available space on the destination.
+#   3. Formats the destination as BTRFS (if needed).
+#   4. Creates a temporary writable snapshot of the source.
+#   5. Copies the snapshot contents to the destination using rsync (flattening).
+#   6. Cleans up temporary resources on exit, interruption, or failure.
+# ============================================================
+btrfs_rsync_clone() {
+	local SOURCE_DEV="$1"
+	local DEST_DEV="$2"
+
+	echo "Starting BTRFS Filesystem-Level Copy..."
+
+	# --- Step 0: Define cleanup function ---
+	cleanup_btrfs_subvol_rsync() {
+		echo
+		echo "⚠️  Cleanup triggered (signal, exit, or interrupt)."
+		echo "Cleaning up temporary snapshot and mount points..."
+
+		# --- Delete snapshot safely ---
+		if [ -n "$SOURCE_MOUNT_POINT" ] && [ -d "$SOURCE_MOUNT_POINT/$SNAPSHOT_NAME" ]; then
+			sudo btrfs subvolume delete "$SOURCE_MOUNT_POINT/$SNAPSHOT_NAME" &>/dev/null &&
+				echo "✅ Deleted snapshot '$SNAPSHOT_NAME'." ||
+				echo "⚠️  Snapshot deletion may have failed or already gone."
+		fi
+
+		# --- Unmount and remove temporary mounts ---
+		for MNT in "$SOURCE_MOUNT_POINT" "$DEST_MOUNT_POINT"; do
+			if [ -n "$MNT" ] && mountpoint -q "$MNT"; then
+				echo "Unmounting $MNT..."
+				sudo umount "$MNT" &>/dev/null ||
+					sudo umount -l "$MNT" &>/dev/null ||
+					sudo umount -f "$MNT" &>/dev/null
+			fi
+			if [ -n "$MNT" ] && ! mountpoint -q "$MNT"; then
+				sudo rmdir "$MNT" &>/dev/null
+				echo "✅ Unmounted and removed: $MNT"
+			else
+				[ -n "$MNT" ] && echo "⚠️  Still mounted after force attempts: $MNT"
+			fi
+		done
+
+		echo "✨ Cleanup complete — all temporary resources released."
+
+	}
+
+	# --- Register trap handlers ---
+	trap cleanup_btrfs_subvol_rsync EXIT INT TERM HUP SIGINT SIGTERM
+	# ----------------------------------------
+
+	# --- Step 1: Will Format destination as BTRFS regardlessly ---
+	local dest_fs_type
+	dest_fs_type=$(lsblk -n -o FSTYPE "$DEST_DEV" | tr -d '[:space:]')
+
+	if ! whiptail --title "Destination Will be formatted to a fresh BTRFS" --yesno \
+		"The destination partition is '$dest_fs_type'. To proceed, it must be formatted as a fresh BTRFS.\n\nDo you want to format $DEST_DEV as BTRFS now?\n\nWARNING: THIS WILL IRREVERSIBLY ERASE ALL DATA ON THE DESTINATION." \
+		0 0 3>&1 1>&2 2>&3; then
+		whiptail --title "Operation Aborted" \
+			--msgbox "The operation requires the destination partition to be formatted as a fresh BTRFS. Aborting as requested." \
+			0 0 3>&1 1>&2 2>&3
+		return
+	fi
+
+	# --- Step 2: Verify source size fits into destination ---
+	SOURCE_MOUNT_POINT=$(mktemp -d)
+	if ! sudo mount "$SOURCE_DEV" "$SOURCE_MOUNT_POINT"; then
+		whiptail --title "FATAL: Mount Failed" \
+			--msgbox "Failed to mount the source partition to check its size." \
+			0 0 3>&1 1>&2 2>&3
+		sudo rmdir "$SOURCE_MOUNT_POINT"
+		return
+	fi
+
+	local source_used_bytes dest_total_bytes
+	source_used_bytes=$(df -B1 --output=used "$SOURCE_MOUNT_POINT" | tail -n 1 | tr -d ' ')
+	dest_total_bytes=$(lsblk -b -n -o SIZE "$DEST_DEV")
+	sudo umount "$SOURCE_MOUNT_POINT"
+
+	if [[ "$dest_total_bytes" -lt "$source_used_bytes" ]]; then
+		whiptail --title "FATAL: Insufficient Space" \
+			--msgbox "The destination partition is too small for the data on the source partition.\n\nData size:  $source_used_bytes bytes\nDest. size: $dest_total_bytes bytes" \
+			0 0 3>&1 1>&2 2>&3
+		sudo rmdir "$SOURCE_MOUNT_POINT"
+		return
+	fi
+
+	# --- Step 3: Confirm destructive operation ---
+	if ! whiptail --title "WARNING: DATA DESTRUCTION" --yesno \
+		"This will format the destination [$DEST_DEV] as BTRFS and replace its contents.\n\nAre you absolutely sure you want to proceed?" \
+		0 0 3>&1 1>&2 2>&3; then
+		echo "User aborted."
+		sudo rmdir "$SOURCE_MOUNT_POINT"
+		return
+	fi
+
+	# --- Step 4: Prepare mounts ---
+	DEST_MOUNT_POINT=$(mktemp -d)
+	sudo mount "$SOURCE_DEV" "$SOURCE_MOUNT_POINT"
+	sudo wipefs -a --force "$DEST_DEV"
+	sudo mkfs.btrfs -f "$DEST_DEV"
+
+	# Inform the OS of partition table changes and wait for udev to settle
+	sudo partprobe
+	sudo sync
+	sleep 2 # Add a short delay to ensure the system recognizes the new filesystem
+	sudo mount "$DEST_DEV" "$DEST_MOUNT_POINT"
+
+	echo "Setting permissions on destination mount point..."
+	sudo chmod 777 "$DEST_MOUNT_POINT"
+
+	# --- Step 5: Create writable snapshot of source ---
+	SNAPSHOT_NAME="clone_snapshot_$(date +%Y-%m-%d_%H-%M-%S)"
+	echo "Creating writable snapshot on source..."
+	if ! sudo btrfs subvolume snapshot "$SOURCE_MOUNT_POINT" "$SOURCE_MOUNT_POINT/$SNAPSHOT_NAME"; then
+		whiptail --title "ERROR" \
+			--msgbox "Failed to create source snapshot. Check console for errors." \
+			0 0 3>&1 1>&2 2>&3
+		return
+	fi
+
+	echo "Making source snapshot writable..."
+	sudo btrfs property set -ts "$SOURCE_MOUNT_POINT/$SNAPSHOT_NAME" ro false
+
+	# --- Step 6: Copy snapshot to destination ---
+	CMD_NICENESS_ARRAY=(ionice -c 2 -n 7 nice -n 10)
+	echo -e "\e[1;48;5;33m" "Starting rsync with ionice/nice for low system impact... \n""\e[0m"
+	echo -e "\e[1;48;5;33m" "Executing: ${CMD_NICENESS_ARRAY[*]} sudo rsync -aAXH --info=progress2 $SOURCE_MOUNT_POINT/$SNAPSHOT_NAME/ $DEST_MOUNT_POINT/" "\e[0m"
+
+	if "${CMD_NICENESS_ARRAY[@]}" sudo rsync -aAXH --info=progress2 "$SOURCE_MOUNT_POINT/$SNAPSHOT_NAME/" "$DEST_MOUNT_POINT/"; then
+		sync && sudo sync
+
+		# --- Manual cleanup (if no interrupt occurred) ---
+		trap - EXIT INT TERM HUP SIGINT SIGTERM # disable trap (we’ll clean manually)
+		# trigger manual cleanup function
+		cleanup_btrfs_subvol_rsync
+		# unset the cleanup function to avoid accidental reuse
+		unset -f cleanup_btrfs_subvol_rsync
+
+		whiptail --title "Success" \
+			--msgbox "BTRFS copy operation completed successfully." \
+			0 0 3>&1 1>&2 2>&3
+	else
+		whiptail --title "ERROR" \
+			--msgbox "Rsync failed. The destination may be in an inconsistent state." \
+			0 0 3>&1 1>&2 2>&3
+	fi
+}
+
+# --- DD Block-Level Clone Function ---
+dd_clone() {
+	local SOURCE_DEV="$1"
+	local DEST_DEV="$2"
+	echo "Starting Block-Level Clone..."
+
+	local SOURCE_SIZE_BYTES
+	local DESTINATION_SIZE_BYTES
+	SOURCE_SIZE_BYTES=$(lsblk -b -n -o SIZE "$SOURCE_DEV")
+	DESTINATION_SIZE_BYTES=$(lsblk -b -n -o SIZE "$DEST_DEV")
+
+	if [[ "$DESTINATION_SIZE_BYTES" -lt "$SOURCE_SIZE_BYTES" ]]; then
+		whiptail --title "FATAL: Invalid Destination" --msgbox "The destination partition is smaller than the source partition.\n\nSource size:      $SOURCE_SIZE_BYTES bytes\nDestination size: $DESTINATION_SIZE_BYTES bytes\n\nBlock-level cloning requires a destination of equal or greater size." 0 0 3>&1 1>&2 2>&3
+		return
+	fi
+
+	if ! whiptail --title "WARNING: DATA DESTRUCTION" --yesno "All data on the destination [$DEST_DEV] will be permanently erased.\n\n(Confirmation 1 of 2)" 0 0 3>&1 1>&2 2>&3; then
+		echo "User aborted."
+		return
+	fi
+	if ! whiptail --title "FINAL WARNING: DATA DESTRUCTION" --yesno "This is your final chance to cancel. The destination [$DEST_DEV] will be overwritten.\n\n(Confirmation 2 of 2)" 0 0 3>&1 1>&2 2>&3; then
+		echo "User aborted."
+		return
+	fi
+
+	trap handle_abort SIGINT
+	echo -e "\nFINAL WARNING: The operation will begin shortly."
+	for i in $(seq 15 -1 1); do
+		printf "Proceeding in %2d seconds... (Press Ctrl+C to abort)\r" "$i"
+		sleep 1
+	done
+	echo -e "\n\nStarting operation..."
+	trap - SIGINT
+
+	echo "RUNNING: sudo dd if=$SOURCE_DEV of=$DEST_DEV bs=4M status=progress"
+	sudo dd if="$SOURCE_DEV" of="$DEST_DEV" bs=4M status=progress
+	sync
+
+	echo "Clone complete. Performing post-clone operations..."
+	local fs_type
+	fs_type=$(lsblk -n -o FSTYPE "$SOURCE_DEV" | tr -d '[:space:]')
+
+	if [ "$fs_type" == "ext4" ]; then
+		echo "EXT4 filesystem detected. Resizing..."
+		sudo resize2fs "$DEST_DEV"
+	elif [ "$fs_type" == "btrfs" ]; then
+		echo "BTRFS filesystem detected. A temporary mount is required to resize."
+		local TEMP_MOUNT_POINT
+		TEMP_MOUNT_POINT=$(mktemp -d)
+		sudo mount "$DEST_DEV" "$TEMP_MOUNT_POINT"
+		sudo btrfs filesystem resize max "$TEMP_MOUNT_POINT"
+		sync
+		sudo umount "$TEMP_MOUNT_POINT"
+		sudo rmdir "$TEMP_MOUNT_POINT"
+	elif [ "$fs_type" == "vfat" ]; then
+		echo "FAT32 (vfat) filesystem detected. Performing filesystem check..."
+		sudo fsck.vfat -a "$DEST_DEV"
+	fi
+	sync
+}
+
+# --- Resize Filesystem Function ---
+resize_filesystem() {
+	echo "Starting Filesystem Resize..."
+
+	local TARGET_PARTITION
+	TARGET_PARTITION=$(select_partition "Resize Filesystem" "ext4|btrfs")
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED"
+		return
+	fi
+	echo "Selected TARGET partition: $TARGET_PARTITION"
+
+	local fs_type
+	fs_type=$(lsblk -n -o FSTYPE "$TARGET_PARTITION" | tr -d '[:space:]')
+
+	if ! whiptail --title "Confirmation" --yesno "This will attempt to resize the filesystem on [$TARGET_PARTITION] ($fs_type).\n\nAre you sure you want to proceed?" 0 0 3>&1 1>&2 2>&3; then
+		echo "User aborted."
+		return
+	fi
+
+	if [ "$fs_type" == "ext4" ]; then
+		echo "EXT4 filesystem detected. Resizing..."
+		if sudo resize2fs "$TARGET_PARTITION"; then
+			whiptail --title "Success" --msgbox "EXT4 filesystem on $TARGET_PARTITION resized successfully." 0 0 3>&1 1>&2 2>&3
+		else
+			whiptail --title "ERROR" --msgbox "Failed to resize EXT4 filesystem on $TARGET_PARTITION. Check console for errors." 0 0 3>&1 1>&2 2>&3
+			return
+		fi
+	elif [ "$fs_type" == "btrfs" ]; then
+		echo "BTRFS filesystem detected. A temporary mount is required to resize."
+		local TEMP_MOUNT_POINT
+		TEMP_MOUNT_POINT=$(mktemp -d)
+		if ! sudo mount "$TARGET_PARTITION" "$TEMP_MOUNT_POINT"; then
+			whiptail --title "ERROR" --msgbox "Failed to mount BTRFS partition $TARGET_PARTITION. Cannot resize." 0 0 3>&1 1>&2 2>&3
+			sudo rmdir "$TEMP_MOUNT_POINT"
+			return
+		fi
+
+		local resize_failed=0
+		if sudo btrfs filesystem resize max "$TEMP_MOUNT_POINT"; then
+			whiptail --title "Success" --msgbox "BTRFS filesystem on $TARGET_PARTITION resized successfully." 0 0 3>&1 1>&2 2>&3
+		else
+			whiptail --title "ERROR" --msgbox "Failed to resize BTRFS filesystem on $TARGET_PARTITION. Check console for errors." 0 0 3>&1 1>&2 2>&3
+			resize_failed=1
+		fi
+		sync
+		sudo umount "$TEMP_MOUNT_POINT"
+		sudo rmdir "$TEMP_MOUNT_POINT"
+		if [ $resize_failed -ne 0 ]; then
+			return
+		fi
+	else
+		whiptail --title "Not Supported" --msgbox "Filesystem type '$fs_type' is not supported for resizing with this script." 0 0 3>&1 1>&2 2>&3
+	fi
+	sync
+}
+
+while true; do
+	# --- Main Execution ---
+	main() {
+		check_dependencies
+		check_root
+		trap handle_abort SIGINT
+
+		local MAIN_MENU_CHOICE
+		MAIN_MENU_CHOICE=$(whiptail --title "Partition Tool" --menu "Select an operation:" 0 0 4 \
+			"Exit" "Exit the script" \
+			"Clone" "Clone or copy a partition" \
+			"Resize" "Resize an existing EXT4 or BTRFS filesystem" \
+			"About" "Information about this script" 3>&1 1>&2 2>&3)
+
+		case "$MAIN_MENU_CHOICE" in
+		"Clone") ;;
+		"Resize")
+			resize_filesystem
+			echo "Resize operation finished."
+			return
+			;;
+		"About")
+			show_about_info
+			return
+			;;
+		"Exit" | "")
+			echo "User exited."
+			exit 0
+			;;
+		*)
+			echo "User aborted."
+			exit 1
+			;;
+		esac
+
+		local SOURCE_DEV
+		SOURCE_DEV=$(select_partition "Select SOURCE Partition" "ext4|btrfs|vfat")
+		if [ $? -ne 0 ]; then
+			echo "USER ABORTED"
+			return
+		fi
+		echo -e "\e[1;48;5;3m" "Selected SOURCE partition: $SOURCE_DEV" "\e[0m"
+
+		local DEST_DEV
+		DEST_DEV=$(select_partition "[DESTINATION] Select Partition" "")
+		if [ $? -ne 0 ]; then
+			echo "USER ABORTED"
+			return
+		fi
+		echo -e "\e[1;48;5;3m" "Selected DESTINATION partition: $DEST_DEV" "\e[0m"
+
+		if [ "$SOURCE_DEV" == "$DEST_DEV" ]; then
+			whiptail --title "FATAL: Invalid Selection" --msgbox "Source and destination cannot be the same partition!" 0 0 3>&1 1>&2 2>&3
+			return
+		fi
+
+		# Ensure destination is unmounted before destructive operations
+		if lsblk -n -o MOUNTPOINT "$DEST_DEV" | grep -q /; then
+			echo "Destination $DEST_DEV is mounted. Unmounting..."
+			if ! sudo umount -R "$DEST_DEV"; then
+				whiptail --title "ERROR: Unmount Failed" --msgbox "Failed to unmount $DEST_DEV. Please unmount it manually." 0 0 3>&1 1>&2 2>&3
+				return
+			fi
+		fi
+
+		local source_fs_type
+		source_fs_type=$(lsblk -n -o FSTYPE "$SOURCE_DEV" | tr -d '[:space:]')
+
+		local CLONE_METHOD
+		if [ "$source_fs_type" == "btrfs" ]; then
+			CLONE_METHOD=$(whiptail --title "BTRFS Clone Method" --menu "The source is BTRFS. Select a cloning method:" 0 0 2 \
+				"dd" "Block-level clone (destination must be same size or larger)" \
+				"rsync-btrfs-snapshot" "Filesystem-level copy (can clone to smaller partitions)" 3>&1 1>&2 2>&3)
+		else # For EXT4 and FAT32
+			CLONE_METHOD=$(whiptail --title "Clone Method" --menu "Select a cloning method:" 0 0 2 \
+				"dd" "Block-level clone (destination must be same size or larger)" \
+				"rsync" "Filesystem-level copy (can clone to smaller partitions)" 3>&1 1>&2 2>&3)
+		fi
+
+		if [ -z "$CLONE_METHOD" ]; then
+			echo "USER ABORTED"
+			return
+		fi
+
+		case "$CLONE_METHOD" in
+		"dd") dd_clone "$SOURCE_DEV" "$DEST_DEV" ;;
+		"rsync-btrfs-snapshot") btrfs_rsync_clone "$SOURCE_DEV" "$DEST_DEV" ;;
+		"rsync") rsync_smart_copy "$SOURCE_DEV" "$DEST_DEV" "$source_fs_type" ;;
+		esac
+
+		echo -e "Operation completed successfully. \n"
+		echo -ne "\e[1;48;5;4m" "press [ ENTER ] to continue ..." "\e[0m"
+		read -r -s -p ""
+	}
+
+	# --- Script Entry Point ---
+	main
+done
+unset NEWT_COLORS

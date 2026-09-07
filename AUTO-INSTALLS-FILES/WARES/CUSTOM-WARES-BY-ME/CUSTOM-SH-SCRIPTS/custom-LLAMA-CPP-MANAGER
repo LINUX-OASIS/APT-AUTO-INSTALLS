@@ -1,0 +1,764 @@
+#!/bin/bash
+
+# ==============================================================================
+# LLAMA.CPP INSTANCE & PROFILE MANAGER
+#
+# Description:
+#   An interactive TUI to manage, create profiles for, and launch llama.cpp.
+#   Supports both CLI and Server (Web) modes with memory locking.
+#
+# Style: LINUX-OASIS
+# ==============================================================================
+
+# 🎨 OASIS THEME (ANSI) 🌸
+O_RESET='\e[0m'
+O_BOLD='\e[1m'
+O_OASIS_BG='\e[1;38;5;231;48;5;53m'  # Bold White on Purple BG
+O_OASIS_HDR='\e[1;38;5;16;48;5;214m' # Bold Black on Gold BG
+O_OASIS_INF='\e[1;38;5;16;48;5;45m'  # Bold Black on Cyan BG
+O_OASIS_SUC='\e[1;38;5;231;48;5;34m' # Bold White on Green BG
+O_OASIS_TXT='\e[1;38;5;201m'         # Bold Hot Pink Text
+O_OASIS_LBL='\e[1;33m'               # Bold Yellow Text
+
+# 🛠️ Self-Healing Dependencies 🌸
+for PACKAGE in whiptail curl jq; do
+	if ! command -v "$PACKAGE" &>/dev/null; then
+		echo -e "${O_OASIS_BG} Installing missing dependency: $PACKAGE ✨ ${O_RESET}"
+		sudo apt update && sudo apt install -y "$PACKAGE"
+	fi
+done
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🚀 ROOT ENFORCEMENT 🚀
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Most operations require root privileges for profile persistence in /bin.
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[1;48;5;1m \e[1;38;5;16m Relaunching with sudo for system-wide profile management... \e[0m"
+	sudo "$0" "$@"
+	exit $?
+fi
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ⚙️ CONFIGURATION ⚙️
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+CONFIG_DIR="/bin/CUSTOM_LLAMA_CPP_MANAGER_CONFIG"
+PROFILES_FILE="$CONFIG_DIR/llama_profiles.conf"
+
+# Schema: NAME#MODEL#CTX#NGL#THREADS#MODE#PORT#HOST#MLOCK#RPC_NODES#TENSOR_SPLIT#REASONING
+
+# Initialize configuration directory and profile storage file
+
+if [ ! -d "$CONFIG_DIR" ]; then
+	sudo mkdir -p "$CONFIG_DIR"
+	sudo chmod 777 -R "$CONFIG_DIR"
+fi
+
+if [ ! -f "$PROFILES_FILE" ]; then
+	sudo touch "$PROFILES_FILE"
+	sudo chmod 777 "$PROFILES_FILE"
+fi
+
+# Define the visual theme for all Whiptail dialogs
+export NEWT_COLORS='
+root=white,black
+window=white,blue
+border=cyan,blue
+title=yellow,blue
+button=black,cyan
+actbutton=white,cyan
+'
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🌸 FUN_CHECK_DEPENDENCIES 🔍
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Verifies presence of llama.cpp binaries and the whiptail UI tool.
+FUN_CHECK_DEPENDENCIES() {
+	local MISSING=()
+	for cmd in whiptail llama-cli llama-server ggml-rpc-server curl jq; do
+		if ! command -v "$cmd" &>/dev/null; then
+			MISSING+=("$cmd")
+		fi
+	done
+
+	if [ ${#MISSING[@]} -gt 0 ]; then
+		if [[ " ${MISSING[*]} " == *"whiptail"* ]]; then
+			echo "Error: whiptail is missing. Please install it."
+			exit 1
+		fi
+		whiptail --title "Missing Dependencies" --msgbox "The following commands are missing: ${MISSING[*]}
+
+Please ensure llama.cpp binaries are in your PATH. ✨" 0 0
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ✨ FUN_CREATE_PROFILE 💖
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Interactive walkthrough to save a new LLM configuration.
+FUN_CREATE_PROFILE() {
+	local P_NAME P_MODEL P_CTX P_NGL P_THREADS P_MODE P_PORT P_HOST P_MLOCK P_RPC P_SPLIT P_REASONING
+
+	# Step 1: Identity
+	P_NAME=$(whiptail --title "New Profile" --inputbox "Enter a name for this profile (e.g., Llama3-Server):" 0 0 3>&1 1>&2 2>&3)
+	[ -z "$P_NAME" ] && return
+
+	# Step 2: Model Location
+	P_MODEL=$(whiptail --title "Model Path" --inputbox "Enter the FULL absolute path to the .gguf model file:" 0 0 "/home/$SUDO_USER/models/" 3>&1 1>&2 2>&3)
+	if [ ! -f "$P_MODEL" ]; then
+		whiptail --msgbox "Error: Model file not found at that path. 💔" 0 0
+		return
+	fi
+
+	# Step 3: Execution Logic
+	P_MODE=$(whiptail --title "Instance Mode" --menu "Choose how to launch this instance:" 0 0 2 \
+		"server" "Web Server Mode (API & UI)" \
+		"cli" "Standard Terminal Interactive Mode" 3>&1 1>&2 2>&3)
+	[ -z "$P_MODE" ] && return
+
+	# Step 4: Networking (only if Server mode)
+	# obtain ip addresses of all network intrfaces that have an ip addr to display in whiptail menu
+	NETIFACES_IP_COMMANDS=$(
+		# Get list of network interfaces
+		LIST_AVAILABLE_NET_INTERFACES=$(ip link show | grep -E '^[0-9]+:' | cut -d: -f2 | awk '{print $1}')
+		for VAL in $LIST_AVAILABLE_NET_INTERFACES; do
+			# Get IPv4 address(es)
+			NET_IFACE_IP_ADDR=$(ip addr show "$VAL" | grep -w 'inet' | awk '{print $2}' | cut -d/ -f1)
+
+			if [[ -n $NET_IFACE_IP_ADDR ]]; then
+				echo "$VAL " "$NET_IFACE_IP_ADDR"
+			fi
+		done
+	)
+	NETIFACES_IPS=$(printf "%s\n" "$NETIFACES_IP_COMMANDS")
+
+	P_PORT=""
+	P_HOST=""
+	if [[ "$P_MODE" == "server" ]]; then
+		P_PORT=$(whiptail --title "Server Port" --inputbox "Enter the port number for the web server:" 0 0 "9090" 3>&1 1>&2 2>&3)
+		[ -z "$P_PORT" ] && P_PORT="9090"
+		P_HOST=$(whiptail --scrolltext --title "Server Host" --inputbox "Enter the host IP address (e.g., 0.0.0.0 or 192.168.1.100). Leave empty for localhost:\n\n$NETIFACES_IPS" 0 0 "" 3>&1 1>&2 2>&3)
+	fi
+
+	# Step 5: Performance Parameters
+	P_CTX=$(whiptail --title "Context Size" --inputbox "Enter context size (e.g., 4096, 8192):" 0 0 "4096" 3>&1 1>&2 2>&3)
+	P_NGL=$(whiptail --title "GPU Offload" --inputbox "Enter number of layers to offload to GPU (-ngl):" 0 0 "0" 3>&1 1>&2 2>&3)
+	P_THREADS=$(whiptail --title "Threads" --inputbox "Enter number of CPU threads to use:" 0 0 "$(nproc)" 3>&1 1>&2 2>&3)
+
+	# sanitize inputs
+	P_CTX=${P_CTX//[^0-9]/}         # This removes everything that is NOT a digit
+	[ -z "$P_NGL" ] && P_NGL=0      # Give it a value of 0 if empty
+	P_NGL=${P_NGL//[^0-9]/}         # This removes everything that is NOT a digit
+	P_THREADS=${P_THREADS//[^0-9]/} # This removes everything that is NOT a digit
+
+	# Step 6: Memory Security
+	if (whiptail --title "Memory Locking" --defaultno --yesno "Enable --load-mode mlock? Prevents the model from being swapped to disk and may improve performance.\n⚠ Requires a sufficiently high memlock limit ⚠\nlow memlock limits can cause model loading to fail/crash." 0 0); then
+		P_MLOCK="yes"
+	else
+		P_MLOCK="no"
+	fi
+
+	# Step 7: Reasoning Mode
+	P_REASONING=$(whiptail --title "Reasoning Mode" --menu "Choose reasoning/thinking mode (--reasoning):" 0 0 3 \
+		"off" "Off (disable reasoning/thinking)" \
+		"on" "On (force enable reasoning)" \
+		"auto" "Auto (detect from template - default)" 3>&1 1>&2 2>&3)
+	[ -z "$P_REASONING" ] && P_REASONING="auto"
+
+	# Step 8: Cluster Mode (RPC)
+	P_RPC=""
+	P_SPLIT=""
+	if (whiptail --title "Cluster Mode" --yesno "Enable Cluster Mode (RPC)? (Distribute computation across multiple nodes)" 0 0 --defaultno); then
+		P_RPC_TRUE=true
+		P_RPC=$(whiptail --title "RPC Nodes" --inputbox "Enter worker nodes (comma-separated, e.g., 192.168.1.11:50052,192.168.1.12:50052):" 0 0 3>&1 1>&2 2>&3)
+		P_SPLIT=$(whiptail --title "Tensor Split" --inputbox "Enter tensor split ratio (comma-separated, e.g., 3,3,0.8):" 0 0 3>&1 1>&2 2>&3)
+	fi
+
+	# Store result in the standard NAME#DATA delimited format
+	# exclude P_HOST if we selected RPC mode (rpc will not run if host ip address flag is used)
+	if [[ $P_RPC_TRUE == true ]]; then
+		echo "${P_NAME}#${P_MODEL}#${P_CTX}#${P_NGL}#${P_THREADS}#${P_MODE}#${P_PORT}##${P_MLOCK}#${P_RPC}#${P_SPLIT}#${P_REASONING}" >>"$PROFILES_FILE"
+	else
+		echo "${P_NAME}#${P_MODEL}#${P_CTX}#${P_NGL}#${P_THREADS}#${P_MODE}#${P_PORT}#${P_HOST}#${P_MLOCK}#${P_RPC}#${P_SPLIT}#${P_REASONING}" >>"$PROFILES_FILE"
+	fi
+
+	whiptail --msgbox "Profile '${P_NAME}' saved successfully! 🌸" 0 0
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 📡 FUN_LAUNCH_LISTENER 👂
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Starts ggml-rpc-server to act as a worker node for distributed inference.
+FUN_LAUNCH_LISTENER() {
+	local L_HOST L_PORT L_THREADS
+
+	L_HOST=$(whiptail --title "RPC Listener Host" --inputbox "Enter bind host IP address (use 0.0.0.0 for all interfaces):" 0 0 "0.0.0.0" 3>&1 1>&2 2>&3)
+	[ -z "$L_HOST" ] && return
+
+	L_PORT=$(whiptail --title "RPC Listener Port" --inputbox "Enter bind port number:" 0 0 "50052" 3>&1 1>&2 2>&3)
+	[ -z "$L_PORT" ] && return
+
+	L_THREADS=$(whiptail --title "RPC Listener Threads" --inputbox "Enter number of CPU threads for worker node:" 0 0 "$(nproc)" 3>&1 1>&2 2>&3)
+	[ -z "$L_THREADS" ] && L_THREADS="$(nproc)"
+
+	clear
+	echo -e "${O_OASIS_BG} 📡 Launching ggml-rpc-server Worker Listener Node ✨ ${O_RESET}"
+	echo -e "${O_OASIS_HDR} Host: $L_HOST | Port: $L_PORT | Threads: $L_THREADS ${O_RESET}"
+	echo -e "${O_OASIS_INF} Listening for incoming remote llama.cpp requests... ${O_RESET}"
+	echo -e "${O_OASIS_TXT} Press Ctrl+C to terminate listener node. ${O_RESET}\n"
+
+	trap 'echo -e "\n\n""\e[1;48;5;203m""closed \"ggml-rpc-server\" (listener for distributed remote llama cpp)""\e[0m"\n' SIGINT SIGTERM
+
+	echo -e "${O_OASIS_HDR} RUNNING COMMAND: ${O_RESET}"
+	echo -e "${O_OASIS_INF} ggml-rpc-server -H $L_HOST -p $L_PORT -t $L_THREADS${O_RESET} \n"
+
+	ggml-rpc-server -H "$L_HOST" -p "$L_PORT" -t "$L_THREADS"
+
+	trap - SIGINT SIGTERM
+	echo -e "\n${O_OASIS_SUC} Listener node stopped. Press Enter to return to menu, senpai! 🌸 ${O_RESET}"
+	read -r
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🏃 FUN_LIST_AND_STOP_RUNNING_INSTANCES 🧭
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Lists and can optionally stop a running instance using the "superior pattern" with "readarray"
+
+FUN_LIST_AND_STOP_RUNNING_INSTANCES() {
+
+	local RUNNING_LLAMA_INSTANCES=()
+	# read data into an array
+	readarray -t RUNNING_LLAMA_INSTANCES < <(pgrep -af llama-server\|llama-cli\|ggml-rpc-server)
+
+	# check if instances are found
+	if [[ ${#RUNNING_LLAMA_INSTANCES[@]} -gt 0 ]]; then
+		echo -e "\e[1;48;5;22m" "FOUND  ${#RUNNING_LLAMA_INSTANCES[@]}  llama cpp INSTANCES" "\e[0m"
+	elif [[ ${#RUNNING_LLAMA_INSTANCES[@]} -eq 0 ]]; then
+		echo -e "\e[1;48;5;93m" "NO LLAMA CPP INSTANCES RUNNING" "\e[0m" "\n"
+		read -r -p "press enter to continue"
+		return
+	fi
+
+	# Step 2: Build options and a reliable map in a single loop.
+	local options=()
+	declare -A id_map # Associative array for a rock-solid mapping
+	local i=1
+	for entry in "${RUNNING_LLAMA_INSTANCES[@]}"; do
+		if [[ -n "$entry" ]]; then
+			# The user sees the number 'i' and the description 'entry'.
+			options+=("$i" "$entry")
+			# The script maps the number 'i' back to the full 'entry' value.
+			id_map[$i]="$entry"
+			((i++))
+		fi
+	done
+
+	# Step 3: Display the menu.
+	# The menu height is dynamically calculated from the number of items.
+	local menu_height=${#id_map[@]}
+	local CHOICE_NUM
+	CHOICE_NUM=$(whiptail --title "GRUB Menu Setter" --menu "Choose the default entry:" 0 0 "$menu_height" "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [[ -z $CHOICE_NUM ]]; then
+		return
+	fi
+
+	# Step 4: Handle the result with a safe, direct lookup.
+	if [ $? -eq 0 ]; then
+		# Retrieve the full, original value from the map. No second read, no race condition.
+		local FINAL_CHOICE="${id_map[$CHOICE_NUM]}"
+
+		SELECTED_LLAMA_CPP_INSTANCE_PID=$(echo "$FINAL_CHOICE" | awk -F' ' '{print $1}')
+		SELECTED_LLAMA_CPP_INSTANCE_PARAMS=$(echo "$FINAL_CHOICE" | cut -d' ' -f2-)
+
+		HEADER_STOP_LLAMA_CPP="●────────────────────────────────────────────────────────────●
+$SELECTED_LLAMA_CPP_INSTANCE_PARAMS
+PID: $SELECTED_LLAMA_CPP_INSTANCE_PID
+●────────────────────────────────────────────────────────────●
+
+STOP: ${FINAL_CHOICE}
+"
+
+		if whiptail --backtitle "STOP LLAMA CPP INSTANCE??" --title "STOP LLAMA CPP INSTANCE?" --defaultno --yesno "${HEADER_STOP_LLAMA_CPP}" 0 0 3>&1 1>&2 2>&3; then
+			sudo kill -9 "$SELECTED_LLAMA_CPP_INSTANCE_PID"
+		fi
+
+	else
+		echo "User cancelled."
+		return 1
+	fi
+
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🏃 FUN_LOAD_RUN_PROFILE 🍥
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Lists and executes saved profiles using the "Superior Pattern".
+FUN_LOAD_RUN_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --msgbox "No saved profiles found. Create one first, senpai! 🥺" 0 0
+		return
+	fi
+
+	# --- THE SUPERIOR PATTERN ---
+	# We use an associative array to map menu numbers back to complex data lines.
+	local options=()
+	declare -A profile_map
+	local i=1
+
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		local name=$(echo "$line" | cut -d'#' -f1)
+		local mode=$(echo "$line" | cut -d'#' -f6)
+		[[ -z "$mode" ]] && mode="cli (legacy)"
+
+		options+=("$i" "[$mode] $name")
+		profile_map[$i]="$line"
+		((i++))
+	done <"$PROFILES_FILE"
+
+	local choice
+	choice=$(whiptail --title "Launch Llama Instance" --menu "Select a profile to run, senpai! ✨" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$choice" ]; then
+		# Parse the mapped data line
+		local data="${profile_map[$choice]}"
+		local num_delimiters=$(echo "$data" | tr -cd '#' | wc -c)
+
+		local m_name m_path m_ctx m_ngl m_threads m_mode m_port m_host m_mlock m_rpc m_split m_reasoning
+
+		if [ "$num_delimiters" -eq 11 ]; then
+			# Standard format (12 fields)
+			IFS='#' read -r m_name m_path m_ctx m_ngl m_threads m_mode m_port m_host m_mlock m_rpc m_split m_reasoning <<<"$data"
+		elif [ "$num_delimiters" -eq 10 ]; then
+			# 11 fields format
+			IFS='#' read -r m_name m_path m_ctx m_ngl m_threads m_mode m_port m_host m_mlock m_rpc m_split <<<"$data"
+			m_reasoning="auto"
+		else
+			# Legacy format (10 fields)
+			IFS='#' read -r m_name m_path m_ctx m_ngl m_threads m_mode m_port m_mlock m_rpc m_split <<<"$data"
+			m_host=""
+			m_reasoning="auto"
+		fi
+
+		# Defaults for legacy profiles
+		[[ -z "$m_mode" ]] && m_mode="cli"
+		[[ -z "$m_mlock" ]] && m_mlock="no"
+		[[ -z "$m_reasoning" ]] && m_reasoning="auto"
+
+		# --- ARGUMENT CONSTRUCTION (BASH ARRAY) ---
+		local ARGS=("-m" "$m_path" "-c" "$m_ctx" "-ngl" "$m_ngl" "-t" "$m_threads")
+		# local ARGS=("-m" "$m_path" "-c" "$m_ctx" "-t" "$m_threads")
+
+		# Add additional arguments to ARGS bash array based on conditions
+		# [[ -n "$m_ngl" && "$m_ngl" -gt 0 ]] && ARGS+=("-ngl" "$m_ngl")
+		[[ "$m_mlock" == "yes" ]] && ARGS+=("--load-mode" "mlock")
+		[[ -n "$m_reasoning" ]] && ARGS+=("--reasoning" "$m_reasoning")
+		[[ -n "$m_rpc" ]] && ARGS+=("--rpc" "$m_rpc")
+		[[ -n "$m_split" ]] && ARGS+=("--tensor-split" "$m_split")
+
+		# If $m_rpc is not empty, we do not add -ngl if it was added earlier
+		# EXPLANATION: when LlamaCpp utilizes a separate worker node to offload the LLM's computation.(rpc) you should not use the ngl flag
+		# -ngl is primarily for local GPU optimization
+		# When using a remote worker if we define -ngl N. it will cause the remote worker to not be used at all (the entire workload offloads on local machine)
+		# IT IS CRUCIAL TO NO DEFINE <-ngl N> nor <-host ipaddr> when runnig remote rpc worker nodes
+		if [[ -n "$m_rpc" ]]; then
+			# Check if -ngl is present and remove it
+			for i in "${!ARGS[@]}"; do
+				if [[ "${ARGS[$i]}" == "-ngl" ]]; then
+					# Remove the -ngl argument and its value
+					unset 'ARGS[i]'
+					unset 'ARGS[i+1]'
+					# Re-index the array
+					ARGS=("${ARGS[@]}")
+					break
+				fi
+			done
+		fi
+
+		clear
+		echo -e "${O_OASIS_BG} Launching llama.cpp Profile: $m_name ✨ ${O_RESET}"
+		echo -e "${O_OASIS_HDR} Mode: $m_mode | MLock: $m_mlock | Reasoning: $m_reasoning | Cluster: $([[ -n "$m_rpc" ]] && echo "Enabled" || echo "Disabled") ${O_RESET}"
+		echo -e "${O_OASIS_TXT}----------------------------------------------------${O_RESET}"
+
+		# Fork logic based on requested mode
+		if [[ "$m_mode" == "server" ]]; then
+			local host_display="${m_host:-localhost}"
+			echo -e "${O_OASIS_SUC} Server will be available at http://${host_display}:$m_port 🌐 ${O_RESET}"
+			echo -e "${O_OASIS_INF} Press Ctrl+C to stop the server. ${O_RESET}"
+
+			# Construct full command string for display
+			local host_arg=""
+			[[ -n "$m_host" ]] && host_arg="--host $m_host"
+			local FULL_CMD="llama-server ${ARGS[*]} --port $m_port $host_arg"
+			echo -e "\n${O_OASIS_LBL} RUNNING COMMAND: ${O_RESET}"
+			echo -e "${O_BOLD}$FULL_CMD${O_RESET}\n"
+
+			# Execute llama-server
+			llama-server "${ARGS[@]}" --port "$m_port" ${m_host:+--host "$m_host"}
+		else
+			# Construct full command string for display
+			local FULL_CMD="llama-cli ${ARGS[*]}"
+			echo -e "\n${O_OASIS_LBL} RUNNING COMMAND: ${O_RESET}"
+			echo -e "${O_BOLD}$FULL_CMD${O_RESET}\n"
+
+			# Execute llama-cli
+			llama-cli "${ARGS[@]}"
+		fi
+
+		echo -e "\n${O_OASIS_SUC} Instance terminated. Press Enter to return to menu, senpai! 🌸 ${O_RESET}"
+		read -r
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ✏️ FUN_EDIT_PROFILE 🎀
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Sequential modification of an existing profile configuration.
+FUN_EDIT_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then return; fi
+
+	local options=()
+	declare -A profile_map
+	local i=1
+
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		options+=("$i" "$(echo "$line" | cut -d'#' -f1)")
+		profile_map[$i]="$line"
+		((i++))
+	done <"$PROFILES_FILE"
+
+	local choice
+	choice=$(whiptail --title "Edit Profile" --menu "Select a profile to modify, senpai! ✏️" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$choice" ]; then
+		local old_data="${profile_map[$choice]}"
+		local num_delimiters=$(echo "$old_data" | tr -cd '#' | wc -c)
+
+		# Parse existing fields
+		local o_name o_model o_ctx o_ngl o_threads o_mode o_port o_host o_mlock o_rpc o_split o_reasoning
+		if [ "$num_delimiters" -eq 11 ]; then
+			IFS='#' read -r o_name o_model o_ctx o_ngl o_threads o_mode o_port o_host o_mlock o_rpc o_split o_reasoning <<<"$old_data"
+		elif [ "$num_delimiters" -eq 10 ]; then
+			IFS='#' read -r o_name o_model o_ctx o_ngl o_threads o_mode o_port o_host o_mlock o_rpc o_split <<<"$old_data"
+			o_reasoning="auto"
+		else
+			IFS='#' read -r o_name o_model o_ctx o_ngl o_threads o_mode o_port o_mlock o_rpc o_split <<<"$old_data"
+			o_host=""
+			o_reasoning="auto"
+		fi
+		[[ -z "$o_reasoning" ]] && o_reasoning="auto"
+
+		# Sequential Edit Prompts
+		local n_name n_model n_ctx n_ngl n_threads n_mode n_port n_host n_mlock n_rpc n_split n_reasoning
+
+		n_name=$(whiptail --title "Edit Name" --inputbox "Profile Name:" 0 0 "$o_name" 3>&1 1>&2 2>&3) || return
+		n_model=$(whiptail --title "Edit Model Path" --inputbox "Absolute Path to .gguf:" 0 0 "$o_model" 3>&1 1>&2 2>&3) || return
+		if [ ! -f "$n_model" ]; then
+			whiptail --msgbox "Error: Model file not found. Edit aborted! 💔" 0 0
+			return
+		fi
+
+		n_mode=$(whiptail --title "Edit Instance Mode" --menu "Launch Mode:" 0 0 2 \
+			"server" "Web Server Mode (API & UI)" \
+			"cli" "Standard Terminal Interactive Mode" --default-item "$o_mode" 3>&1 1>&2 2>&3) || return
+
+		n_port=""
+		n_host=""
+		if [[ "$n_mode" == "server" ]]; then
+			n_port=$(whiptail --title "Edit Server Port" --inputbox "Web Server Port:" 0 0 "${o_port:-8080}" 3>&1 1>&2 2>&3) || return
+			n_host=$(whiptail --title "Edit Server Host" --inputbox "Web Server Host IP (empty for localhost):" 0 0 "$o_host" 3>&1 1>&2 2>&3) || return
+		fi
+
+		n_ctx=$(whiptail --title "Edit Context Size" --inputbox "Context Size:" 0 0 "$o_ctx" 3>&1 1>&2 2>&3) || return
+		n_ngl=$(whiptail --title "Edit GPU Offload" --inputbox "GPU Layers (-ngl):" 0 0 "$o_ngl" 3>&1 1>&2 2>&3) || return
+		n_threads=$(whiptail --title "Edit Threads" --inputbox "CPU Threads:" 0 0 "$o_threads" 3>&1 1>&2 2>&3) || return
+
+		if (whiptail --title "Edit Memory Locking" --yesno "Enable --load-mode mlock?" 0 0 $([[ "$o_mlock" == "yes" ]] && echo "--yes-button Yes --no-button No" || echo "--defaultno")); then
+			n_mlock="yes"
+		else
+			n_mlock="no"
+		fi
+
+		n_reasoning=$(whiptail --title "Edit Reasoning Mode" --menu "Choose reasoning mode (--reasoning):" 0 0 3 \
+			"off" "Off (disable reasoning/thinking)" \
+			"on" "On (force enable reasoning)" \
+			"auto" "Auto (detect from template - default)" --default-item "$o_reasoning" 3>&1 1>&2 2>&3) || return
+
+		n_rpc=""
+		n_split=""
+		if (whiptail --title "Edit Cluster Mode" --yesno "Enable Cluster Mode (RPC)?" 0 0 $([[ -n "$o_rpc" ]] && echo "--yes-button Yes --no-button No" || echo "--defaultno")); then
+			n_rpc=$(whiptail --title "Edit RPC Nodes" --inputbox "Worker nodes:" 0 0 "$o_rpc" 3>&1 1>&2 2>&3) || return
+			n_split=$(whiptail --title "Edit Tensor Split" --inputbox "Tensor split ratio:" 0 0 "$o_split" 3>&1 1>&2 2>&3) || return
+		fi
+
+		# Reconstruct and Replace
+		local new_data="${n_name}#${n_model}#${n_ctx}#${n_ngl}#${n_threads}#${n_mode}#${n_port}#${n_host}#${n_mlock}#${n_rpc}#${n_split}#${n_reasoning}"
+
+		# Escaping for safe sed replacement
+		local escaped_old=$(echo "$old_data" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+		sed -i "s|^${escaped_old}$|${new_data}|" "$PROFILES_FILE"
+
+		whiptail --msgbox "Profile updated successfully! ✨" 0 0
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🗑️ FUN_DELETE_PROFILE 💔
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Safely removes a profile entry from the config file.
+FUN_DELETE_PROFILE() {
+
+	# check if the llamacpp saved profiles file exists
+	# -s True if file exists and is not empty.
+	# ! -s True if file doesnt exists and is empty.
+	if [ ! -s "$PROFILES_FILE" ]; then
+		echo -e "\e[1;48;5;100m" "NO SAVED LLAMACPP PROFILES FOUND..." "\e[0m"
+		whiptail --msgbox "NO SAVED LLAMACPP PROFILES FOUND..." 0 0
+		return
+	fi
+
+	# create a dynamic whiptail checklist so we can delete a saved llamacpp profile
+
+	# Step 1: Read data ONCE into an array using a command pipeline.
+	readarray LLAMACPP_PROFILES < <(cat "$PROFILES_FILE")
+
+	# Check if any entries were found
+	if [[ ${#LLAMACPP_PROFILES[@]} -eq 0 ]]; then
+		echo "NO SAVED LLAMACPP PROFILES FOUND"
+		whiptail --msgbox "NO SAVED LLAMACPP PROFILES FOUND..." 0 0
+		return
+	fi
+
+	# Step 2: Build options and a reliable map in a single loop.
+	local options=()
+	declare -A id_map # Associative array for a rock-solid mapping
+	local i=1
+	for entry in "${LLAMACPP_PROFILES[@]}"; do
+		if [[ -n "$entry" ]]; then
+			# The user sees the number 'i' and the description 'entry'.
+			options+=("$i" "$(echo "$entry" | cut -d'#' -f1)" "OFF")
+			# The script maps the number 'i' back to the full 'entry' value.
+			id_map[$i]="$entry"
+			((i++))
+		fi
+	done
+
+	# Step 3: Display the menu.
+	# The menu height is dynamically calculated from the number of items.
+	local menu_height=${#id_map[@]}
+	local choice
+	choice=$(whiptail --separate-output --title "Delete Profile" --checklist "Select a profile to PERMANENTLY remove, senpai! 🗑️" 0 0 "$menu_height" "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$choice" ]; then
+		# loop deletion selection(s)
+		for CHOICE_KEY in $choice; do
+			local to_del="${id_map[$CHOICE_KEY]}"
+			local p_name=$(echo "$to_del" | cut -d'#' -f1)
+			# Use literal string matching for safe line-by-line deletion
+			local escaped_to_del=$(echo "$to_del" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+			# confirm deletion
+			if (whiptail --title "Confirm Deletion" --yesno "Are you sure you want to delete profile '$p_name' permanently? 💔" 0 0); then
+				sed -i "\|^${escaped_to_del}$|d" "$PROFILES_FILE"
+				whiptail --msgbox "Profile deleted! It's gone forever... 💨" 0 0
+			fi
+		done
+	fi
+
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 📥 FUN_DOWNLOAD_MODEL 🍥
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Downloads a single GGUF file from Hugging Face or Ollama Registry.
+FUN_DOWNLOAD_MODEL() {
+	local SOURCE
+	SOURCE=$(whiptail --title "Download Model" --menu "Choose download source:" 0 0 2 \
+		"HF" "Hugging Face (Direct GGUF Download)" \
+		"OLLAMA" "Ollama Registry (Direct GGUF Extraction)" 3>&1 1>&2 2>&3)
+
+	[ -z "$SOURCE" ] && return
+
+	local DEST
+	DEST=$(whiptail --title "Download Destination" --inputbox "Enter target directory for the .gguf file:" 0 0 "/home/$SUDO_USER/models/" 3>&1 1>&2 2>&3)
+	[ -z "$DEST" ] && return
+	mkdir -p "$DEST"
+	sudo chmod -R 777 "$DEST"
+
+	if [[ "$SOURCE" == "HF" ]]; then
+		local REPO FILENAME
+		REPO=$(whiptail --title "Hugging Face Repo" --inputbox "Enter Repo ID (e.g., unsloth/gemma-4-E4B-it-GGUF):" 0 0 3>&1 1>&2 2>&3)
+		[ -z "$REPO" ] && return
+		FILENAME=$(whiptail --title "Hugging Face Filename" --inputbox "Enter GGUF Filename (e.g., gemma-4-E4B-it-Q4_K_M.gguf):" 0 0 3>&1 1>&2 2>&3)
+		[ -z "$FILENAME" ] && return
+
+		clear
+		echo -e "${O_OASIS_BG} Downloading from Hugging Face: $FILENAME ✨ ${O_RESET}"
+		echo -e "${O_OASIS_INF} Destination: $DEST ${O_RESET}\n"
+
+		curl -L --progress-bar -o "${DEST}/${FILENAME}" "https://huggingface.co/${REPO}/resolve/main/${FILENAME}?download=true"
+		sudo chmod 777 "${DEST}/${FILENAME}"
+
+		if [ $? -eq 0 ]; then
+			whiptail --msgbox "Download complete! File saved to: ${DEST}/${FILENAME} 🌸" 0 0
+		else
+			whiptail --msgbox "Error: Download failed! Check your connection or Repo/Filename. 💔" 0 0
+		fi
+
+	elif [[ "$SOURCE" == "OLLAMA" ]]; then
+		local MODEL_NAME TAG
+		local INPUT
+		INPUT=$(whiptail --title "Ollama Model" --inputbox "Enter model name (e.g., qwen2.5:7b or llama3):" 0 0 3>&1 1>&2 2>&3)
+		[ -z "$INPUT" ] && return
+
+		if [[ "$INPUT" == *":"* ]]; then
+			MODEL_NAME=$(echo "$INPUT" | cut -d':' -f1)
+			TAG=$(echo "$INPUT" | cut -d':' -f2)
+		else
+			MODEL_NAME="$INPUT"
+			TAG="latest"
+		fi
+
+		clear
+		echo -e "${O_OASIS_BG} Fetching Ollama Manifest for: $MODEL_NAME:$TAG ✨ ${O_RESET}"
+
+		# Handle library vs user models
+		local MANIFEST_URL
+		if [[ "$MODEL_NAME" == *"/"* ]]; then
+			MANIFEST_URL="https://registry.ollama.ai/v2/${MODEL_NAME}/manifests/${TAG}"
+		else
+			MANIFEST_URL="https://registry.ollama.ai/v2/library/${MODEL_NAME}/manifests/${TAG}"
+		fi
+
+		local DIGEST
+		DIGEST=$(curl -sL "$MANIFEST_URL" | jq -r '.layers[] | select(.mediaType == "application/vnd.ollama.image.model") | .digest')
+
+		if [ -z "$DIGEST" ] || [ "$DIGEST" == "null" ]; then
+			whiptail --msgbox "Error: Could not find model digest in manifest. 💔" 0 0
+			return
+		fi
+
+		echo -e "${O_OASIS_HDR} Digest Found: $DIGEST ${O_RESET}"
+		echo -e "${O_OASIS_BG} Downloading GGUF Blob... 🍥 ${O_RESET}\n"
+
+		local BLOB_URL
+		if [[ "$MODEL_NAME" == *"/"* ]]; then
+			BLOB_URL="https://registry.ollama.ai/v2/${MODEL_NAME}/blobs/${DIGEST}"
+		else
+			BLOB_URL="https://registry.ollama.ai/v2/library/${MODEL_NAME}/blobs/${DIGEST}"
+		fi
+
+		local OUT_FILE="${MODEL_NAME/\//_}-${TAG}.gguf"
+		curl -L --progress-bar -o "${DEST}/${OUT_FILE}" "$BLOB_URL"
+
+		if [ $? -eq 0 ]; then
+			whiptail --msgbox "Download complete! File saved as: ${DEST}/${OUT_FILE} 🌸" 0 0
+		else
+			whiptail --msgbox "Error: Download failed! 💔" 0 0
+		fi
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ❓ FUN_SHOW_HELP 📖
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Displays about page and manual connection info.
+FUN_SHOW_HELP() {
+	local help_text="LLAMA.CPP MANAGER HELP & PERFORMANCE TUNING 🌸
+
+1. Execution Modes:
+   - CLI: Direct interactive chat via 'llama-cli'.
+   - Server: Background 'llama-server' providing a Web UI and API. 🌐
+     Supports --host and --port customization, senpai!
+   - Listener Node: Worker node running 'ggml-rpc-server' to listen for 📡
+     incoming remote distributed computing requests over the network.
+
+2. Model Downloader (Option 8):
+   - Hugging Face: Requires 'Repo ID' (user/repo) and exact 'Filename' 
+     (found in the 'Files and versions' tab). Downloads a single GGUF.
+   - Ollama Registry: Requires model name (e.g., 'llama3' or 'qwen2.5:7b').
+     Extracts the GGUF blob directly without Ollama's metadata clutter. ✨
+
+3. Critical Performance Parameters:
+
+   [--load-mode mlock] (Memory Locking)
+   Prevents the operating system from swapping the model data from RAM 
+   to the Disk/SSD. (Replaces deprecated --mlock). Essential for speed.
+
+   [--reasoning on|off|auto] (Reasoning / Thinking Mode)
+   Controls reasoning/thinking in chat ('on', 'off', or 'auto' to detect template).
+
+   [-ngl] (Number of GPU Layers)
+   Determines layers offloaded to VRAM. Set to 99 to force all to GPU.
+
+   [-t] (Threads)
+   CPU cores utilized. Match your physical core count for best results.
+
+4. Cluster / Worker Setup (RPC):
+   To use another machine as a worker node:
+   - Option 3 on Worker Machine: Launch ggml-rpc-server listener!
+   - Or manually: ggml-rpc-server -p 50052 -H 0.0.0.0 -t 4
+
+   Main Machine Setup:
+   - Enable 'Cluster Mode' in your profile and enter worker IP(s) 
+     (e.g., 192.168.1.11:50052).
+   - Single Worker Offloading: Use '--tensor-split 0,1' (0 parts local, 1 part worker)
+     to offload 100% of compute workload to the remote worker node!
+   - Multi-Worker Splitting: e.g., '3,3,0.8' to proportion workload across 
+     local host and worker nodes based on available VRAM/RAM capacity.
+
+5. Profile Storage:
+   Profiles are stored in: $PROFILES_FILE
+
+Requirements: Binaries (llama-cli, llama-server, ggml-rpc-server) must be in your system PATH. ✨"
+
+	whiptail --title "Help / About" --scrolltext --msgbox "$help_text" 26 78
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ⚙️ MAIN PROGRAM LOOP 🍥
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_CHECK_DEPENDENCIES
+
+# Persistent loop to keep the UI active until the user chooses Exit
+while true; do
+	MAIN_CHOICE=$(
+		whiptail --title "LLAMA.CPP INSTANCE MANAGER" --menu "Main Menu, Senpai! ✨" 0 0 10 \
+			"1" "🚀 [Load/RUN] Llama Profile" \
+			"2" "🦀 [STOP/List] llama cpp instance(s)" \
+			"3" "📡 [Listener Node] Launch ggml-rpc-server" \
+			"4" "✨ Create New Profile" \
+			"5" "✏️  Edit Existing Profile" \
+			"6" "🗑️  Delete Profile" \
+			"7" "📋 List Saved Profiles (Quick View)" \
+			"8" "📥 Download GGUF Model" \
+			"9" "❓ Help / About" \
+			"10" "🚪 Exit" 3>&1 1>&2 2>&3
+	)
+
+	if [ $? -ne 0 ]; then
+		echo -e "${O_OASIS_BG} Exiting, bye-bye! 👋 ${O_RESET}"
+		exit 0
+	fi
+
+	case $MAIN_CHOICE in
+	1) FUN_LOAD_RUN_PROFILE ;;
+	2) FUN_LIST_AND_STOP_RUNNING_INSTANCES ;;
+	3) FUN_LAUNCH_LISTENER ;;
+	4) FUN_CREATE_PROFILE ;;
+	5) FUN_EDIT_PROFILE ;;
+	6) FUN_DELETE_PROFILE ;;
+	7)
+		clear
+		echo -e "${O_OASIS_HDR} NAME | MODEL | CTX | NGL | THREADS | MODE | PORT | HOST | MLOCK | REASONING ${O_RESET}"
+		echo -e "${O_OASIS_TXT}----------------------------------------------------${O_RESET}"
+		column -t -s '#' "$PROFILES_FILE" 2>/dev/null || cat "$PROFILES_FILE"
+		echo -e "${O_OASIS_TXT}----------------------------------------------------${O_RESET}"
+		echo -e "${O_OASIS_LBL} Press Enter to return to menu, senpai! ✨ ${O_RESET}"
+		read -r
+		;;
+	8) FUN_DOWNLOAD_MODEL ;;
+	9) FUN_SHOW_HELP ;;
+	10) exit 0 ;;
+	esac
+done

@@ -1,0 +1,119 @@
+# WEBSITE LINKS
+
+# index of links to movies, shows, anime, games, and other digital
+https://fmhy.net/
+
+# index of links to movies, shows, anime, games, and other digital media resources
+https://ahoylist.net/
+
+# Streaming website for movies, TV shows, and anime
+https://www.cineby.sc/
+
+# Streaming website for movies, TV shows, and anime
+https://solarmoviesz.com/
+
+# Streaming website for movies, TV shows, and anime
+https://brocoflix.xyz/
+
+# Streaming website for movies, TV shows, and anime
+https://sflix.ps/home
+
+# Streaming website for movies, TV shows, and anime
+https://moviepluto.cc/
+
+# stream movies and TV shows for free in HD without ads or signup
+https://streamixapp.pages.dev/
+
+# stream and watch movies & TV shows for free
+https://rabbitstream.qzz.io/
+
+# Streaming website for movies, TV shows, and anime
+https://movies2watch.tv/
+
+# index of links to anime and other digital media resources
+https://theindex.moe/
+
+# index of links to anime and other digital media resources
+https://everythingmoe.com/
+
+# Mobile-focused streaming site for cartoons, dubbed and subbed anime
+https://m.wcostream.tv/
+
+# Anime streaming website
+https://ww3.animeonline.ninja/
+
+# Free, ad-free HD anime library with both subbed and dubbed options
+https://reanime.to/home
+
+# Free, ad-free HD anime library with both subbed and dubbed options
+https://anisnatch.top/home
+
+# Free, ad-free HD anime library with both subbed and dubbed options
+https://aniwaves.ru/
+
+# Design blog showcasing inspiring, high-quality graphic and web design projects
+https://mindsparklemag.com/
+
+# Free, high-quality mockups for designers to present their work
+https://mockups-design.com/
+
+# Blog post featuring a curated list of the best graphic design websites for portfolio inspiration
+https://contentsnare.com/best-graphic-design-websites/
+
+# Online AI tool that converts JPG and PNG images into SVG vector files
+https://vectorizer.ai/
+
+# Social media platform for creative professionals to showcase and discover creative work
+https://www.behance.net/
+
+# Vast collection of text-based faces and ASCII art to copy and paste
+https://texteditor.com/text-faces/
+
+# Online service providing tools and API to convert files between HTML, PDF, and various image formats
+https://pdfcrowd.com/
+
+# Free online tool for converting web pages into PDF documents
+https://www.web2pdfconvert.com/
+
+# Blog focused on ethical hacking, penetration testing, and IT security
+https://miloserdov.org/
+
+# Official Arch Linux wiki with comprehensive documentation
+https://wiki.archlinux.org/
+
+# Download Nintendo Switch ROMs
+https://eggnsemulator.com/
+https://romsim.com/
+https://nsvault.me/
+
+# Download Full native Llinux Games (Precompiled games for linux)
+https://freelinuxpcgames.com/
+
+# Official GitHub repository for Intel Compute Runtime releases (for Intel graphics hardware)
+https://github.com/intel/compute-runtime/releases
+
+# Online technology skills platforms
+# - Video training courses for software developers, IT administrators, and creatives
+https://codeschool.com
+# - Expert-led video courses and interactive exercises for tech/design
+https://teamtreehouse.com
+# - Free, open-source curriculum to learn coding
+https://freecodecamp.com
+# - Interactive platform with free and paid coding classes
+https://codecademy.com
+# - Wide range of courses across tech, business, and creative fields, both free and paid
+https://www.coursera.org/
+
+# MIT COURSES
+https://ocw.mit.edu/search/
+
+# Open-source, web-based documentation browser consolidating references for programming languages, libraries, and tools
+https://devdocs.io
+https://devdocs.io/bash/
+https://devdocs.io/go/
+
+# Git hosting platform focused on free and open-source software, similar to GitHub without commercial ownership
+https://codeberg.org/
+
+# slitaz iso download links, Recommend slitaz-current-core-64.iso
+https://mirror1.slitaz.org/iso/

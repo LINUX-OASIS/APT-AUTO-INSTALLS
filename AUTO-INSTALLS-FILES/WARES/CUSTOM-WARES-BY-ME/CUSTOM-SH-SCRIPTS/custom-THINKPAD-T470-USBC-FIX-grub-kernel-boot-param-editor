@@ -1,0 +1,134 @@
+#!/bin/bash
+
+# grub-param-editor.sh - A script to edit GRUB boot parameters using whiptail.
+
+# Function to check if a command exists
+command_exists() {
+	command -v "$1" >/dev/null 2>&1
+}
+
+# Function to update the GRUB config file
+update_grub_config() {
+	local grub_variable="$1"
+	local new_params="$2"
+
+	# Create a backup
+	BACKUP_FILE="${GRUB_CONFIG}.bak.$(date +%F-%T)"
+	if (whiptail --title "Confirm Changes" --yesno "This will update your GRUB configuration and run 'update-grub'.\n\nA backup will be created at:\n$BACKUP_FILE\n\nNew value for ${grub_variable}:\n\"$new_params\"\n\nProceed?" 15 78); then
+
+		cp "$GRUB_CONFIG" "$BACKUP_FILE"
+
+		# Use sed to replace the line.
+		# This sed command is a bit complex to handle cases where the line might not exist.
+		if grep -q "^${grub_variable}=" "$GRUB_CONFIG"; then
+			sed -i "s|^${grub_variable}=.*|${grub_variable}=\"$new_params\"|" "$GRUB_CONFIG"
+		else
+			# If the line doesn't exist, append it.
+			echo "${grub_variable}=\"$new_params\"" >>"$GRUB_CONFIG"
+		fi
+
+		# Run update-grub and show progress
+		whiptail --title "Updating GRUB" --infobox "Running 'update-grub'. Please wait..." 0 0
+
+		# Capture output to show to the user
+		GRUB_OUTPUT=$(update-grub 2>&1)
+
+		whiptail --title "GRUB Update Complete" --msgbox "update-grub finished.\n\nOutput:\n$GRUB_OUTPUT\n\nA reboot is required for changes to take effect." 0 0
+	else
+		whiptail --title "Cancelled" --msgbox "Operation cancelled. No changes were made." 0 0
+	fi
+}
+
+main() {
+	# 1. Check for dependencies and permissions
+	if ! command_exists whiptail; then
+		echo "Error: whiptail is not installed. Please install it to use this script."
+		exit 1
+	fi
+
+	if [[ $EUID -ne 0 ]]; then
+		echo "This script must be run as root. Re-running with sudo..."
+		sudo "$0" "$@"
+		exit $?
+	fi
+
+	# 2. Define constants
+	GRUB_CONFIG="/etc/default/grub"
+	BLACKLIST_PARAMS="module_blacklist=ucsi_acpi acpi_mask_gpe=0x16"
+
+	# 3. Main loop
+	while true; do
+		GRUB_VAR_CHOICE=$(whiptail --title "GRUB Variable Selection" --menu "Which GRUB command line do you want to edit?" 0 0 2 \
+			"GRUB_CMDLINE_LINUX_DEFAULT" "Typically for non-recovery boot entries (e.g., 'quiet splash')" \
+			"GRUB_CMDLINE_LINUX" "Applies to all boot entries (recovery mode included)" 3>&1 1>&2 2>&3)
+
+		exit_status=$?
+		if [ $exit_status -ne 0 ]; then
+			whiptail --title "Exit" --msgbox "No variable selected. Exiting." 0 0
+			break
+		fi
+
+		# Read the current value
+		CURRENT_PARAMS=$(grep -e "^${GRUB_VAR_CHOICE}=" "$GRUB_CONFIG" | sed -e "s/${GRUB_VAR_CHOICE}=//" -e 's/"//g')
+
+		CHOICE=$(whiptail --title "GRUB Boot Parameter Editor" --menu "Editing: ${GRUB_VAR_CHOICE}\nSelect an option:" 0 0 4 \
+			"1" "View/Edit current parameters" \
+			"2" "Add ucsi_acpi BLACKLIST / acpi_mask_gpe=0x16" \
+			"3" "Remove ucsi_acpi BLACKLIST / acpi_mask_gpe=0x16" \
+			"4" "Back to variable selection" 3>&1 1>&2 2>&3)
+
+		exit_status=$?
+		if [ $exit_status -ne 0 ]; then
+			continue # Go back to the variable selection
+		fi
+
+		case $CHOICE in
+		1)
+			# View/Edit current parameters
+			NEW_PARAMS=$(whiptail --title "Edit Kernel Parameters" --inputbox "Modify the parameters for ${GRUB_VAR_CHOICE}. Separate each with a space." 10 78 "$CURRENT_PARAMS" 3>&1 1>&2 2>&3)
+			if [ $? -eq 0 ]; then
+				update_grub_config "$GRUB_VAR_CHOICE" "$NEW_PARAMS"
+			fi
+			;;
+		2)
+			# Add the specific blacklist parameters
+			if [[ "$CURRENT_PARAMS" == *"$BLACKLIST_PARAMS"* ]]; then
+				whiptail --title "Already Exists" --msgbox "The UCSI/ACPI blacklist parameters already seem to be present." 0 0
+			else
+				# Append with a leading space if parameters already exist
+				if [ -z "$CURRENT_PARAMS" ]; then
+					NEW_PARAMS="$BLACKLIST_PARAMS"
+				else
+					NEW_PARAMS="$CURRENT_PARAMS $BLACKLIST_PARAMS"
+				fi
+
+				if (whiptail --title "Confirm Addition" --yesno "This will add the following parameters to ${GRUB_VAR_CHOICE}:\n\n$BLACKLIST_PARAMS\n\nIs this correct?" 12 78); then
+					update_grub_config "$GRUB_VAR_CHOICE" "$NEW_PARAMS"
+				fi
+			fi
+			;;
+		3)
+			# Remove the specific blacklist parameters
+			if [[ "$CURRENT_PARAMS" == *"$BLACKLIST_PARAMS"* ]]; then
+				# Using bash string replacement
+				NEW_PARAMS="${CURRENT_PARAMS//$BLACKLIST_PARAMS/}"
+				# Also remove potential double spaces
+				NEW_PARAMS=$(echo "$NEW_PARAMS" | tr -s ' ' | xargs)
+
+				if (whiptail --title "Confirm Removal" --yesno "This will remove the UCSI/ACPI blacklist parameters from ${GRUB_VAR_CHOICE}.\n\nNew parameters will be:\n\"$NEW_PARAMS\"\n\nIs this correct?" 12 78); then
+					update_grub_config "$GRUB_VAR_CHOICE" "$NEW_PARAMS"
+				fi
+			else
+				whiptail --title "Not Found" --msgbox "The UCSI/ACPI blacklist parameters were not found." 0 0
+			fi
+			;;
+		4)
+			# Go back to variable selection
+			continue
+			;;
+		esac
+	done
+}
+
+# Run the main function
+main

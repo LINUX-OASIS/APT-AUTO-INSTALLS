@@ -1,0 +1,91 @@
+#!/bin/bash
+
+# Function to display an about/help page
+show_about_page() {
+	whiptail --msgbox "dconf Manager Script\n\nThis script allows you to easily export and import your dconf settings using a whiptail Text-based User Interface (TUI).\n\nExport: Saves your current dconf settings to a specified text file.\nImport: Loads dconf settings from a chosen text file, overwriting current settings.\nVersion: 1.0" 0 0 --title "About dconf Manager"
+}
+
+# Function to display a message box
+show_message() {
+	whiptail --msgbox "$1" 0 0
+}
+
+# Function to export dconf settings
+export_dconf() {
+	local default_filename="dconf-settings-$(date +%Y%m%d%H%M%S).txt"
+	local filename=$(whiptail --inputbox "Enter filename to save dconf settings:" 0 0 "$default_filename" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ]; then # User clicked OK
+		if dconf dump / >"$filename"; then
+			show_message "dconf settings successfully exported to $filename"
+		else
+			show_message "Error: Failed to export dconf settings to $filename"
+		fi
+	else
+		show_message "Export cancelled."
+	fi
+}
+
+# Function to import dconf settings
+import_dconf() {
+	local raw_files=()
+	mapfile -t raw_files < <(find . -maxdepth 1 -type f -name "*.txt" -printf "%f\n" | sort)
+
+	if [ ${#raw_files[@]} -eq 0 ]; then
+		show_message "No .txt files found in the current directory to import."
+		return
+	fi
+
+	local menu_items=()
+	for f in "${raw_files[@]}"; do
+		menu_items+=("$f" "")
+	done
+
+	local selected_file=$(whiptail --menu "Choose a dconf settings file to import:" 0 0 12 "${menu_items[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ]; then # User clicked OK
+		if whiptail --yesno "WARNING: Importing dconf settings will overwrite your current settings. Are you sure you want to proceed?" 0 0; then
+			if dconf load / <"$selected_file"; then
+				show_message "dconf settings successfully imported from $selected_file"
+			else
+				show_message "Error: Failed to import dconf settings from $selected_file"
+			fi
+		else
+			show_message "Import cancelled by user."
+		fi
+	else
+		show_message "Import cancelled."
+	fi
+}
+
+# Main menu loop
+while true; do
+	CHOICE=$(whiptail --title "dconf Manager" --menu "Choose an option:" 0 0 10 \
+		"1" "Export dconf settings" \
+		"2" "Import dconf settings" \
+		"3" "About/Help" \
+		"4" "Exit" 3>&1 1>&2 2>&3)
+
+	case $CHOICE in
+	1)
+		export_dconf
+		;;
+	2)
+		import_dconf
+		;;
+	3)
+		show_about_page
+		;;
+	4)
+		show_message "Exiting dconf Manager."
+		break
+		;;
+	*)
+		# This happens if the user presses Esc or cancels the menu
+		show_message "Exiting dconf Manager."
+		break
+		;;
+	esac
+done
+
+exit 0

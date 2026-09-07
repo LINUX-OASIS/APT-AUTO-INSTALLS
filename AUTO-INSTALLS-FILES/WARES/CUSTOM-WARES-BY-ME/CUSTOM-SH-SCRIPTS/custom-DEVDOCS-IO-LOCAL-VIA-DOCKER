@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+
+# ==============================================================================
+# SCRIPT: devdocs-manager.sh (Refactored from DEVDOCS-IO-LOCAL-VIA-DOCKER.bash)
+# DESCRIPTION: Defensive, Whiptail-driven manager for offline DevDocs via Docker.
+#              Supports custom Docker data-root redirection to save OS disk space.
+# ==============================================================================
+
+set -euo pipefail
+
+# --- Configuration ---
+CONTAINER_NAME="devdocs"
+IMAGE_NAME="ghcr.io/freecodecamp/devdocs:latest"
+DEFAULT_PORT="9292"
+DAEMON_JSON="/etc/docker/daemon.json"
+
+# --- UI Helpers ---
+TITLE="DevDocs Offline Manager"
+
+msg_box() {
+	whiptail --scrolltext --title "$TITLE" --msgbox "$1" 10 60
+}
+
+error_box() {
+	whiptail --title "ERROR" --msgbox "$1" 10 60
+}
+
+# --- Validation Functions ---
+check_root() {
+	if [[ $EUID -ne 0 ]]; then
+		if command -v whiptail >/dev/null 2>&1; then
+			if whiptail --title "Sudo Required" --yesno "This script requires root permissions to manage Docker and system services.\n\nWould you like to elevate to sudo?" 10 60; then
+				exec sudo "$0" "$@"
+			else
+				echo "Error: Script cannot continue without root permissions."
+				exit 1
+			fi
+		else
+			echo "Sudo required. Re-executing with sudo..."
+			exec sudo "$0" "$@"
+		fi
+	fi
+}
+
+check_dependencies() {
+	# 1. Ensure whiptail is available first since we use it for UI
+	if ! command -v whiptail >/dev/null 2>&1; then
+		echo "Required dependency 'whiptail' is missing. Attempting to install..."
+		apt-get update && apt-get install -y whiptail || {
+			echo "Failed to install whiptail. Please install it manually."
+			exit 1
+		}
+	fi
+
+	# 2. Map other command names to their required apt packages
+	declare -A deps=(
+		["docker"]="docker.io"
+		["rsync"]="rsync"
+	)
+
+	local needs_update=true
+
+	for cmd in "${!deps[@]}"; do
+		if ! command -v "$cmd" >/dev/null 2>&1; then
+			local pkg=${deps[$cmd]}
+
+			if [[ "$needs_update" == "true" ]]; then
+				msg_box "Dependency '$cmd' is missing. Updating package list..."
+				apt-get update
+				needs_update=false
+			fi
+
+			msg_box "Installing $pkg..."
+			apt-get install -y "$pkg" || {
+				error_box "Failed to install '$pkg'. Please install it manually and re-run the script."
+				exit 1
+			}
+
+			# Post-install setup for Docker
+			if [[ "$cmd" == "docker" ]]; then
+				systemctl enable --now docker
+				# Add the user who invoked sudo to the docker group
+				local original_user
+				original_user=$(logname 2>/dev/null || echo "${SUDO_USER:-}")
+				if [[ -n "$original_user" ]]; then
+					usermod -aG docker "$original_user"
+					msg_box "Docker installed and user '$original_user' added to 'docker' group.\n\nNOTE: You MUST log out and back in for group changes to take effect."
+				fi
+			fi
+		fi
+	done
+}
+
+# --- Core Logic Functions ---
+
+configure_docker_root() {
+	local current_docker_root
+	current_docker_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
+
+	local target_dir
+	target_dir=$(whiptail --title "Persistent Storage Path" --inputbox \
+		"Enter the absolute path for ALL Docker & Containerd data.\n(Images, Layers, and Volumes will live here)\nCurrent: $current_docker_root" \
+		12 70 "/mnt/INT-WORKER-T470/DOCKER_IMAGES/DATA_ROOT" 3>&1 1>&2 2>&3) || return
+
+	if [[ -z "$target_dir" ]]; then
+		error_box "Target directory cannot be empty."
+		return 1
+	fi
+
+	# Create directory if it doesn't exist
+	if [[ ! -d "$target_dir" ]]; then
+		if whiptail --title "Create Directory" --yesno "Directory $target_dir does not exist. Create it?" 10 60; then
+			mkdir -p "$target_dir" || {
+				error_box "Failed to create $target_dir"
+				return 1
+			}
+		else
+			return 1
+		fi
+	fi
+
+	# Migration Warning
+	if whiptail --title "Data Migration" --yesno "Would you like to move existing data from /var/lib/containerd to the new location? This will free up space on your root partition." 10 70; then
+		MIGRATE=true
+	else
+		MIGRATE=false
+	fi
+
+	msg_box "Stopping services to apply changes..."
+	systemctl stop docker.socket || true
+	systemctl stop docker || true
+	systemctl stop containerd || true
+
+	# Prepare directories
+	mkdir -p "$target_dir/docker"
+	mkdir -p "$target_dir/containerd"
+
+	if [[ "$MIGRATE" == "true" ]]; then
+		msg_box "Migrating data... this may take some time depending on your disk speed."
+		# Use rsync to move data. We use -a to preserve permissions.
+		if [[ -d "/var/lib/containerd" ]]; then
+			rsync -a /var/lib/containerd/ "$target_dir/containerd/" || true
+			rm -rf /var/lib/containerd/* || true
+		fi
+		if [[ -d "/var/lib/docker" ]]; then
+			rsync -a /var/lib/docker/ "$target_dir/docker/" || true
+			rm -rf /var/lib/docker/* || true
+		fi
+	fi
+
+	# Update Docker daemon.json
+	echo "{\"data-root\": \"$target_dir/docker\"}" >"$DAEMON_JSON"
+
+	# Update Containerd config
+	mkdir -p /etc/containerd
+	if [[ ! -f /etc/containerd/config.toml ]] || ! grep -q "root =" /etc/containerd/config.toml; then
+		containerd config default >/etc/containerd/config.toml
+	fi
+	# Use sed to replace the root path in containerd config, handling various quote styles
+	sed -i "s|^root = .*|root = \"$target_dir/containerd\"|" /etc/containerd/config.toml
+
+	msg_box "Restarting services..."
+	systemctl daemon-reload
+	systemctl start containerd
+	systemctl start docker
+
+	local new_root
+	new_root=$(docker info -f '{{.DockerRootDir}}')
+	msg_box "Configuration Updated!\n\nDocker Root: $new_root\nContainerd Root: $target_dir/containerd"
+}
+
+deploy_container() {
+	if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+		if whiptail --title "Container Exists" --yesno "Container '$CONTAINER_NAME' already exists. Recreate it?" 10 60; then
+			docker rm -f "$CONTAINER_NAME" >/dev/null
+		else
+			return 0
+		fi
+	fi
+
+	msg_box "Pulling image and starting DevDocs...\nThis may take a minute."
+
+	if docker run --name "$CONTAINER_NAME" \
+		-d \
+		-p "${DEFAULT_PORT}:9292" \
+		--restart unless-stopped \
+		"$IMAGE_NAME"; then
+		msg_box "DevDocs is now running!\nURL: http://localhost:${DEFAULT_PORT}"
+
+		whiptail --scrolltext --title "NOTE: FINISH DevDocs Offline Setup - HOW TO 100%" --msgbox "
+How to make it 100% Offline:
+  Before you go off-grid, follow these steps while still connected ! :
+
+1. Open http://localhost:9292 in your browser.
+2. Click the \"Offline\" button (or the gear icon ⚙️) in the top-left corner.
+3. Find the documentations you need (e.g., Go, Bash, C++).
+4. Click \"Install\" next to each one. [or click install all]
+5. Wait for the progress bar to finish." 0 0
+
+	else
+		error_box "Failed to start container."
+	fi
+}
+
+show_status() {
+	local status
+	status=$(docker ps -a --filter name="$CONTAINER_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}")
+	local root_dir
+	root_dir=$(docker info -f '{{.DockerRootDir}}')
+
+	msg_box "--- SYSTEM STATUS ---\nDocker Root: $root_dir\n\n--- CONTAINER STATUS ---\n$status"
+}
+
+manage_service() {
+	local action
+	action=$(whiptail --title "Manage Service" --menu "Choose an action:" 15 60 4 \
+		"START" "Start the DevDocs container" \
+		"STOP" "Stop the DevDocs container" \
+		"RESTART" "Restart the DevDocs container" \
+		"REMOVE" "Remove the DevDocs container" 3>&1 1>&2 2>&3) || return
+
+	case "$action" in
+	START) docker start "$CONTAINER_NAME" && msg_box "Started." ;;
+	STOP) docker stop "$CONTAINER_NAME" && msg_box "Stopped." ;;
+	RESTART) docker restart "$CONTAINER_NAME" && msg_box "Restarted." ;;
+	REMOVE)
+		if whiptail --title "Confirm" --yesno "Are you sure you want to remove the container?" 10 60; then
+			docker rm -f "$CONTAINER_NAME" && msg_box "Removed."
+		fi
+		;;
+	esac
+}
+
+show_help() {
+	whiptail --scrolltext --title "Help / About - $TITLE" --msgbox "
+DevDocs Offline Manager v2.0
+---------------------------
+This tool sets up a local instance of DevDocs.io using Docker.
+
+KEY FEATURES:
+* Storage Redirection: Forces Docker and Containerd to store
+  all images and layers on a custom partition, keeping your
+  root (/) drive empty.
+* Defensive Management: Handles service restarts and data
+  migration automatically.
+
+100% OFFLINE STEPS:
+1. Deploy the container via Option 2.
+2. Open http://localhost:9292.
+3. Use the 'Offline' menu in the browser app to download
+   documentation sets (Go, Python, etc.) while online.
+4. Once downloaded, the docs are stored locally in your
+   custom storage path and work without internet.
+" 0 0
+}
+
+# --- Main Menu ---
+
+main() {
+	check_root
+	check_dependencies
+
+	while true; do
+		local choice
+		choice=$(whiptail --title "$TITLE" --menu "Select an option:" 0 0 9 \
+			"1. Configure Docker Root" "Redirect image storage to a custom path" \
+			"2. Deploy DevDocs" "Install and run the DevDocs container" \
+			"3. Check Status" "View container and storage health" \
+			"4. Manage Service" "Start/Stop/Remove container" \
+			"5. Help / About" "Learn how this script works" \
+			"6. Exit" "Close the manager" 3>&1 1>&2 2>&3) || break
+
+		case "$choice" in
+		"1. Configure Docker Root") configure_docker_root ;;
+		"2. Deploy DevDocs") deploy_container ;;
+		"3. Check Status") show_status ;;
+		"4. Manage Service") manage_service ;;
+		"5. Help / About") show_help ;;
+		"6. Exit") break ;;
+		esac
+	done
+}
+
+main "$@"

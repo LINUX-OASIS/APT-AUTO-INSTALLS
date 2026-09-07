@@ -1,0 +1,332 @@
+#!/bin/bash
+
+# ==============================================================================
+#
+#               SSH CONNECTION MANAGER (TUI)
+#
+#  A professional utility for managing SSH connection profiles and
+#  automating passwordless Ed25519 authentication.
+#
+#  Author: LINUX-OASIS / Gemini CLI
+#
+#  Architecture:
+#    - Superior Pattern: Atomic data acquisition via readarray + associative
+#      array mapping for robust TUI interaction.
+#    - Self-Healing: Automatic dependency resolution (openssh, whiptail).
+#    - Professional UI: High-contrast technical color palette.
+#
+# ==============================================================================
+
+# --- Display professional banner ---
+echo "░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░"
+echo "SSH CONNECTION MANAGER (v1.2) - Technical Suite"
+echo "Made By.............. LINUX-OASIS"
+
+# --- Root Enforcement ---
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[1;48;5;202m" "This script requires root privileges to manage profiles in /bin." "\e[0m"
+	echo "Relaunching with sudo..."
+	sudo env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" "$0" "$@"
+	exit $?
+fi
+
+# --- Configuration & Environment ---
+CONFIG_DIR="/bin/CUSTOM-SSH-MANAGER"
+PROFILES_FILE="$CONFIG_DIR/profiles.conf"
+
+# Ensure configuration environment exists
+sudo mkdir -p "$CONFIG_DIR"
+sudo touch "$PROFILES_FILE"
+sudo chmod 777 "$CONFIG_DIR"
+sudo chmod 666 "$PROFILES_FILE"
+
+# Determine Original User's Home for SSH key management
+REAL_USER=${SUDO_USER:-$(logname)}
+REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+SSH_KEY_PATH="$REAL_HOME/.ssh/id_ed25519"
+
+# Professional High-Contrast Theme (Cisco/Industrial standard)
+export NEWT_COLORS='
+root=white,black
+window=white,black
+border=white,black
+shadow=black,gray
+title=brightcyan,black
+button=black,yellow
+actbutton=white,brightcyan
+checkbox=brightcyan,black
+actcheckbox=black,brightcyan
+entry=black,brightcyan
+label=brightcyan,black
+listbox=white,black
+actlistbox=black,brightcyan
+textbox=white,black
+acttextbox=black,brightcyan
+'
+
+# --- Initialization & Dependency Resolution ---
+# Proactively installs missing dependencies to ensure a "self-healing" script.
+FUN_CHECK_DEPENDENCIES() {
+	local MISSING_DEPS=()
+	local PKG_MAP=(
+		"whiptail:whiptail"
+		"ssh:openssh-client"
+		"ssh-keygen:openssh-client"
+		"ssh-copy-id:openssh-client"
+		"column:bsdmainutils"
+	)
+
+	for item in "${PKG_MAP[@]}"; do
+		local cmd="${item%%:*}"
+		local pkg="${item##*:}"
+		if ! command -v "$cmd" &>/dev/null; then
+			MISSING_DEPS+=("$pkg")
+		fi
+	done
+
+	if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+		echo "Installing missing dependencies: ${MISSING_DEPS[*]}..."
+		sudo apt update && sudo apt install -y "${MISSING_DEPS[@]}"
+	fi
+}
+
+# --- Core Logic Functions ---
+
+# Function: Create a new SSH profile
+FUN_CREATE_PROFILE() {
+	local P_NAME P_USER P_HOST
+
+	P_NAME=$(whiptail --scrolltext --title "New SSH Profile" --inputbox "Enter unique profile name (e.g. WebServer-Prod):" 0 0 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$P_NAME" ]] && return
+
+	# Sanitization
+	P_NAME="${P_NAME// /_}"
+	P_NAME="${P_NAME//#/}"
+
+	P_USER=$(whiptail --scrolltext --title "Remote Configuration" --inputbox "Enter remote username:" 0 0 "$REAL_USER" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$P_USER" ]] && return
+
+	P_HOST=$(whiptail --scrolltext --title "Remote Configuration" --inputbox "Enter target IP address or hostname:" 0 0 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$P_HOST" ]] && return
+
+	# Persistence: NAME#USER#HOST
+	echo "${P_NAME}#${P_USER}#${P_HOST}" >>"$PROFILES_FILE"
+	whiptail --scrolltext --title "Success" --msgbox "Profile '${P_NAME}' saved." 0 0
+}
+
+# Function: Select and connect to a remote host (Superior Pattern)
+FUN_CONNECT_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --scrolltext --title "Information" --msgbox "No profiles found." 0 0
+		return
+	fi
+
+	local raw_profiles=()
+	readarray -t raw_profiles <"$PROFILES_FILE"
+
+	local options=()
+	declare -A id_map
+	local i=1
+
+	for line in "${raw_profiles[@]}"; do
+		[[ -z "$line" ]] && continue
+		local name=$(echo "$line" | cut -d'#' -f1)
+		local user=$(echo "$line" | cut -d'#' -f2)
+		local host=$(echo "$line" | cut -d'#' -f3)
+		options+=("$i" "$name ($user@$host)")
+		id_map[$i]="$line"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "SSH Connection" --menu "Select a profile to connect:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	# Step 6 & 7: Retrieval & Resolution
+	if [[ $? -eq 0 && -n "$choice" ]]; then
+		local data="${id_map[$choice]}"
+		local m_user=$(echo "$data" | cut -d'#' -f2)
+		local m_host=$(echo "$data" | cut -d'#' -f3)
+
+		clear
+		echo "Initiating SSH connection to $m_user@$m_host..."
+		# Execute as original user to use their keys and config
+		sudo -u "$REAL_USER" env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" ssh "$m_user@$m_host"
+
+		echo -e "\e[1;48;5;17m""\nConnection closed. Press Enter to return to menu.""\e[0m"
+		read -r
+	fi
+}
+
+# Function: Setup passwordless SSH (Keygen + Copy-ID)
+FUN_SETUP_PASSWORDLESS() {
+	if [ ! -f "$SSH_KEY_PATH" ]; then
+		if whiptail --scrolltext --title "Key Generation" --yesno "No Ed25519 key found for $REAL_USER. Generate one now?" 0 0; then
+			sudo -u "$REAL_USER" ssh-keygen -t ed25519 -N "" -f "$SSH_KEY_PATH" -C "ssh-manager-key"
+		else
+			return
+		fi
+	fi
+
+	local TARGET_USER TARGET_HOST
+	if [ -s "$PROFILES_FILE" ] && whiptail --scrolltext --title "Target Selection" --yesno "Use a saved profile for target?" 0 0; then
+		local raw_profiles=()
+		readarray -t raw_profiles <"$PROFILES_FILE"
+		local options=()
+		declare -A id_map
+		local i=1
+		for line in "${raw_profiles[@]}"; do
+			[[ -z "$line" ]] && continue
+			local name=$(echo "$line" | cut -d'#' -f1)
+			options+=("$i" "$name")
+			id_map[$i]="$line"
+			((i++))
+		done
+		local choice
+		choice=$(whiptail --scrolltext --title "Select Target Profile" --menu "Choose target:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+		[[ $? -ne 0 ]] && return
+		local data="${id_map[$choice]}"
+		TARGET_USER=$(echo "$data" | cut -d'#' -f2)
+		TARGET_HOST=$(echo "$data" | cut -d'#' -f3)
+	else
+		TARGET_USER=$(whiptail --scrolltext --title "Manual Setup" --inputbox "Enter remote username:" 0 0 3>&1 1>&2 2>&3) || return
+		TARGET_HOST=$(whiptail --scrolltext --title "Manual Setup" --inputbox "Enter remote host IP/Hostname:" 0 0 3>&1 1>&2 2>&3) || return
+	fi
+
+	clear
+	echo "Distributing public key to $TARGET_USER@$TARGET_HOST..."
+	if sudo -u "$REAL_USER" env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" ssh-copy-id -i "${SSH_KEY_PATH}.pub" "$TARGET_USER@$TARGET_HOST"; then
+		whiptail --scrolltext --title "Success" --msgbox "Passwordless authentication enabled for [ $TARGET_USER@$TARGET_HOST ]" 0 0
+	else
+		whiptail --scrolltext --title "Error" --msgbox "Failed to copy SSH key. Ensure remote host is reachable and SSH service is active." 0 0
+	fi
+}
+
+# Function: Sequential Profile Modification
+FUN_EDIT_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then return; fi
+
+	local raw_profiles=()
+	readarray -t raw_profiles <"$PROFILES_FILE"
+	local options=()
+	declare -A id_map
+	local i=1
+	for line in "${raw_profiles[@]}"; do
+		[[ -z "$line" ]] && continue
+		options+=("$i" "$(echo "$line" | cut -d'#' -f1)")
+		id_map[$i]="$line"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "Edit Profile" --menu "Select a profile to modify:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$choice" ]] && return
+
+	local old_data="${id_map[$choice]}"
+	local o_name o_user o_host
+	IFS='#' read -r o_name o_user o_host <<<"$old_data"
+
+	local n_name n_user n_host
+	n_name=$(whiptail --scrolltext --title "Edit Name" --inputbox "Profile Alias:" 0 50 "$o_name" 3>&1 1>&2 2>&3) || return
+	n_user=$(whiptail --scrolltext --title "Edit User" --inputbox "Username:" 0 50 "$o_user" 3>&1 1>&2 2>&3) || return
+	n_host=$(whiptail --scrolltext --title "Edit Host" --inputbox "IP / Hostname:" 0 50 "$o_host" 3>&1 1>&2 2>&3) || return
+
+	local new_data="${n_name}#${n_user}#${n_host}"
+	local escaped_old=$(echo "$old_data" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+	sed -i "s|^${escaped_old}$|${new_data}|" "$PROFILES_FILE"
+
+	whiptail --scrolltext --title "Success" --msgbox "Profile updated." 0 0
+}
+
+# Function: Delete an existing profile
+FUN_DELETE_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then return; fi
+
+	local raw_profiles=()
+	readarray -t raw_profiles <"$PROFILES_FILE"
+	local options=()
+	declare -A id_map
+	local i=1
+	for line in "${raw_profiles[@]}"; do
+		[[ -z "$line" ]] && continue
+		local name=$(echo "$line" | cut -d'#' -f1)
+		options+=("$i" "$name")
+		id_map[$i]="$line"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "Delete Profile" --menu "Select a profile to permanently remove:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [[ $? -eq 0 && -n "$choice" ]]; then
+		local data="${id_map[$choice]}"
+		local name=$(echo "$data" | cut -d'#' -f1)
+		if whiptail --scrolltext --title "Confirm Deletion" --yesno "Delete profile '$name'?" 0 0; then
+			local escaped_data=$(echo "$data" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+			sed -i "\|^${escaped_data}$|d" "$PROFILES_FILE"
+		fi
+	fi
+}
+
+# Function: Display technical help and usage
+FUN_SHOW_HELP() {
+	local help_text
+	read -r -d '' help_text <<'EOF'
+SSH CONNECTION MANAGER - Technical Documentation
+
+1. PROFILE MANAGEMENT:
+   - Create: Defines a new alias with user and host/IP.
+   - Edit: Modify existing profile parameters sequentially.
+   - Delete: Removes entry from profiles.conf via atomic line deletion.
+
+2. PASSWORDLESS AUTHENTICATION:
+   - Keygen: Generates 256-bit Ed25519 key (Curve25519).
+   - Distribution: Uses 'ssh-copy-id' to distribute public identity.
+
+3. ARCHITECTURE:
+   - Pattern: Superior Pattern (readarray + associative mapping).
+   - Config: /bin/CUSTOM-SSH-MANAGER/profiles.conf (Hash-delimited).
+EOF
+	whiptail --scrolltext --title "About / Help" --msgbox "$help_text" 0 0
+}
+
+# --- Main Menu Loop ---
+FUN_CHECK_DEPENDENCIES
+
+while true; do
+	MAIN_CHOICE=$(whiptail --scrolltext --title "SSH PROFILE MANAGER" --menu "Select Action" 0 0 0 \
+		"1" "Connect to Remote Host" \
+		"2" "Create New Profile" \
+		"3" "Edit Profile" \
+		"4" "Delete Profile" \
+		"5" "Setup Passwordless Auth (Keygen/Copy-ID)" \
+		"6" "List Saved Profiles" \
+		"7" "About / Help" \
+		"8" "Exit" 3>&1 1>&2 2>&3)
+
+	[[ $? -ne 0 ]] && break
+
+	case "$MAIN_CHOICE" in
+	1) FUN_CONNECT_PROFILE ;;
+	2) FUN_CREATE_PROFILE ;;
+	3) FUN_EDIT_PROFILE ;;
+	4) FUN_DELETE_PROFILE ;;
+	5) FUN_SETUP_PASSWORDLESS ;;
+	6)
+		if [ -s "$PROFILES_FILE" ]; then
+			clear
+			printf "\n%-20s %-15s %-s\n" "NAME" "USER" "HOST"
+			echo "------------------------------------------------"
+			column -t -s '#' "$PROFILES_FILE"
+			echo "------------------------------------------------"
+			read -p "Press Enter to continue..."
+		else
+			whiptail --scrolltext --msgbox "No profiles saved." 0 0
+		fi
+		;;
+	7) FUN_SHOW_HELP ;;
+	8) break ;;
+	esac
+done
+
+# --- Final Exit ---
+echo -e "\nSession terminated. Goodbye.\n"

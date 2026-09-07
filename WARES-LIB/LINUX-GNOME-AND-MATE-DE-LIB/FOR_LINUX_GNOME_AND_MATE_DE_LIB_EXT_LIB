@@ -1,0 +1,3004 @@
+#!/bin/bash
+
+########################################################################################################################
+#
+#                                    SCRIPT FOR GNOME AND MATE DESKTOP ENVIRONMENTS
+#
+# This script is designed to automate the installation and configuration of a wide range of software, tools, and
+# customizations for Debian-based Linux distributions using either the GNOME or MATE Desktop Environment (DE).
+#
+# It handles:
+#   - Installation of essential dependencies for custom scripts.
+#   - A vast library of applications, including development tools, system utilities, security software, and multimedia apps.
+#   - Complex setups for development environments like Visual Studio Code and Node.js (via nvm).
+#   - Installation and configuration of GNOME Shell Extensions, with version detection to ensure compatibility.
+#   - System-level configurations for virtualization (KVM/QEMU, VirtualBox), networking, and hardware.
+#   - Creation of autostart scripts and systemd services to ensure proper initialization on boot.
+#   - Configuration for new user accounts by populating `/etc/skel`.
+#
+# The script is structured with helper functions and logical blocks to manage the complexity of the tasks.
+#
+########################################################################################################################
+
+#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+#
+#  FUN_WARES_FOR_GNOME_AND_MATE_DE
+#
+#  Main function to install software and configurations for GNOME and MATE desktop environments.
+#  This function orchestrates the entire process, calling helper functions and executing installation
+#  commands for various packages and tools.
+#
+#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+function FUN_WARES_FOR_GNOME_AND_MATE_DE {
+
+	# Ask for the sudo password upfront and keep the session alive.
+	# This starts a background process that periodically runs `sudo -v`
+	# to refresh the sudo timestamp, preventing it from expiring during the build.
+	sudo -v
+	while true; do
+		sudo -n true
+		sleep 60
+		kill -0 "$$" || exit
+	done 2>/dev/null &
+	SUDO_KEEPALIVE_PID=$!
+
+	echo "now installing wares for UBUNTU VANILLA [GNOME Desktop Environment] specifically OR MATE if you are using MATE DE"
+
+	### Decorative separators - no functional impact.
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Initial Dependency Installation for Custom Scripts
+	# This section installs required packages for the various custom utility scripts (`custom-*`) included in this project.
+	#-------------------------------------------------------------------------------------------------------------------
+
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	#
+	#  FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY
+	#
+	#  A helper function to streamline the installation of APT packages. It displays a banner, installs one or more
+	#  packages, and then checks the installation status.
+	#
+	#  This function relies on several global variables from the main script:
+	#    - `BANNER_PKG_NAME_MSG`: The message to display in the installation banner.
+	#    - `PKG_NAME`: The specific package name used for status checking.
+	#    - `FUN_VERBOSE_INSTALLING`: A global function that displays the banner and runs pre-flight checks.
+	#    - `FUN_PACKAGE_INSTALLATION_STATUS_CHECKER`: A global function that verifies the installation of `PKG_NAME`.
+	#
+	#  Parameters:
+	#    $1: A string representing the display name for the banner message (e.g., "efibootmgr").
+	#    $2: A space-separated string of package names to be installed (e.g., "nmap netdiscover").
+	#
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY() {
+		local display_name="$1"
+		local package_names="$2"
+		FUN_VERBOSE_INSTALLING "$display_name" # Display the installation banner.
+		# Loop through each package in the provided list.
+		for pkg in $package_names; do
+			local max_attempts=3
+			local attempt=1
+			local delay=10
+			while [ $attempt -le $max_attempts ]; do
+				# Attempt to install the package.
+				sudo apt install -y "$pkg"
+				# Check if the package is installed successfully.
+				if dpkg -s "$pkg" &>/dev/null; then
+					break # Exit the loop if installation is successful.
+				fi
+				if [ $attempt -lt $max_attempts ]; then
+					echo "Failed to install '$pkg'. Retrying in $delay seconds... (Attempt $((attempt + 1))/$max_attempts)"
+					sleep $delay
+				fi
+				attempt=$((attempt + 1))
+			done
+			FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "$pkg" # Check and report the final status for the individual package.
+		done
+	}
+	# !SECTION: END - Initial Dependency Installation for Custom Scripts
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# DOCUMENTATION: Package Installation Methods
+	#-------------------------------------------------------------------------------------------------------------------
+	#
+	# There are two primary methods used in this script for installing packages:
+	#
+	# 1. Classical Method:
+	#    - Offers granular control over each installation step.
+	#    - Ideal for packages that require pre/post-installation commands or special handling.
+	#    - Example:
+	#        BANNER_PKG_NAME_MSG="Message shown in banner"
+	#        PKG_NAME="actual-package-name"
+	#        FUN_VERBOSE_INSTALLING
+	#        sudo apt install -y efibootmgr
+	#        FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+	#
+	# 2. Modern Helper Function Method (`FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY`):
+	#    - More concise and compact for installing multiple, straightforward packages.
+	#    - Reduces code repetition.
+	#    - Usage: FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "Banner Message" "package1 package2 package3"
+	#    - Example:
+	#        FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "efibootmgr" "efibootmgr"
+	#
+	#-------------------------------------------------------------------------------------------------------------------
+
+	# Install dependencies for various custom scripts. Each line corresponds to a specific script's needs.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "efibootmgr" "efibootmgr"                                                                           # For `custom-EFIBOOTMGR-NVRAM-ENTRY-EDITOR`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "qemu-utils" "qemu-utils"                                                                           # For `custom-NBD-MOUNT-VDI-QCOW`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "nmap && netdiscover" "nmap netdiscover"                                                            # For `custom-NETWORKING-SCAN-NETWORK-EXCLUDE-NETIFACE-IP`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "python3-pip python3-pyftpdlib net-tools" "python3-pip python3-pyftpdlib net-tools"                 # For `custom-NETWORKING-PYTHON-SIMPLE-HTTP-SERVER`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "samba smbclient nbtscan qrencode fim zbar-tools" "samba smbclient nbtscan qrencode fim zbar-tools" # For `custom-NETWORKING-SAMBA-SHARE-FILES`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "nbd-server and nbd-client" "nbd-server nbd-client"                                                 # For `custom-NETWORKING-NBD-MANAGER` -> be able to serve block devices over the network as if they were on local client machine using NBD protocol
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "ethtool etherwake netdiscover wakeonlan" "ethtool etherwake netdiscover wakeonlan"                 # For `custom-NETWORKING-WAKE-ON-LAN`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "parted dosfstools mtools exfatprogs" "parted dosfstools mtools exfatprogs"                         # For `custom-SPARSE-IMG-BIN-FILE-MANAGER-CREATOR-PARTITIONER-EDITOR` and FAT32 support
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "nvme-cli smartmontools" "nvme-cli smartmontools"                                                   # For `custom-STORAGE-DEVICE-HEALTH-CHECK`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "btrfs-progs" "btrfs-progs"                                                                         # For `custom-UUID-OR-LABEL-CHANGER-PARTITIONS`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "mdadm for managing RAID arrays" "mdadm"                                                            # For `custom-UUID-OR-LABEL-CHANGER-PARTITIONS`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "pi" "pi"                                                                                           # For calculating the value of pi to the N decimal point in `custom-KOKORO-WAIFU-STRESS-TESTER-v1`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "stress" "stress"                                                                                   # For calculating the value of pi to the N decimal point in `custom-KOKORO-WAIFU-STRESS-TESTER-v1`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "figlet" "figlet"                                                                                   # For calculating the value of pi to the N decimal point in `custom-KOKORO-WAIFU-STRESS-TESTER-v1`
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "makeself" "makeself"                                                                               # For creating self-extracting archives (executable shell scripts) for easy software distribution
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "debootstrap - For creating Debian-based chroot environments" "debootstrap"                         # For creating Debian-based chroot environments
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "dsniff - For arpspoof" "dsniff"                                                                    # For arpspoof - arpspoof is part of dsniff package
+
+	### Decorative separators.
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+	###"░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░▓▓▓▓▓▓█▄▄▄▄▄█▀╬░░░█▓▓▓▓▓▌░▒▒▒▒▒▒▒▒░▐█▓▓▓▓▓░░▒▒▒▒▒▒▒▒▒░▐██████▌╬░▒▒▒▒▒▒▒▒"
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Core System Utilities and Tools Installation
+	# This section installs a broad range of useful command-line and graphical utilities.
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "debconf-utils" "debconf-utils"       # For managing debconf database (pre-seeding answers).
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "ttyd" "ttyd"                         # A tool for sharing terminal over the web.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "tmux" "tmux"                         # A terminal multiplexer for managing multiple terminal sessions.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "openssh-server" "openssh-server"     # For remote SSH access to the machine. [ssh <username>@<IP-or-hostname>]
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gettext" "gettext"                   # For internationalization and localization, a dependency for many builds from source.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "btrfs-progs" "btrfs-progs"           # For managing BTRFS filesystems.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "util-linux-extra" "util-linux-extra" # Provides extra utilities, including `hwclock`.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "smartmontools" "smartmontools"       # For disk health monitoring (`smartctl`).
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "nvme-cli" "nvme-cli"                 # For managing NVMe SSDs.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "cpulimit" "cpulimit"                 # For limiting CPU usage.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "shfmt" "shfmt"                       # shfmt is a tool for formatting shell scripts
+	# FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "blueman" "blueman"                   # Blueman: UI for managing Bluetooth adapters, pairing, and default device settings.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "sshfs" "sshfs" # For mounting remote filesystems over SSH (behave like local directories & permissions). [remote mount example: sshfs <username>@<IP-or-hostname>:/remote/path /local/mount/point]
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SUB-SECTION: rEFInd Boot Manager Installation
+	# Special handling for rEFInd to prevent it from automatically taking over the boot process.
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING "REFIND    [boot manager]"
+	# Display important information to the user about manually installing rEFInd to the ESP.
+	cat <<EOF
+It is necessary to install rEFInd to the EFI System Partition (ESP) for it to control the boot process.
+Not installing the new rEFInd binary on the ESP may leave the system in
+an unbootable state. Alternatives to automatically installing rEFInd include running /usr/sbin/refind-install by hand or installing the
+rEFInd binaries manually by copying them from subdirectories of
+/usr/share/refind-{version} !!!.
+
+If you want rEFInd to control the boot process [or change its settings after install], you can do so by runing:
+
+#installs refind to fallback path of target device esp, this is the method to use for dedicated esp partition...
+#installs to /EFI/BOOT/bootx64.efi
+$ refind-install --usedefault /dev/target-esp-partition
+
+#to install to a shared esp partition ... installs to /EFI/vendor/bootx64.efi
+$ refind-install   or    $ refind-install --root <root mount point>
+
+NOTE !!::: see man refind-install for more information
+EOF
+	# Use debconf-set-selections to pre-answer the installer question, preventing it from installing to the ESP automatically.
+	echo refind refind/install_to_esp boolean false | sudo debconf-set-selections
+	sudo apt install -y refind
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "refind"
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: General Software and Application Installation
+	# This large section installs a wide variety of applications for different purposes.
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "adb - android debug bridge" "adb" # For Android device communication.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "jq - JSON processor" "jq"         # A powerful command-line JSON processor.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "install pandoc & its dependencies" "pandoc texlive texlive-xetex texlive-fonts-recommended texlive-latex-extra weasyprint"
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "okular" "okular"                                                                               # A universal document viewer.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "qrencode" "qrencode"                                                                           # For generating QR codes.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "zbar-tools" "zbar-tools"                                                                       # For reading QR codes from images.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "fim - terminal image viewer" "fim"                                                             # An advanced terminal image viewer.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "cpufrequtils" "cpufrequtils"                                                                   # For controlling CPU frequency scaling.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "i7z - # sudo i7z command - reports processor data,C states,Speeds,Temps-Intel Core CPUs" "i7z" # For monitoring Intel Core CPU stats.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "dosfstools & mtools - for full fat32 support" "dosfstools mtools"                              # For full FAT32 filesystem support.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "xorriso" "xorriso"                                                                             # For creating ISO 9660 filesystem images.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "make" "make"                                                                                   # A core build automation tool.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "cmake" "cmake"                                                                                 # A cross-platform build system generator.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "hwinfo" "hwinfo"                                                                               # For probing for hardware information.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "color-picker" "color-picker"                                                                   # A simple color picker tool.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "wavemon" "wavemon"                                                                             # A curses-based monitor for wireless network devices.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "easytag" "easytag"                                                                             # An audio file tag editor.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "dkms" "dkms"                                                                                   # Dynamic Kernel Module Support framework.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "curl" "curl"                                                                                   # A tool for transferring data with URLs.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "bleachbit" "bleachbit"                                                                         # A system cleaner.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "plocate" "plocate"                                                                             # A much faster implementation of `locate`.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gimp" "gimp"                                                                                   # GNU Image Manipulation Program.
+
+	# gimp x11 backend temporary fix for gimp 3.2+XX  on ubuntu 26.04 ( expected to not need this fix in the future once X11 wayland issues are ironed out)
+	{
+		REAL_USER=${SUDO_USER:-$USER}
+		USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+		GIMP_VER=$(dpkg-query -W -f='${Version}\n' gimp 2>/dev/null | awk -F. '{print $1"."$2}')
+
+		dpkg-query -W gimp || (echo "❌ GIMP not found" && exit 1)
+
+		# Define GIMP files
+		SRC="/usr/share/applications/gimp.desktop"
+		USR_FILE="$USER_HOME/.local/share/applications/gimp.desktop"
+		SKL_FILE="/etc/skel/.local/share/applications/gimp.desktop"
+
+		# Copy and modify
+		sudo mkdir -p "$(dirname "$USR_FILE")" "$(dirname "$SKL_FILE")"
+		sudo cp "$SRC" "$USR_FILE"
+		sudo chmod 777 "$USR_FILE" # Allow editing by the script
+
+		# unlike the gimp.desktop file in /usr/share/applications which has Exec=gimp <gimp version> %U
+		# we dont use the gimp version number Since local desktop entries take precedence over system ones ... and we want to make sure the Exec line is always correct even after gimp updates that may change the version number in the Exec line of the system desktop entry
+		sed -i "/^Exec=/c\\Exec=env GDK_BACKEND=x11 XCURSOR_SIZE=24 gimp %U" "$USR_FILE"
+
+		sudo cp "$USR_FILE" "$SKL_FILE"
+
+		# Set correct permissions
+		sudo chown "$REAL_USER":"$REAL_USER" "$USR_FILE"
+		sudo chmod 777 "$SKL_FILE"
+
+		echo "✅ GIMP X11 launcher applied ($GIMP_VER)."
+	}
+	# Done with the GIMP X11 backend fix.
+
+	# gimp install GMIC (GREYC’s Magic for Image Computing) plugin binary
+	{
+		FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "GIMP GMIC plugin Binary - GREYCs Magic for Image Computing Binary plugin installation"
+
+		GIMP_VER=$(dpkg-query -W -f='${Version}\n' gimp 2>/dev/null | awk -F. '{print $1"."$2}')
+
+		sudo mkdir -p "$HOME"/.config/GIMP/"$GIMP_VER"/plug-ins
+		sudo mkdir -p /etc/skel/.config/GIMP/"$GIMP_VER"/plug-ins
+		sudo chmod -R 777 "$HOME"/.config/GIMP/"$GIMP_VER"/plug-ins
+		sudo chmod -R 777 /etc/skel/.config/GIMP/"$GIMP_VER"/plug-ins
+		sudo cp -r ./AUTO-INSTALLS-FILES/WARES/GIMP-PLUGINS/gmic_gimp_qt "$HOME"/.config/GIMP/"$GIMP_VER"/plug-ins/
+		sudo cp -rf ./AUTO-INSTALLS-FILES/WARES/GIMP-PLUGINS/gmic_gimp_qt /etc/skel/.config/GIMP/"$GIMP_VER"/plug-ins/
+		sudo chmod -R 777 "$HOME"/.config/GIMP/"$GIMP_VER"/plug-ins/gmic_gimp_qt
+		sudo chmod -R 777 /etc/skel/.config/GIMP/"$GIMP_VER"/plug-ins/gmic_gimp_qt
+	}
+	# Done gimp install GMIC (GREYC’s Magic for Image Computing) plugin binary
+
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "darktable" "darktable"                                # A photography workflow application and raw developer.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "mat2 - metadata anonimyzer" "mat2"                    # A tool for removing metadata from files.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "trash-cli  :: to use trash-empty command" "trash-cli" # Command-line interface to the freedesktop.org trash system.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "mmc-utils" "mmc-utils"                                # Utilities for MMC/SD storage devices.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gparted" "gparted"                                    # A partition editor.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "screenfetch" "screenfetch"                            # A classic system information tool with ASCII art.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "inxi - for system hardware info" "inxi"               # An advanced system information script.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "qbittorrent" "qbittorrent"                            # A popular BitTorrent client.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "tree" "tree"                                          # For listing directory contents in a tree-like format.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "g++" "g++"                                            # The GNU C++ compiler.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "crunch" "crunch"                                      # A wordlist generator.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "htop" "htop"                                          # An interactive process viewer.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "git" "git"                                            # The distributed version control system.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "grub-efi-amd64-bin" "grub-efi-amd64-bin"              # GRUB binaries for EFI systems.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "grub-efi-amd64-signed" "grub-efi-amd64-signed"        # Signed GRUB binaries for Secure Boot.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "kwrite" "kwrite"                                      # A lightweight text editor from KDE.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "geany" "geany"                                        # A fast and lightweight IDE.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gedit" "gedit"                                        # A fast and lightweight IDE.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "ktouch" "ktouch"                                      # A touch typing tutor from KDE.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "kdialog" "kdialog"                                    # A utility for showing dialog boxes from shell scripts.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "breeze" "breeze"                                      # The default theme for KDE Plasma.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "kdenlive" "kdenlive"                                  # A powerful open-source video editor.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "blender" "blender"                                    # A comprehensive 3D creation suite. can be used like a video editor as well. replacement for adobe after effects and premiere pro for motion graphics and video editing.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "audacity" "audacity"                                  # A multi-track audio editor and recorder.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "ardour" "ardour"                                      # A digital audio workstation.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "vlc" "vlc"                                            # A versatile multimedia player.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "handbrake" "handbrake"                                # A multi-platform video transcoder.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "unrar" "unrar"                                        # For extracting RAR archives.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "7zip" "7zip"                                          # A high-compression file archiver.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "7zip-rar" "7zip-rar"                                  # Plugin for 7zip to handle RAR files.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "ffmpeg" "ffmpeg"                                      # The swiss-army-knife for multimedia processing.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "timeshift" "timeshift"                                # A system restore utility.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "v4l2loopback-dkms" "v4l2loopback-dkms"                # For creating virtual video devices.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "obs-studio" "obs-studio"                              # A popular streaming and recording software.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "vokoscreen-ng" "vokoscreen-ng"                        # A screencasting tool.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "lolcat" "lolcat"                                      # For rainbow-colored output in the terminal.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "snapd" "snapd"                                        # The background service for managing snaps.
+
+	# The installation of `ubuntu-desktop-bootstrap` via snap is commented out.
+	# It is suspected of causing issues during installations from a custom ISO. !!!! the cause was actually due to using another storage device other than our / root partition .. if we are going to do so we must mount it with exec option
+	# BANNER_PKG_NAME_MSG="install ubuntu-desktop-bootstrap"
+	# PKG_NAME="install ubuntu-desktop-bootstrap"
+	# FUN_VERBOSE_INSTALLING
+	# sudo snap install ubuntu-desktop-bootstrap --classic
+	# FUN_PACKAGE_INSTALLATION_STATUS_CHECKER
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "zstd" "zstd"                                                      # Zstandard compression algorithm.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "secure-delete" "secure-delete"                                    # Tools for securely deleting files.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "cool-retro-term" "cool-retro-term"                                # A terminal emulator mimicking old cathode displays.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "intel-gpu-tools - gputop command - iGPU info  " "intel-gpu-tools" # Tools for debugging the Intel graphics driver.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "cpupower-gui" "cpupower-gui"                                      # A graphical tool for CPU power management.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "wine64" "wine64"                                                  # For running Windows applications on Linux.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "q4wine" "q4wine"                                                  # A graphical user interface for WINE.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "uptimed" "uptimed"                                                # A daemon for tracking system uptime.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "software-properties-common" "software-properties-common"          # Manages software repositories (e.g., for `add-apt-repository`).
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "spice-vdagent" "spice-vdagent"                                    # Agent for SPICE virtualization protocol (improves guest integration).
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "jstest-gtk" "jstest-gtk"                                          # A graphical joystick testing tool.
+	# FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "ANTIMICROX - GUI for mapping keyboard keys and mouse controls to a gamepad" "antimicro" # A graphical program to map gamepad buttons to keyboard, mouse, or scripts. [ antimicrox is the successor to antimicro, but the package name in apt is still "antimicro". we are going to install antimicrox by building it from source for the latest version & comment this one out]
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "shc" "shc" # A shell script compiler.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "libqrencode4 - QR Code encoding library" "libqrencode4"
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "debhelper" "debhelper"
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "btop" "btop"                                                                   # A modern, feature-rich resource monitor.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "exfatprogs" "exfatprogs"                                                       # Utilities for the exFAT filesystem.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "thinkfan" "thinkfan"                                                           # A fan control program for ThinkPads.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "remmina" "remmina remmina-plugin-rdp remmina-plugin-secret remmina-plugin-vnc" # A remote desktop client with plugins.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "ethtool" "ethtool"                                                             # For querying and controlling network driver and hardware settings.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "etherwake" "etherwake"                                                         # A tool to send Wake-On-LAN "Magic Packets".
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "netdiscover" "netdiscover"                                                     # An active/passive address reconnaissance tool.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "wakeonlan" "wakeonlan"                                                         # Another script for sending Wake-On-LAN packets.
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: antimicrox Installation
+	# antimicrox is a GUI tool for mapping keyboard keys and mouse controls to a gamepad
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " INSTALLING LATEST ANTIMICROX - build from source github "
+	# Clean the temporary worker directory to ensure a fresh start.
+	# This command safely removes all files, including hidden ones, without affecting the parent directory.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# install dependencies for building antimicrox from source
+	sudo apt update && sudo apt install -y g++ cmake extra-cmake-modules qt6-base-dev qt6-tools-dev-tools libqt6core5compat6-dev \
+		qt6-tools-dev libsdl2-dev libxi-dev libxtst-dev libx11-dev itstool gettext ninja-build git
+
+	# Clone the antimicrox repository from GitHub to the worker directory.
+	git clone https://github.com/AntiMicroX/antimicrox.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/antimicrox
+
+	# CD to the cloned repository directory.
+	cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/antimicrox
+
+	#  Prepare the Build Environment
+	mkdir build
+	cd build
+	# Configure the build using CMake with Ninja as the generator.
+	cmake .. -G Ninja
+	# Build the Program using Ninja, which will compile the source code and create the executable. (we will use nice and ionice to reduce the priority and impact of the build process on system responsiveness)
+	ionice -c 2 -n 7 nice -n 10 ninja
+	# Install the Program using Ninja, which will copy the built executable and any necessary files to the appropriate system directories.
+	sudo ninja install
+	# Check if the installation was successful by verifying the presence of the `antimicrox` executable in the system PATH.
+	if command -v antimicrox &>/dev/null; then
+		echo "antimicrox has been installed successfully!"
+	else
+		echo "antimicrox installation failed. Please check the build output for errors."
+	fi
+
+	sync
+
+	# After installation, reload udev rules to ensure that any device permissions or rules related to antimicrox are applied immediately without requiring a reboot.
+	sudo udevadm control --reload-rules
+	sudo udevadm trigger
+
+	cd "$CD_DIRNAME" || exit
+
+	# Clean the temporary worker directory to ensure a fresh start.
+	# This command safely removes all files, including hidden ones, without affecting the parent directory.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# !SECTION: END antimicrox Installation --------------------------------------------------------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: scrcpy Installation
+	# scrcpy is a tool for displaying and controlling Android devices.
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " INSTALLING LATEST SCRCPY "
+	# Clean the temporary worker directory to ensure a fresh start.
+	# This command safely removes all files, including hidden ones, without affecting the parent directory.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	# Enable 'exit on error' mode. This ensures that the script will stop immediately if any command fails,
+	# preventing potential issues from cascading.
+	set -e
+	# Fetch the latest release metadata from the scrcpy GitHub repository using its API.
+	echo "Fetching latest scrcpy release information..."
+	LATEST_RELEASE_JSON=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest)
+	# Use `jq` to parse the JSON response and extract the download URL for the Linux x86_64 tarball.ls
+
+	# The `test` function in `jq` uses a regex to find the correct asset.
+	DOWNLOAD_URL=$(echo "$LATEST_RELEASE_JSON" | jq -r ".assets[] | select(.name | test(\"scrcpy-linux-x86_64-v.*.tar.gz$\")) | .browser_download_url")
+	# If no URL is found, print an error and exit. This handles cases where the asset name changes or is missing.
+	if [ -z "$DOWNLOAD_URL" ]; then
+		echo "Could not find download URL for linux-x86_64. Exiting."
+		exit 1
+	fi
+	echo "Found download URL: $DOWNLOAD_URL"
+	# Download the latest release archive to the temporary worker directory.
+	echo "Downloading latest scrcpy release..."
+	wget -q --show-progress -P "./AUTO-INSTALLS-FILES/WORKER-TEMP/" "$DOWNLOAD_URL"
+	# Extract the archive into the same temporary directory.
+	ARCHIVE_NAME=$(basename "$DOWNLOAD_URL")
+	echo "Extracting archive..."
+	tar xf "./AUTO-INSTALLS-FILES/WORKER-TEMP/$ARCHIVE_NAME" -C "./AUTO-INSTALLS-FILES/WORKER-TEMP/"
+	# The archive extracts into a versioned subdirectory (e.g., scrcpy-linux-x86_64-v2.4).
+	# This command finds the name of that newly created directory.
+	EXTRACTED_DIR=$(find ./AUTO-INSTALLS-FILES/WORKER-TEMP/ -mindepth 1 -maxdepth 1 -type d)
+	# Install scrcpy by copying the file to /usr/bin
+	# This makes the `scrcpy` commands available system-wide.
+	echo "Installing scrcpy for all users..."
+	sudo cp -f "$EXTRACTED_DIR/scrcpy" /usr/bin/
+	sudo cp -f "$EXTRACTED_DIR/scrcpy-server" /usr/bin/
+	# Set appropriate executable permissions
+	sudo chmod 777 /usr/bin/scrcpy
+	sudo chmod 777 /usr/bin/scrcpy-server
+	echo "scrcpy has been updated successfully!"
+	echo "You can now run 'scrcpy' from your terminal."
+	# Disable 'exit on error' mode to allow the rest of the main script to continue
+	# even if other, non-critical commands fail later on.
+	set +e
+	# Clean up the temporary worker directory by removing the downloaded archive and extracted files.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	# !SECTION: END scrcpy Installation --------------------------------------------------------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: ANDROID ADB AUTHKEYS Installation
+	# ADB AUTH KEYS (PC TRUST IDENTITY) - allows the user to establish a trusted connection between the PC and Android devices without needing to accept the RSA fingerprint prompt on the device for each new connection.
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " INSTALLING ANDROID ADB AUTHKEYS (PC TRUST IDENTITY) "
+	cd "$CD_DIRNAME" || exit
+
+	# Create the .android directory in the user's home directory if it doesn't already exist.
+	sudo mkdir -p "$HOME/.android"
+	sudo mkdir -p "/etc/skel/.android"
+
+	sudo chmod -R 777 "$HOME/.android" "/etc/skel/.android"
+
+	# Copy adbkeys files from our project DIR to ~/.android & set permissions
+	sudo cp -f ./AUTO-INSTALLS-FILES/ANDROID-ADB-AUTH-KEYS/adbkey "$HOME/.android/"
+	sudo cp -f ./AUTO-INSTALLS-FILES/ANDROID-ADB-AUTH-KEYS/adbkey.pub* "$HOME/.android/"
+	# Also copy to /etc/skel so that new users created on the system will also have the adbkeys by default in their home directories.
+	sudo cp -f ./AUTO-INSTALLS-FILES/ANDROID-ADB-AUTH-KEYS/adbkey "/etc/skel/.android/"
+	sudo cp -f ./AUTO-INSTALLS-FILES/ANDROID-ADB-AUTH-KEYS/adbkey.pub* "/etc/skel/.android/"
+
+	sudo chmod -R 777 "$HOME/.android" "/etc/skel/.android"
+
+	echo -e "\n\n\n ✔Android ADB auth keys have been installed successfully!"
+	echo "You can now connect your Android devices via ADB without needing to accept the RSA fingerprint prompt on the device for each new connection, as long as the device's RSA key matches the public key you installed."
+
+	# !SECTION: END ANDROID ADB AUTHKEYS Installation --------------------------------------------------------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: GO (Golang) Programming Language Installation
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " INSTALLING Golang / Go Programming Language "
+	cd "$CD_DIRNAME" || exit
+
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	# Remove any previous Go installation by deleting the /usr/local/go folder (if it exists)
+	sudo rm -rf /usr/local/go 2>/dev/null
+	# Fetch the latest Go download link for linux-amd64.
+	# Fetch the HTML content from the Go download page.
+	html_content=$(curl -s https://go.dev/dl/)
+	# Extract the download link for the latest version for linux-amd64.
+	download_path=$(echo "$html_content" | grep -o '/dl/go[^"]*linux-amd64.tar.gz' | head -n 1)
+	# Check if a download link was found -> and install golang
+	if [ -n "$download_path" ]; then
+		download_link="https://go.dev${download_path}"
+		echo "Latest Go download link for linux-amd64:"
+		echo "$download_link"
+		# Download golang Linux AMD64 tar release using curl
+		curl -L --output-dir ./AUTO-INSTALLS-FILES/WORKER-TEMP/ -O "$download_link"
+		# install golang on system
+		sudo tar -C /usr/local -xzf ./AUTO-INSTALLS-FILES/WORKER-TEMP/go*linux-amd64.tar.gz
+		sudo chmod -R 777 /usr/local/go/
+
+		# ==============================================================================
+		# set correct $PATH variables
+		# Description: This script section appends custom directory paths to the system-wide
+		#              /etc/profile file. This ensures that these directories are
+		#              included in the PATH for all users during login.
+		#              It also updates the PATH for the current shell session.
+		# ==============================================================================
+
+		# Define an array of directory paths to be added to the system PATH.
+		PATHS_TO_ADD=(
+			"/usr/local/go/bin"
+		)
+		# Target configuration file for system-wide environment variables.
+		PROFILE_FILE="/etc/profile"
+		echo "Checking $PROFILE_FILE for custom path configurations..."
+
+		# FIX 1: Sanitize the existing PATH *once* before the loop starts.
+		# This creates a stable, clean base that won't grow infinitely inside the loop.
+		PATH_BASE=$(echo -n "$PATH" | awk -v RS=: '$0 != "" && !a[$0]++ {printf "%s%s", (i++ ? ":" : ""), $0}')
+
+		for dir in "${PATHS_TO_ADD[@]}"; do
+			# FIX 2: Use the stable PATH_BASE so LINE is identical on every run.
+			LINE="export PATH=$PATH_BASE:$dir"
+
+			# Check if the directory configuration already exists in the profile file.
+			if ! grep -qsF "$LINE" "$PROFILE_FILE"; then
+				echo "Appending $dir to $PROFILE_FILE..."
+				echo "$LINE" | sudo tee -a "$PROFILE_FILE" >/dev/null
+			else
+				echo "Information: $dir already exists in $PROFILE_FILE. Skipping."
+			fi
+
+			# Update the PATH for the current active shell session.
+			case ":${PATH}:" in
+			*":$dir:"*)
+				# Directory is already present in the current PATH.
+				;;
+			*)
+				# Directory is missing; append it to the current PATH.
+				export PATH="$PATH:$dir"
+				;;
+			esac
+		done
+		echo "Update process finished."
+		echo "Updated current session PATH: $PATH"
+		# Clean up script-specific variables to maintain a clean environment.
+		unset PATHS_TO_ADD PROFILE_FILE dir LINE PATH_BASE
+		# END set correct $PATH variables for /usr/local/go/bin ==============================================================================
+
+		# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	else
+		echo -e "\e[1;48;5;1m" "Could not find the latest Go download link." "\e[0m"
+	fi
+	# !SECTION: GO (Golang) Programming Language Installation END ------------------------------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION : TinyGo Installation - A Go compiler for microcontrollers and WebAssembly ------------------------------------------------------
+	#-------------------------------------------------------------------------------------------------------------------
+
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " INSTALLING TinyGo Compiler for Microcontrollers "
+
+	# Clean workspace
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	cd "$CD_DIRNAME" || exit
+
+	echo "Fetching latest TinyGo release..."
+
+	# Get latest tinygo release JSON
+	LATEST_TINYGO_TAG=$(curl -sL "https://api.github.com/repos/tinygo-org/tinygo/releases/latest" | jq -r '.tag_name')
+
+	TINYGO_DOWNLOAD_URL=$(curl -sL "https://api.github.com/repos/tinygo-org/tinygo/releases/tags/$LATEST_TINYGO_TAG" | jq -r '.assets[] | select(.name | test("tinygo.*linux-amd64.*\\.tar\\.gz$")) | .browser_download_url')
+
+	if [[ -z "$TINYGO_DOWNLOAD_URL" || "$TINYGO_DOWNLOAD_URL" == "null" ]]; then
+		echo "❌ Failed to locate TinyGo Linux AMD64 archive."
+		exit 1
+	fi
+
+	echo "✔ Download URL: $TINYGO_DOWNLOAD_URL"
+
+	# Download
+	wget -q --show-progress -P "./AUTO-INSTALLS-FILES/WORKER-TEMP" "$TINYGO_DOWNLOAD_URL"
+
+	ARCHIVE="./AUTO-INSTALLS-FILES/WORKER-TEMP/$(basename "$TINYGO_DOWNLOAD_URL")" # gives us the name of the downloaded archive .tar.gz file
+
+	# Extract
+	echo "Extracting... (archive: $ARCHIVE)"
+	tar -xzf "$ARCHIVE" -C "./AUTO-INSTALLS-FILES/WORKER-TEMP"
+	sync
+
+	# delete the archive after extraction to save space
+	sudo rm -rf "$ARCHIVE"
+
+	# # Find extracted directory
+	EXTRACTED_TINYGO_DIR=$(find "./AUTO-INSTALLS-FILES/WORKER-TEMP" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+
+	if [[ -z "$EXTRACTED_TINYGO_DIR" ]]; then
+		echo "❌ Extraction of TINYGO [$ARCHIVE] failed — no [tinygo] directory found."
+		exit 1
+	fi
+
+	# Install tinygo
+	echo "Installing tinygo to /usr/local/bin ..."
+	sudo mkdir -p /usr/local/bin
+	sudo chmod -R 777 /usr/local/bin
+	sudo cp -f "$EXTRACTED_TINYGO_DIR/bin/tinygo" /usr/local/bin/
+	sudo cp -f "$EXTRACTED_TINYGO_DIR/bin/wasm-opt" /usr/local/bin/
+	sudo chmod 777 "/usr/local/bin/tinygo"
+	sudo chmod 777 "/usr/local/bin/wasm-opt"
+
+	# copy to /etc/skel so that new users will also have tinygo in their PATH
+	sudo mkdir -p /etc/skel/.local/bin
+	sudo cp -f "$EXTRACTED_TINYGO_DIR/bin/tinygo" /etc/skel/.local/bin/
+	sudo cp -f "$EXTRACTED_TINYGO_DIR/bin/wasm-opt" /etc/skel/.local/bin/
+	sudo chmod 777 /etc/skel/.local/bin/tinygo
+	sudo chmod 777 /etc/skel/.local/bin/wasm-opt
+	sync
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	echo -e "\n\n\n ✔ TinyGo installed successfully."
+	tinygo version
+	echo -e "\e[1;48;5;3m" "$(tinygo version)" "\e[0m"
+
+	# !SECTION: END Tinygo Installation --------------------------------------------------------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: VSCode Installation and Configuration
+	# This section handles the complete installation and setup of VSCode, including extensions and user configuration.
+	#-------------------------------------------------------------------------------------------------------------------
+	###~~~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~~~###
+	# --- VSCode Installation (Centralized) ---
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " install fully VSCODE"
+	FUN_VERBOSE_INSTALLING "INSTALLING VSCODE ---"
+
+	cd "$CD_DIRNAME" || exit
+
+	# Source the library for vscode and call the online installation function for VSCODE
+	source ./WARES-LIB/VSCODE_ONLINE_INSTALLATION_LIB
+
+	FUN_INSTALL_VSCODE_ONLINE
+
+	# Check and report the installation status of VSCode.
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "code"
+	###~~~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~~~###
+	# !SECTION: VSCode Installation and Configuration END
+	###~~~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~x~|~~~###
+
+	# 	#-------------------------------------------------------------------------------------------------------------------
+	# 	# Google Gemini-CLI Installation [ COMMENTED OUT BECAUSE GEMINI-CLI WAS PHASED OUT FOR ANTIGRAVITY - gemini-cli is no longer available]
+	# 	# This section automates the installation of the Google Gemini CLI, which requires Node.js and npm.
+	# 	# It uses nvm (Node Version Manager) to install and manage Node.js versions.
+	# 	#-------------------------------------------------------------------------------------------------------------------
+	# 	# This code block programmatically installs the Google Gemini CLI.
+	# 	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "INSTALLING GOOGLE GEMINI-CLI ---"
+	# 	{
+	# 		# Fetch the official list of Node.js versions.
+	# 		echo "Fetching the latest Node.js LTS version metadata..."
+	# 		NODE_VERSIONS_JSON=$(curl -s https://nodejs.org/dist/index.json)
+
+	# 		# Use `jq` to parse the JSON and find the latest version marked as Long-Term Support (LTS).
+	# 		LATEST_LTS_VERSION_NODE_JS_TAG=$(echo "$NODE_VERSIONS_JSON" | jq -r '[.[] | select(.lts != false)] | sort_by(.version | sub("^v";"") | split(".") | map(tonumber)) | last | .version')
+
+	# 		# If `jq` fails or the fetch is unsuccessful, use a hardcoded fallback version.
+	# 		if [[ -z "$LATEST_LTS_VERSION_NODE_JS_TAG" ]]; then
+	# 			echo "Failed to fetch latest LTS version. Using fallback version."
+	# 			LATEST_LTS_VERSION_NODE_JS_TAG="v22.17.1" # Fallback LTS version
+	# 		fi
+	# 		echo "Latest Node.js LTS version found: $LATEST_LTS_VERSION_NODE_JS_TAG"
+
+	# 		# Extract just the major version number (e.g., "22" from "v22.17.1").
+	# 		LATEST_LTS_VERSION_NODE_JS_MAJOR=$(echo "$LATEST_LTS_VERSION_NODE_JS_TAG" |
+	# 			sed 's/^v\([0-9]\+\)\..*$/\1/' | tr -d '[:space:]')
+	# 		echo "Latest Node.js LTS major version: $LATEST_LTS_VERSION_NODE_JS_MAJOR"
+
+	# 		# Dynamically find the latest version of nvm from its GitHub releases page.
+	# 		REPO_URL="https://github.com/nvm-sh/nvm/releases"
+	# 		echo "Fetching the latest nvm release version..."
+	# 		LATEST_NVM_VERSION=$(curl -s "$REPO_URL" |
+	# 			grep -oE '/nvm-sh/nvm/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+' |
+	# 			sed 's+/nvm-sh/nvm/releases/tag/++' | sort -V | tail -n 1 | tr -d '[:space:]')
+
+	# 		if [[ -n "$LATEST_NVM_VERSION" ]]; then
+	# 			echo "Latest nvm release version: $LATEST_NVM_VERSION"
+	# 		else
+	# 			echo "Failed to fetch the latest nvm version. Exiting."
+	# 			exit 1
+	# 		fi
+
+	# 		# Construct the URL for the nvm installation script.
+	# 		NVM_INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${LATEST_NVM_VERSION}/install.sh"
+	# 		echo "NVM install script URL: $NVM_INSTALL_SCRIPT_URL"
+
+	# 		# Install nvm only if it's not already installed.
+	# 		if ! command -v nvm &>/dev/null; then
+	# 			echo "nvm not found, proceeding with installation..."
+	# 			# Download and execute the nvm installation script.
+	# 			curl -o- "${NVM_INSTALL_SCRIPT_URL}" | bash
+	# 			# Source the nvm script to make it available in the current shell session.
+	# 			source "$HOME/.nvm/nvm.sh"
+	# 			# Use nvm to install the previously determined latest LTS version of Node.js.
+	# 			nvm install "$LATEST_LTS_VERSION_NODE_JS_MAJOR"
+	# 		else
+	# 			echo "nvm is already installed. Skipping installation."
+	# 		fi
+
+	# 		# Verify that node, npm, and nvm are installed and working.
+	# 		echo "Verifying installations... RUNNING: node -v && npm -v && nvm current"
+	# 		echo -e "\e[3;43m" "node version:  $(node -v)" "\e[0m"
+	# 		echo "node version: " "$(node -v)"
+	# 		# node -v
+	# 		echo -e "\e[3;43m" "npm version:  $(npm -v)" "\e[0m"
+	# 		echo "npm version: " "$(npm -v)"
+	# 		# npm -v
+	# 		echo -e "\e[3;43m" "nvm current version:  $(nvm current)" "\e[0m"
+	# 		echo "nvm current version: " "$(nvm current)"
+	# 		# nvm current
+
+	# 		# Use npm to install the Google Gemini CLI globally.
+	# 		echo "Installing Google Gemini CLI... RUNNING: npm install -g @google/gemini-cli"
+	# 		if ! npm install -g @google/gemini-cli; then
+	# 			echo "Failed to install Google Gemini CLI. Exiting."
+	# 			exit 1
+	# 		else
+	# 			echo -e " \e[4;45m" "Successfully installed Google Gemini-CLI." "\e[0m"
+	# 			echo "Google Gemini-CLI installed successfully."
+
+	# 			echo -e "\e[3;43m" "Google Gemini-CLI version:  $(gemini -v)" "\e[0m"
+	# 			echo "Google Gemini-CLI version: " "$(gemini -v)"
+	# 			# gemini -v
+	# 		fi
+
+	# 		# Copy the nvm and npm configuration directories to `/etc/skel`.
+	# 		# This ensures new users will have nvm and its installed packages available.
+	# 		echo "copy .nvm and .npm directory to /etc/skel for user initialization."
+	# 		sudo cp -rf "$HOME/.nvm" /etc/skel/
+	# 		sudo cp -rf "$HOME/.npm" /etc/skel/
+	# 		sudo chmod -R 777 /etc/skel/.nvm
+	# 		sudo chmod -R 777 /etc/skel/.npm
+
+	# 		# Create autostart scripts to initialize nvm for new users upon login.
+	# 		echo "Creating autostart script for nvm initialization..."
+	# 		sudo mkdir -p "$HOME/.config/autostart"
+	# 		sudo mkdir -p "$HOME/.local/bin"
+	# 		sudo chmod -R 777 "$HOME/.config/autostart"
+	# 		sudo chmod -R 777 "$HOME/.local/bin"
+
+	# 		# Create the .desktop file for the autostart script.
+	# 		cat <<'EOF' | sudo tee "$HOME/.config/autostart/google-gemini-cli-initialization.desktop"
+	# [Desktop Entry]
+	# Type=Application
+	# Exec=bash -c "$HOME/.local/bin/google-gemini-cli-initialization.sh"
+	# Hidden=false
+	# NoDisplay=false
+	# X-GNOME-Autostart-enabled=true
+	# Name=Google Gemini CLI Initialization
+	# Comment=Runs Google Gemini CLI initialization commands
+	# EOF
+	# 		sudo chmod 777 "$HOME/.config/autostart/google-gemini-cli-initialization.desktop"
+
+	# 		# Create the initialization script itself.
+	# 		cat <<'EOF' | sudo tee "$HOME/.local/bin/google-gemini-cli-initialization.sh"
+	# #!/bin/bash
+	# # This script ensures that nvm, node, and npm are correctly configured in the user's environment.
+
+	# # Source the nvm script to load it into the current environment.
+	# export NVM_DIR="$HOME/.nvm"
+	# source "$NVM_DIR/nvm.sh"
+
+	# # Verify versions (optional, for logging/debugging).
+	# nvm --version
+	# node -v
+	# npm -v
+	# gemini -v
+
+	# # This section permanently adds the nvm initialization logic to the user's .bashrc file,
+	# # so that nvm is available in all future terminal sessions.
+
+	# # Define the configuration block to be added.
+	# NVM_CONFIG=$(cat <<'INNEREOF'
+
+	# export NVM_DIR="$HOME/.nvm"
+	# [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+	# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+	# INNEREOF
+	# )
+	# NVM_SEARCH_TERM='export NVM_DIR="$HOME/.nvm"'
+
+	# # Add the configuration to .bashrc only if it's not already there.
+	# if ! grep -qF -- "$NVM_SEARCH_TERM" "$HOME/.bashrc"; then
+	#     echo "Appending NVM configuration to $HOME/.bashrc..."
+	#     echo "$NVM_CONFIG" >> "$HOME/.bashrc"
+	# else
+	#     echo "NVM configuration already exists in $HOME/.bashrc."
+	# fi
+	# EOF
+	# 		sudo chmod 777 "$HOME/.local/bin/google-gemini-cli-initialization.sh"
+
+	# 		# Copy the autostart files to /etc/skel for new users.
+	# 		sudo mkdir -p /etc/skel/.config/autostart
+	# 		sudo mkdir -p /etc/skel/.local/bin
+	# 		sudo chmod -R 777 /etc/skel/.config/autostart
+	# 		sudo chmod -R 777 /etc/skel/.local/bin
+	# 		sudo cp -rf "$HOME/.config/autostart/google-gemini-cli-initialization.desktop" /etc/skel/.config/autostart/
+	# 		sudo cp -rf "$HOME/.local/bin/google-gemini-cli-initialization.sh" /etc/skel/.local/bin/
+	# 		sudo chmod 777 /etc/skel/.config/autostart/google-gemini-cli-initialization.desktop
+	# 		sudo chmod 777 /etc/skel/.local/bin/google-gemini-cli-initialization.sh
+
+	# 		echo "Google Gemini CLI installation and configuration completed successfully."
+	# 	}
+	#	# -------------------------------------------------------------------------------------------------------------------
+	#	# END OF GOOGLE GEMINI CLI SECTION
+	#	# -------------------------------------------------------------------------------------------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: ANTIGRAVITY CLI Installation - Antigravity is the successor to the Google Gemini CLI, providing a more powerful and flexible interface for interacting with Google's AI services.
+	# This section automates the installation of the Antigravity CLI
+	# Google Antigravity is an agentic software development platform that allows engineers to orchestrate multiple autonomous AI agents to build, test, and refactor applications using natural language commands.
+	# It is designed to be a more powerful and flexible successor to the Google Gemini CLI
+	#-------------------------------------------------------------------------------------------------------------------
+
+	sudo rm "/usr/local/bin/agy" 2>/dev/null || true # remove any existing agy binary if it exists, ignore errors if it doesn't exist
+	# -s -- --dir /usr/local/bin: Safely pipes the string flags past bash into the installer's internal variable loop so it can use the correct installation directory without the installer trying to interpret those flags itself (which would cause it to fail since it doesn't recognize them).
+	curl -fsSL https://antigravity.google/cli/install.sh | sudo bash -s -- --dir /usr/local/bin
+	sudo chmod 777 /usr/local/bin/agy
+
+	# -------------------------------------------------------------------------------------------------------------------
+	# !SECTION: END OF ANTIGRAVITY CLI Installation
+	# -------------------------------------------------------------------------------------------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: ollama - INSTALL ollama  - Local (offline) ai LLMs on your machine
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "install OLLAMA - Local (offline) ai LLMs on your machine ---"
+	# Installs Ollama, a local LLM (Large Language Model) platform.
+	curl -fsSL https://ollama.com/install.sh | sudo sh
+
+	# Explicitly ensure the systemd service exists and is enabled.
+	# This handles cases where the installer might skip service creation (e.g., in chroot/containers).
+	if ! id "ollama" &>/dev/null; then
+		sudo useradd -r -s /bin/false -U -m -d /usr/share/ollama ollama
+		sudo usermod -aG ollama "$USER"
+	fi
+
+	# Always overwrite/create the service file to ensure consistency.
+	cat <<EOF | sudo tee /etc/systemd/system/ollama.service
+[Unit]
+Description=Ollama Service
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+User=ollama
+Group=ollama
+Restart=always
+RestartSec=3
+Environment="PATH=$PATH"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	# Reload, enable, and start the service.
+	sudo systemctl daemon-reload
+	sudo systemctl enable ollama
+	sudo systemctl start ollama
+
+	# !SECTION: END - ollama - Local (offline) ai LLMs on your machine
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: llama-cpp - INSTALL llama-cpp - Fast C++ implementation of LLaMA for local LLM hosting
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "install llama-cpp - Fast C++ implementation of LLaMA for local LLM hosting ---"
+
+	# Clean temporary worker directory safely, avoiding . and .. but clearing hidden files.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# Clone the llama-cpp repository from GitHub.
+	git clone https://github.com/ggml-org/llama.cpp ./AUTO-INSTALLS-FILES/WORKER-TEMP/llama-cpp
+
+	# Navigate to the cloned repository directory.
+	cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/llama-cpp || {
+		echo "Failed to navigate to llama-cpp directory. Exiting."
+		exit 1
+	}
+
+	# Install Vulkan dependencies and compilation tools.
+	sudo apt update
+	sudo apt install libvulkan-dev vulkan-tools glslang-tools glslc spirv-headers -y
+
+	# ==============================================================================================================
+	# HARDWARE COMPILATION REFERENCE GUIDE
+	# ==============================================================================================================
+	# 1. LAPTOP INTEGRATED GPUS (Current Active Layout for i5-6200U / i5-7200U / i5-7300U / T470 / T14 Gen 1):
+	#    -DGGML_VULKAN_COOP_MAT=OFF   -> Disables dedicated tensor/matrix engines to prevent laptop iGPU runtime crashes.
+	#    -DGGML_VULKAN_DISABLE_FP16=ON -> Forces 32-bit math fallbacks on older Skylake/Kaby Lake driver architectures.
+	#
+	# 2. DEDICATED DESKTOP / MODERN INTEGRATED GPUS WITH VULKAN (NVIDIA, AMD, Intel Arc, Modern Iris Xe):
+	#    cmake -B build -DGGML_VULKAN=ON -DGGML_RPC=ON -DBUILD_SHARED_LIBS=ON
+	#    (Leaving COOP_MAT and FP16 at defaults allows software to exploit hardware Tensor Cores / XMX engines natively)
+	#
+	# 3. NATIVE NVIDIA CUDA PLATFORMS:
+	#    cmake -B build -DGGML_CUDA=ON -DGGML_RPC=ON -DBUILD_SHARED_LIBS=ON
+	#    (Requires nvidia-cuda-toolkit installed on the host system instead of Vulkan packages)
+	#
+	# 4. NATIVE AMD ROCm PLATFORMS:
+	#    cmake -B build -DGGML_HIPBLAS=ON -DGGML_RPC=ON -DBUILD_SHARED_LIBS=ON
+	#
+	# 5. 100% PURE CPU-ONLY BINARY (No Graphics Acceleration / Highly Portable Across Servers):
+	#    cmake -B build -DGGML_RPC=ON -DBUILD_SHARED_LIBS=OFF -DGGML_STATIC=ON
+	#    (Safe to force static here because CPU instructions lack dynamic graphics runtime driver requirements)
+	# ==============================================================================================================
+
+	# Optimized configuration line for ThinkPad T14 Gen 5+ and modern hardware
+	# cmake -B build -DGGML_VULKAN=ON -DGGML_RPC=ON -DBUILD_SHARED_LIBS=ON
+
+	# Configure the build system with Vulkan, RPC, and Shared Library configurations.
+	# Note: -DGGML_VULKAN_COOP_MAT=OFF prevents hardware tensor crashes on laptop integrated GPUs (HD 520 / HD 620).
+	# Note: -DGGML_VULKAN_DISABLE_FP16=ON forces precision math fallbacks necessary for Skylake & Kaby Lake architectures.
+	# Note: -DGGML_NATIVE=OFF disables host-specific compilation flags, making the binary portable to other CPU models.
+	# Note: -DLLAMA_BUILD_TESTS=OFF and -DLLAMA_BUILD_EXAMPLES=OFF disables compiling unnecessary test/example binaries.
+	cmake -B build \
+		-DGGML_VULKAN=ON \
+		-DGGML_RPC=ON \
+		-DBUILD_SHARED_LIBS=ON \
+		-DGGML_VULKAN_COOP_MAT=OFF \
+		-DGGML_VULKAN_DISABLE_FP16=ON \
+		-DGGML_NATIVE=OFF \
+		-DGGML_BACKEND_DL=ON \
+		-DGGML_CPU_ALL_VARIANTS=ON \
+		-DLLAMA_BUILD_TESTS=OFF \
+		-DLLAMA_BUILD_EXAMPLES=OFF \
+		-DLLAMA_BUILD_SERVER=ON \
+		-DLLAMA_BUILD_TOOLS=ON
+
+	# Calculate safe number of parallel jobs based on RAM (approx 4GB per job) to avoid out-of-memory limits.
+	TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+	RAM_SAFE_JOBS=$((TOTAL_RAM_KB / 4000000))
+	CPU_CORES=$(nproc)
+
+	# Ensure jobs map within a safe range of 1 to maximum available system cores.
+	if [ "$RAM_SAFE_JOBS" -lt 1 ]; then
+		BUILD_JOBS=1
+	elif [ "$RAM_SAFE_JOBS" -gt "$CPU_CORES" ]; then
+		BUILD_JOBS=$CPU_CORES
+	else
+		BUILD_JOBS=$RAM_SAFE_JOBS
+	fi
+
+	echo "System has ${CPU_CORES} cores and $((TOTAL_RAM_KB / 1024))MB RAM. Using -j ${BUILD_JOBS} for a safe build."
+
+	# Compile target operational binaries: llama-cli, llama-server, and rpc-server.
+	ionice -c 2 -n 7 nice -n 10 cmake --build build --config Release -j "$BUILD_JOBS" || {
+		echo "Compilation failed. Check the output above for errors."
+		exit 1
+	}
+
+	# Install binaries natively to /usr/local system frameworks.
+	# sudo cmake --install ./AUTO-INSTALLS-FILES/WORKER-TEMP/llama-cpp/build --prefix /usr/local
+
+	# Install target components cleanly into /usr/local.
+	# We omit specific component parameters because llama.cpp's install schema uses the default (Unspecified) component.
+	# The disabled example/test configuration ensures only target libraries and selected tools are installed.
+	sudo cmake --install build --prefix /usr/local || {
+
+		echo "cmake install of llama-cpp failed, overwriting manually..."
+
+		sudo cp -afv ./build/bin/llama* /usr/local/bin/ || {
+			echo "Failed to install llama-cpp. Check the output above for errors."
+			exit 1
+		}
+
+		sudo cp -afv ./build/bin/ggml-rpc-server /usr/local/bin/ || {
+			echo "Failed to install llama-cpp. Check the output above for errors."
+			exit 1
+		}
+
+		sudo cp -afv ./build/bin/lib*.so* /usr/local/lib/ || {
+			echo "Failed to install llama-cpp. Check the output above for errors."
+			exit 1
+		}
+
+	}
+
+	# Register newly built shared libraries (libllama.so, libggml.so) to the system linker cache paths.
+	sudo ldconfig
+
+	# Navigate back to the original operational execution directory.
+	cd "$CD_DIRNAME" || exit
+
+	# Elevate execution permissions uniformly for terminal interface access.
+	sudo chmod -R 777 /usr/local/bin/
+
+	# Sync write pipelines and purge temporary source workspace.
+	sync
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# !SECTION: END - llama-cpp - Fast C++ implementation of LLaMA for local LLM hosting
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: PIPER TTS (Text To Speech) SYSTEM-WIDE INSTALLATION CODE BLOCK
+	#-------------------------------------------------------------------------------------------------------------------
+	########################################################################################################################
+	#
+	#                                    Install piper Text-to-Speech (SYSTEM-WIDE)
+	#
+	# This code block installs Piper-TTS in a global virtual environment and automates its accessibility.
+	# It handles:
+	#   - Installation of system dependencies.
+	#   - Virtual environment creation in /usr/local/bin/xtts.
+	#   - Patching the 'activate' script for the new system-wide path.
+	#   - System-wide PATH integration via /etc/profile using standard project conventions.
+	#
+	########################################################################################################################
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "PIPER TTS (Text To Speech) SYSTEM-WIDE INSTALLATION"
+
+	echo "Starting Piper-TTS Global Installation..."
+
+	# Moving to /usr/local/bin/xtts as requested
+	VENV_ROOT="/usr/local/bin/xtts"
+	ACTIVATE_SCRIPT="$VENV_ROOT/venv/bin/activate"
+
+	# Use the helper function for consistency with the rest of the script
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "python3-venv python3-full alsa-utils mpv ffmpeg wget sed" "python3-venv python3-full alsa-utils mpv ffmpeg wget sed"
+
+	# If existing venv is in home, move it or recreate it? User asked to "have the whole xtts directory to be in /usr/local/bin"
+	# We will create it fresh to ensure all internal binary pointers are correct for the new location.
+	echo "Setting up global virtual environment in $VENV_ROOT..."
+	sudo rm -rf "$VENV_ROOT" # Clean any partial install
+	sudo mkdir -p "$VENV_ROOT"
+	sudo chmod -R 777 "$VENV_ROOT"
+
+	cd "$VENV_ROOT" || exit
+	python3 -m venv venv
+
+	# Activate and install
+	source venv/bin/activate
+	echo "Installing piper-tts via pip..."
+	pip install --upgrade pip
+	pip install piper-tts
+	deactivate
+
+	echo "Patching 'activate' script for system-wide path..."
+	if [ -f "$ACTIVATE_SCRIPT" ]; then
+		# Ensure all VIRTUAL_ENV variables point to the new /usr/local/bin/xtts/venv path
+		sudo sed -i "s|/home/[^/ ]*/xtts/venv|$VENV_ROOT/venv|g" "$ACTIVATE_SCRIPT"
+		sudo sed -i "s|$(pwd)/venv|$VENV_ROOT/venv|g" "$ACTIVATE_SCRIPT"
+		echo "✅ Activation script patched."
+	fi
+
+	echo "Integrating Piper binaries into system-wide PATH..."
+
+	# Define an array of directory paths to be added to the system PATH.
+	PATHS_TO_ADD=(
+		"$VENV_ROOT/venv/bin"
+	)
+	# Target configuration file for system-wide environment variables.
+	PROFILE_FILE="/etc/profile"
+	echo "Checking $PROFILE_FILE for custom path configurations..."
+
+	# FIX 1: Sanitize the existing PATH *once* before the loop starts.
+	# This creates a stable, clean base that won't grow infinitely inside the loop.
+	PATH_BASE=$(echo -n "$PATH" | awk -v RS=: '$0 != "" && !a[$0]++ {printf "%s%s", (i++ ? ":" : ""), $0}')
+
+	for dir in "${PATHS_TO_ADD[@]}"; do
+		# FIX 2: Use the stable PATH_BASE so LINE is identical on every run.
+		LINE="export PATH=$PATH_BASE:$dir"
+
+		# Check if the directory configuration already exists in the profile file.
+		if ! grep -qsF "$LINE" "$PROFILE_FILE"; then
+			echo "Appending $dir to $PROFILE_FILE..."
+			echo "$LINE" | sudo tee -a "$PROFILE_FILE" >/dev/null
+		else
+			echo "Information: $dir already exists in $PROFILE_FILE. Skipping."
+		fi
+
+		# Update the PATH for the current active shell session.
+		case ":${PATH}:" in
+		*":$dir:"*)
+			# Directory is already present in the current PATH.
+			;;
+		*)
+			# Directory is missing; append it to the current PATH.
+			export PATH="$PATH:$dir"
+			;;
+		esac
+	done
+
+	REAL_USER=${SUDO_USER:-$USER}
+	USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+
+	# Remove the old home-based venv activation from .bashrc if it was there
+	if [ -f "$USER_HOME/.bashrc" ]; then
+		sudo sed -i '/# Piper-TTS Virtual Environment Activation/,/fi/d' "$USER_HOME/.bashrc"
+		sudo sed -i '/xtts\/venv\/bin\/activate/d' "$USER_HOME/.bashrc"
+	fi
+
+	# Remove the old autostart fixer
+	sudo rm -f "$USER_HOME/.local/bin/piper-tts-env-fixer.sh"
+	sudo rm -f "$USER_HOME/.config/autostart/piper-tts-env-fixer.desktop"
+
+	echo "Verifying installation..."
+	# Note: Since /etc/profile changes require a relogin, we verify using the direct path first
+	if [ -f "$VENV_ROOT/venv/bin/piper" ]; then
+		echo -e "\e[1;42m SUCCESS \e[0m Piper is installed globally at $VENV_ROOT/venv/bin/piper"
+		"$VENV_ROOT/venv/bin/piper" --version
+	else
+		echo "❌ Piper installation verification failed."
+	fi
+
+	cd "$CD_DIRNAME" || exit
+
+	# copy our piper models to /usr/local/bin/xtts/models so they can be accessed by the system-wide installation
+	sudo mkdir -p /usr/local/bin/xtts/models
+	sudo cp -rf ./AUTO-INSTALLS-FILES/PIPER-TTS-XXTS-MODELS/* /usr/local/bin/xtts/models/
+	sudo chmod -R 777 /usr/local/bin/xtts/models
+
+	echo "✅ Piper-TTS System-Wide Setup Complete!"
+	echo "Please restart your terminal or run 'source /etc/profile' to use the 'piper' command anywhere."
+
+	# !SECTION: END PIPER TTS (Text To Speech) SYSTEM-WIDE INSTALLATION SCRIPT
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Kernel Compilation Dependencies
+	# Installs all the necessary packages required to compile a Linux kernel from source.
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING "Dependencies for compiling linux kernel"
+	# Install each dependency individually.
+	sudo apt install -y git fakeroot build-essential xz-utils libssl-dev bc flex bison libelf-dev dwarves libncurses-dev
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "git fakeroot build-essential xz-utils libssl-dev bc flex bison libelf-dev dwarves libncurses-dev"
+
+	# !SECTION: END - Kernel Compilation Dependencies
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: KVM/QEMU Virtualization Setup
+	# Installs and configures KVM, QEMU, and Virt-Manager for full system virtualization.
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING "KVM QEMU VIRT-MANAGER"
+	sudo apt update
+	sleep 1
+	# Install all necessary packages for the virtualization stack.
+	sudo apt install -y qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst virt-manager virt-viewer ovmf netplan.io iproute2
+	# Add the current user to the required groups to manage VMs without sudo.
+	sudo usermod -aG libvirt "$USER"
+	sudo usermod -aG libvirt-qemu "$USER"
+	sudo usermod -aG kvm "$USER"
+
+	# Configure kernel modules to be loaded automatically on boot. These are essential for KVM and VFIO (PCIe passthrough).
+	cat <<EOF | sudo tee /etc/modules-load.d/kvm-modules.conf
+# Load kernel modules for KVM and PCIe passthrough.
+vfio
+vfio_pci
+vfio_iommu_type1
+kvm
+kvm_intel
+pci_stub
+EOF
+
+	# Add a kernel boot parameter to enable the IOMMU for Intel processors. This is required for PCIe passthrough.
+	sudo touch /etc/default/grub.d/custom-KERNEL-BOOT-PARAMETERS.cfg
+	echo 'GRUB_CMDLINE_LINUX_DEFAULT="intel_iommu=on"' | sudo tee /etc/default/grub.d/custom-KERNEL-BOOT-PARAMETERS.cfg
+	# Update GRUB to apply the new kernel parameter. This may fail safely inside a chroot environment like Cubic.
+	sudo update-grub
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst virt-manager virt-viewer ovmf netplan.io iproute2"
+	# !SECTION: END KVM/QEMU Virtualization Setup
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Security Tools Installation
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "MDK4" "mdk4"                                              # A Wi-Fi testing tool.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "AIRCRACK-NG" "aircrack-ng"                                # A suite of tools for Wi-Fi network security.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "HASHCAT" "hashcat"                                        # An advanced password recovery utility.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "HCXTOOLS" "hcxtools"                                      # Tools for converting Wi-Fi handshake captures for use with Hashcat.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "maskprocessor - for hashcat mask attacks" "maskprocessor" # A high-performance word generator for Hashcat.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "flashrom - for flashing eeproms" "flashrom"               # A utility for reading, writing, and erasing flash ROM chips.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "esptool - for flashing esp32 microcontrollers" "esptool"  # Firmware flashing utility for ESP microcontrollers.	# !SECTION: END Security Tools Installation
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Charmbracelet Tools Installation
+	# Installs command-line tools from the Charmbracelet suite by fetching them from GitHub releases.
+	#-------------------------------------------------------------------------------------------------------------------
+	# Note on Charmbracelet libraries vs. tools:
+	# The following are Go LIBRARIES and not standalone command-line tools.
+	# They are meant to be imported and used within Go projects.
+	# - github.com/charmbracelet/bubbletea : Reactive TUI framework (Elm style)
+	# - github.com/charmbracelet/bubbles   : TUI components (list, table, spinner, etc.)
+	# - github.com/charmbracelet/lipgloss  : Styling (colors, borders, layouts)
+	# - github.com/charmbracelet/huh       : Build terminal forms and prompts
+	# To use them, add them as dependencies in your Go project (e.g., 'go get github.com/charmbracelet/bubbletea').
+
+	# Generic function to install a Charmbracelet tool from its GitHub release.
+	# Note: The 'chmod 777' permissions are intentionally set as per specific requirements.
+	install_charmbracelet_tool() {
+		local tool_name="$1"
+		local install_type="$2" # Can be "release" or "library"
+		local project_name="$1" # GitHub repository name, defaults to tool name
+
+		FUN_VERBOSE_INSTALLING "install charmbracelet ${tool_name}: a tool for glamorous CLIs - from github"
+
+		# Clean and create a temporary worker directory
+		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+		mkdir -p "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-${tool_name}"
+		sudo chmod -R 777 "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-${tool_name}"
+
+		# Dynamically find the latest release version
+		local latest_version
+		latest_version=$(wget -qO- "https://github.com/charmbracelet/${project_name}/releases/latest" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -n 1)
+
+		if [ -z "$latest_version" ]; then
+			echo "Error: Could not find the latest version for ${tool_name}."
+			# Clean up before returning
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+			return 1
+		fi
+
+		# Ensure /usr/local/bin exists and has the desired permissions
+		sudo mkdir -p /usr/local/bin
+		sudo chmod -R 777 /usr/local/bin
+
+		if [ "$install_type" == "release" ]; then
+			# Logic for .tar.gz archives (gum, vhs)
+			local file_name="${tool_name}_${latest_version#v}_Linux_x86_64.tar.gz"
+			local download_url="https://github.com/charmbracelet/${project_name}/releases/download/${latest_version}/${file_name}"
+
+			wget "$download_url" -P "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-${tool_name}"
+
+			if [ $? -ne 0 ]; then
+				echo "Error: Download failed for ${tool_name} archive!"
+			else
+				sudo tar -xvf "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-${tool_name}/${file_name}" -C "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-${tool_name}/"
+				local source_file
+				source_file=$(find "./AUTO-INSTALLS-FILES/WORKER-TEMP/charmbracelet-${tool_name}" -type f -name "${tool_name}" -path "*x86_64*")
+
+				if [ -n "$source_file" ]; then
+					sudo mv "$source_file" "/usr/local/bin/"
+					sudo chmod 777 "/usr/local/bin/${tool_name}"
+					echo "Moved ${tool_name} to /usr/local/bin"
+				else
+					echo "Error: File matching pattern not found for ${tool_name} in archive!"
+				fi
+			fi
+		elif [ "$install_type" == "library" ]; then
+			# Logic for library source code archives
+			# Note: This downloads the .tar.gz of the source, not a runnable binary.
+			local file_name="${latest_version}.tar.gz"
+			local download_url="https://github.com/charmbracelet/${project_name}/archive/refs/tags/${file_name}"
+
+			# delete the go-library dir if it exists (to avoid duplicate files)
+			[ -d /usr/local/bin/go-libraries/charmbracelet/"${tool_name}" ] && sudo rm -rf /usr/local/bin/go-libraries/charmbracelet/"${tool_name}"
+
+			# Download directly to the destination and make executable
+			sudo wget "$download_url" -P "/usr/local/bin/go-libraries/charmbracelet/${tool_name}"
+
+			if [ $? -eq 0 ]; then
+				sudo chmod -R 777 "/usr/local/bin/go-libraries/"
+				echo "Archived ${tool_name} source to /usr/local/bin/go-libraries/charmbracelet/"
+			else
+				echo "Error: Download failed for ${tool_name} binary!"
+			fi
+		fi
+
+		# Clean temporary worker directory
+		sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	}
+
+	# List of Charmbracelet tools to install.
+	# NOTE: bubbletea, bubbles, and lipgloss have been removed from this list as they are Go libraries
+	# and do not have binary releases, only source code archives.
+	CHARM_TOOLS="gum vhs huh bubbletea bubbles lipgloss"
+
+	# Iterate and install each tool
+	for tool in $CHARM_TOOLS; do
+		case "$tool" in
+		"gum" | "vhs")
+			install_charmbracelet_tool "$tool" "release"
+			;;
+		"huh")
+			install_charmbracelet_tool "$tool" "library"
+			;;
+		"bubbletea")
+			install_charmbracelet_tool "$tool" "library"
+			;;
+		"bubbles")
+			install_charmbracelet_tool "$tool" "library"
+			;;
+		"lipgloss")
+			install_charmbracelet_tool "$tool" "library"
+			;;
+		esac
+	done
+	# !SECTION: END Charmbracelet Tools Installation
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Fastfetch Installation
+	# Installs fastfetch, a modern system information tool, from its GitHub releases.
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING "install fastfetch - a command-line utility that displays system information in a visually appealing way - from github"
+	# Dynamically find the latest release tag.
+	REPO_URL_FASTFETCH_GITHUB="https://github.com/fastfetch-cli/fastfetch/releases/"
+	LATEST_RELEASE_TAG_FASTFETCH=$(wget -qO- "$REPO_URL_FASTFETCH_GITHUB" | grep -oE '/fastfetch-cli/fastfetch/releases/tag/[0-9]+.[0-9]+.[0-9]+' | head -n 1 | sed 's+/fastfetch-cli/fastfetch/releases/tag/++' | tr -d '[:space:]')
+	DOWNLOAD_URL_FASTFETCH="https://github.com/fastfetch-cli/fastfetch/releases/download/${LATEST_RELEASE_TAG_FASTFETCH}/fastfetch-linux-amd64.deb"
+	# Download the .deb package.
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	mkdir -p ./AUTO-INSTALLS-FILES/WORKER-TEMP/fastfetch
+	sudo chmod -R 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/fastfetch
+	wget "$DOWNLOAD_URL_FASTFETCH" -P "./AUTO-INSTALLS-FILES/WORKER-TEMP/fastfetch"
+	sudo chmod -R 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/fastfetch/fastfetch-linux-amd64.deb
+	if [ ! -f "./AUTO-INSTALLS-FILES/WORKER-TEMP/fastfetch/fastfetch-linux-amd64.deb" ]; then
+		echo "ERROR: Failed to download fastfetch package."
+		exit 1
+	fi
+	# Install the package using dpkg.
+	sudo dpkg -i "./AUTO-INSTALLS-FILES/WORKER-TEMP/fastfetch/fastfetch-linux-amd64.deb" || {
+		echo "ERROR: COULDNT INSTALL FASTFETCH"
+		exit 1
+	}
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "fastfetch"
+	# !SECTION: END Fastfetch Installation
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: yt-dlp Installation
+	# Installs yt-dlp, a terminal based youtube and other websites media download tool
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " install yt-dlp & deno - terminal based youtube and other websites media download tool & default JS runtime required for yt-dlp YouTube extraction ---"
+
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# Download latest yt-dlp linux binary
+	# Dynamically  Fetch latest release: GitHub provides a static URL structure that automatically redirects to the asset in the most recent release
+	YTDLP_LATEST_RELEASE_URL_GITHUB="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"
+	# Download latest linux binary
+	curl -sL "$YTDLP_LATEST_RELEASE_URL_GITHUB" -o "./AUTO-INSTALLS-FILES/WORKER-TEMP/yt-dlp" || exit 1
+	sudo chmod 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/yt-dlp
+	# Move to bin and set permissions
+	sudo mv ./AUTO-INSTALLS-FILES/WORKER-TEMP/yt-dlp /bin
+	sudo chmod 777 /bin/yt-dlp
+
+	# Download and install Deno (default JS runtime required for yt-dlp YouTube extraction)
+	# Dynamically  Fetch latest release: GitHub provides a static URL structure that automatically redirects to the asset in the most recent release
+	DENO_LATEST_RELEASE_URL="https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip"
+	curl -sL "$DENO_LATEST_RELEASE_URL" -o "./AUTO-INSTALLS-FILES/WORKER-TEMP/deno.zip" || exit 1
+	unzip -o "./AUTO-INSTALLS-FILES/WORKER-TEMP/deno.zip" -d "./AUTO-INSTALLS-FILES/WORKER-TEMP/"
+	sudo mv ./AUTO-INSTALLS-FILES/WORKER-TEMP/deno /bin/
+	sudo chmod 777 /bin/deno
+
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# !SECTION: END yt-dlp Installation
+
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	# SECTION: GNOME DESKTOP ENVIRONMENT INSTALLATION
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	#
+	#                                          GNOME DESKTOP ENVIRONMENT CODE BLOCK
+	#
+	# This entire section is dedicated to installing software and extensions specifically for the GNOME Desktop Environment.
+	# It will only run if the user has selected a GNOME-based distribution.
+	#
+	# The logic checks the `MAIN_CHOICE_SANITIZED` variable, which corresponds to user selections:
+	#   - "5": Wares for Ubuntu Vanilla (GNOME DE)
+	#   - "6": Full Send (Includes option 5)
+	#   - "8": Wares for Debian (GNOME DE)
+	#
+	# It includes version checking for GNOME Shell to ensure compatibility of extensions.
+	#
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	if [[ $MAIN_CHOICE_SANITIZED == *"UBUNTU_GNOME_VANILLA"* ]] || [[ $MAIN_CHOICE_SANITIZED == *"UBUNTU_GNOME_FULL_SEND"* ]] || [[ $MAIN_CHOICE_SANITIZED == *"DEBIAN_GNOME"* ]]; then
+
+		# Install core GNOME tools and extensions from the repository.
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gnome-system-tools" "gnome-system-tools"
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gnome-shell-extensions" "gnome-shell-extensions"
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gnome-shell-extension-manager" "gnome-shell-extension-manager" # A graphical tool to manage extensions.
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gnome-disk-utility" "gnome-disk-utility"
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gnome-clocks" "gnome-clocks"
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gnome-menus" "gnome-menus"
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gnome-session-flashback" "gnome-session-flashback"           # Provides a classic GNOME 2-style session.
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gnome-tweaks" "gnome-tweaks"                                 # Essential tool for advanced GNOME settings.
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gnome-shell-extension-gpaste" "gnome-shell-extension-gpaste" # A lightweight GNOME DE native clipboard manager.
+		gnome-extensions enable GPaste@gnome-shell-extensions.gnome.org
+
+		# The 'Vitals' extension installation is commented out but left for documentation.
+		# It provides an alternative for system monitoring in the top bar.
+		#if [ "$GNOME_VERSION_CHECK_NUM" -ge 45 ]; then
+		#	sudo apt install -y gnome-shell-extension-manager gir1.2-gtop-2.0 lm-sensors
+		#	sudo mkdir -p ~/.local/share/gnome-shell/extensions
+		#	sudo mkdir -p /etc/skel/.local/share/gnome-shell/extensions/
+		#	sudo git clone https://github.com/corecoding/Vitals.git ~/.local/share/gnome-shell/extensions/Vitals@CoreCoding.com -b develop
+		#	sudo git clone https://github.com/corecoding/Vitals.git /etc/skel/.local/share/gnome-shell/extensions/Vitals@CoreCoding.com -b develop
+		#	gnome-extensions enable Vitals@CoreCoding.com
+		#fi
+
+		# Install Nautilus (Files) context menu extensions.
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "gtkhash" "gtkhash"
+		FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "nautilus-admin" "nautilus-admin" # Adds "Open as Administrator" to the context menu.
+
+		# If the selected distribution is Debian, install the 'dash-to-dock' extension from the Debian repositories.
+		if [[ $MAIN_CHOICE_SANITIZED == *"DEBIAN_GNOME"* ]]; then
+			sudo apt install -y gnome-shell-extensions
+			sudo apt install -y gnome-shell-extension-dashtodock
+			# Enable for current user (ignore failure to enable since GNOME shell might not be running or reload needed)
+			gnome-extensions enable dash-to-dock@micxgx.gmail.com 2>/dev/null || true
+			if [ -d "/usr/share/gnome-shell/extensions/dash-to-dock@micxgx.gmail.com" ] || [ -d "$HOME/.local/share/gnome-shell/extensions/dash-to-dock@micxgx.gmail.com" ]; then
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: Dash-to-Dock" "success"
+			else
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: Dash-to-Dock" "fail"
+			fi
+		fi
+
+		# Check the installed GNOME Shell version to handle compatibility for extensions.
+		# This extracts the major version number (e.g., 46, 47, 48 ...etc)
+		GNOME_VERSION_CHECK_NUM=$(gnome-shell --version | tr -d -c '[:digit:]' | grep -o "^.." | tr -d '[:space:]')
+
+		# Install 'TopHat' GNOME extension for system monitoring in the top bar.
+		# The installation method differs based on the GNOME version.
+		if [ "$GNOME_VERSION_CHECK_NUM" -ge 46 ]; then # Latest release for newer versions.
+			sudo apt install -y gnome-shell-extensions
+			FUN_VERBOSE_INSTALLING "manually install TOPHAT GNOME extension"
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			sudo apt install -y gir1.2-gtop-2.0 gnome-shell-extensions
+			# Dynamically fetch the latest release tag.
+			REPO_URL_TOPHAT_GITHUB="https://github.com/fflewddur/tophat/releases"
+			LATEST_RELEASE_TAG_TOPHAT="v$(wget -qO- "$REPO_URL_TOPHAT_GITHUB" | grep -oP '(?<=/fflewddur/tophat/releases/tag/v)[0-9]+' | sort -V | tail -n 1 | tr -d '[:space:]')"
+			if [[ -z "$LATEST_RELEASE_TAG_TOPHAT" ]]; then
+				echo "Failed to fetch the latest release tag."
+				exit 1
+			fi
+			# Construct the download URL for the release zip.
+			RELEASE_PAGE_URL_TOPHAT_ZIP="https://github.com/fflewddur/tophat/releases/download/${LATEST_RELEASE_TAG_TOPHAT}/tophat@fflewddur.github.io.${LATEST_RELEASE_TAG_TOPHAT}.shell-extension.zip"
+			if [[ -z "$RELEASE_PAGE_URL_TOPHAT_ZIP" ]]; then
+				echo "Failed to fetch the latest download URL."
+				exit 1
+			fi
+			# Download and extract the extension zip to the global directory for all users.
+			wget -q "$RELEASE_PAGE_URL_TOPHAT_ZIP" -P ./AUTO-INSTALLS-FILES/WORKER-TEMP/tophat
+
+			GLOBAL_TOPHAT_DIR="/usr/share/gnome-shell/extensions/tophat@fflewddur.github.io"
+			sudo rm -rf "$GLOBAL_TOPHAT_DIR"
+			sudo mkdir -p "$GLOBAL_TOPHAT_DIR"
+
+			# Extract to global directory
+			sudo 7z x ./AUTO-INSTALLS-FILES/WORKER-TEMP/tophat/*.zip -o"$GLOBAL_TOPHAT_DIR" -aoa >/dev/null
+			sudo chmod -R 755 "$GLOBAL_TOPHAT_DIR"
+
+			# Compile schemas for the extension (Essential for global installs)
+			if [ -d "$GLOBAL_TOPHAT_DIR/schemas" ]; then
+				sudo glib-compile-schemas "$GLOBAL_TOPHAT_DIR/schemas"
+			fi
+
+			# Enable the extension for current user (ignore failure to enable since GNOME shell might not be running or reload needed)
+			gnome-extensions enable tophat@fflewddur.github.io 2>/dev/null || true
+			if [ -f "$GLOBAL_TOPHAT_DIR/metadata.json" ]; then
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: TopHat" "success"
+			else
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: TopHat" "fail"
+			fi
+
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		fi
+		# END TopHat extension installation
+
+		# Install 'Caffeine' GNOME extension to prevent the system from sleeping.
+		# The installation method differs based on the GNOME version.
+		if [ "$GNOME_VERSION_CHECK_NUM" -ge 46 ]; then # Main branch for newer versions.
+			FUN_VERBOSE_INSTALLING " manually install CAFFEINE gnome extension"
+			sudo apt install -y gettext gnome-shell-extensions
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			git clone https://github.com/eonpatapon/gnome-shell-extension-caffeine.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/gnome-shell-extension-caffeine
+			cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/gnome-shell-extension-caffeine || exit
+			make build
+			# make install # -> we commented the make build because it will install to our $HOME gnome-shell ext's dir ( and we want it in the global /usr/share/gnome-shell/extensions DIR instead)
+			# Global Installation for all users
+			GLOBAL_CAFFEINE_DIR="/usr/share/gnome-shell/extensions/caffeine@patapon.info"
+			sudo rm -rf "$GLOBAL_CAFFEINE_DIR"
+			sudo mkdir -p "$GLOBAL_CAFFEINE_DIR"
+			sudo chmod -R 777 "$GLOBAL_CAFFEINE_DIR"
+
+			# Extract the generated zip file to the global location.
+			sudo 7z x caffeine@patapon.info.zip -o"$GLOBAL_CAFFEINE_DIR" -aoa >/dev/null
+			sudo chmod -R 777 "$GLOBAL_CAFFEINE_DIR"
+
+			# Compile the GSettings schemas (Essential for global installs)
+			if [ -d "$GLOBAL_CAFFEINE_DIR/schemas" ]; then
+				sudo glib-compile-schemas "$GLOBAL_CAFFEINE_DIR/schemas"
+			fi
+
+			cd "$CD_DIRNAME" || exit
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			# Enable for current user (ignore failure to enable since GNOME shell might not be running or reload needed)
+			gnome-extensions enable caffeine@patapon.info 2>/dev/null || true
+			if [ -f "$GLOBAL_CAFFEINE_DIR/metadata.json" ]; then
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: Caffeine" "success"
+			else
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: Caffeine" "fail"
+			fi
+		fi
+		# END Caffeine extension installation
+
+		# Install 'Battery Health Charging Extension' for managing battery charge levels on ThinkPads & other laptops. (dynamically fetches latest version per GNOME version)
+		if [ "$GNOME_VERSION_CHECK_NUM" -ge 46 ]; then
+			FUN_VERBOSE_INSTALLING "install - Battery Health Charging GNOME extension (Global & Automated)"
+			EXT_UUID="Battery-Health-Charging@maniacx.github.com"
+			GNOME_VER="$GNOME_VERSION_CHECK_NUM"
+			# Clear temp work directory
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			# Fetch latest version & download URL dynamically
+			EXT_INFO=$(curl -s "https://extensions.gnome.org/extension-info/?uuid=${EXT_UUID}&shell_version=${GNOME_VER}")
+			LATEST_VERSION=$(echo "$EXT_INFO" | jq -r '.version')
+			if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" == "null" ]; then
+				echo "Could not fetch latest version for $EXT_UUID and GNOME $GNOME_VER" >&2
+				exit 1
+			fi
+			DOWNLOAD_URL="https://extensions.gnome.org/api/v1/extensions/${EXT_UUID}/versions/${LATEST_VERSION}/?format=zip"
+			TMP_ZIP="./AUTO-INSTALLS-FILES/WORKER-TEMP/${EXT_UUID}.v${LATEST_VERSION}.zip"
+			# Download the ZIP
+			wget -qO "$TMP_ZIP" "$DOWNLOAD_URL"
+
+			# Global Installation to /usr/share (available for all users)
+			GLOBAL_EXT_DIR="/usr/share/gnome-shell/extensions/${EXT_UUID}"
+			sudo rm -rf "$GLOBAL_EXT_DIR"
+			sudo mkdir -p "$GLOBAL_EXT_DIR"
+			sudo unzip -q "$TMP_ZIP" -d "$GLOBAL_EXT_DIR"
+			sudo chmod -R 755 "$GLOBAL_EXT_DIR"
+
+			# Compile schemas for the extension
+			if [ -d "$GLOBAL_EXT_DIR/schemas" ]; then
+				sudo glib-compile-schemas "$GLOBAL_EXT_DIR/schemas"
+			fi
+
+			# Create a provisioning script to handle Polkit rules for ALL users
+			cat <<EOF | sudo tee /usr/local/bin/bhc-provision.sh >/dev/null
+#!/bin/bash
+# Automatically provision Polkit rules for Battery Health Charging extension for all users
+EXT_PATH="$GLOBAL_EXT_DIR"
+INSTALLER="\$EXT_PATH/tool/installer.sh"
+
+if [ ! -f "\$INSTALLER" ]; then
+    echo "Installer not found at \$INSTALLER"
+    exit 1
+fi
+
+for home_dir in /home/*; do
+    [ -d "\$home_dir" ] || continue
+    user=\$(basename "\$home_dir")
+    if id "\$user" &>/dev/null; then
+        echo "Provisioning BHC for user: \$user"
+        bash "\$INSTALLER" --tool-user "\$user" install > /dev/null 2>&1
+    fi
+done
+EOF
+			sudo chmod +x /usr/local/bin/bhc-provision.sh
+
+			# Create a systemd service to run the provisioning script on boot
+			cat <<EOF | sudo tee /etc/systemd/system/bhc-provision.service >/dev/null
+[Unit]
+Description=Battery Health Charging Polkit Provisioner
+After=local-fs.target
+ConditionPathExists=$GLOBAL_EXT_DIR/tool/installer.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bhc-provision.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+			# Reload systemd, enable and start the service
+			sudo systemctl daemon-reload
+			sudo systemctl enable bhc-provision.service
+			sudo systemctl start bhc-provision.service
+
+			# Enable the extension for the current user (ignore failure to enable since GNOME shell might not be running or reload needed)
+			gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
+			if [ -f "$GLOBAL_EXT_DIR/metadata.json" ]; then
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: $EXT_UUID" "success"
+			else
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: $EXT_UUID" "fail"
+			fi
+
+			# Cleanup
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		fi
+		#END OF BATTERY HEALTH CHARGING EXTENSION INSTALLATION (GLOBAL & AUTOMATED)
+
+		# # this old method of installing the Thinkpad Thermal extension is now deprecated in favor of building from github source (because the extensions.gnome.org has stale GNOME compatibility) but leaving it here for reference.
+		# # Install 'Thinkpad Thermal' GNOME extension for fan control (dynamically fetches latest version per GNOME version)
+		# if [ "$GNOME_VERSION_CHECK_NUM" -ge 46 ]; then
+		# 	FUN_VERBOSE_INSTALLING "install - Thinkpad Thermal GNOME extension (dynamic latest version)"
+		# 	EXT_UUID="thinkpadthermal@moonlight.drive.vk.gmail.com"
+		# 	GNOME_VER="$GNOME_VERSION_CHECK_NUM"
+		# 	# Clear temp work directory
+		# 	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		# 	# Fetch latest version & download URL dynamically
+		# 	EXT_INFO=$(curl -s "https://extensions.gnome.org/extension-info/?uuid=${EXT_UUID}&shell_version=${GNOME_VER}")
+		# 	LATEST_VERSION=$(echo "$EXT_INFO" | jq -r '.version')
+		# 	if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" == "null" ]; then
+		# 		echo "Could not fetch latest version for $EXT_UUID and GNOME $GNOME_VER" >&2
+		# 		exit 1
+		# 	fi
+		# 	DOWNLOAD_URL="https://extensions.gnome.org/api/v1/extensions/${EXT_UUID}/versions/${LATEST_VERSION}/?format=zip"
+		# 	TMP_ZIP="./AUTO-INSTALLS-FILES/WORKER-TEMP/${EXT_UUID}.v${LATEST_VERSION}.zip"
+		# 	# download the actual gnome extension "Thinkpad Thermal"
+		# 	wget -O "$TMP_ZIP" "$DOWNLOAD_URL" || exit
+		# 	# Global Installation to /usr/share (available for all users)
+		# 	GLOBAL_EXT_DIR="/usr/share/gnome-shell/extensions/${EXT_UUID}"
+		# 	sudo rm -rf "$GLOBAL_EXT_DIR"
+		# 	sudo mkdir -p "$GLOBAL_EXT_DIR"
+		# 	sudo chmod -R 777 "$GLOBAL_EXT_DIR"
+		# 	sudo unzip -q "$TMP_ZIP" -d "$GLOBAL_EXT_DIR"
+		# 	sudo chmod -R 777 "$GLOBAL_EXT_DIR"
+
+		# 	# Compile schemas for the extension
+		# 	if [ -d "$GLOBAL_EXT_DIR/schemas" ]; then
+		# 		sudo glib-compile-schemas "$GLOBAL_EXT_DIR/schemas"
+		# 	fi
+
+		# 	# Add current GNOME version to 'ThinkPad Thermal' extension to bypass missing developer updates.
+		# 	# This conditional method prevents duplicates and perfectly preserves the original list order.
+		# 	#
+		# 	# Process breakdown:
+		# 	# 1. jq --arg v "${GNOME_VERSION_CHECK_NUM}": Passes the system's GNOME version variable into jq as '$v'.
+		# 	# 2. |= (update operator): Applies the conditional logic directly inside the "shell-version" array.
+		# 	# 3. if index($v): Checks if the current version string already exists in the compatibility list.
+		# 	# 4. then .: If found (True), leaves the array completely untouched to avoid duplication.
+		# 	# 5. else . + [$v]: If missing (False), safely appends the system version string to the end of the array.
+		# 	# 6. >temp.json && mv: Streams the clean JSON to a temporary file and overwrites the system path upon success.
+		# 	jq --arg v "${GNOME_VERSION_CHECK_NUM}" '.["shell-version"] |= (if index($v) then . else . + [$v] end)' /usr/share/gnome-shell/extensions/thinkpadthermal@moonlight.drive.vk.gmail.com/metadata.json >temp.json && mv temp.json "/usr/share/gnome-shell/extensions/thinkpadthermal@moonlight.drive.vk.gmail.com/metadata.json"
+
+		# 	# Enable fan control via thinkpad_acpi
+		# 	echo "options thinkpad_acpi fan_control=1" | sudo tee /etc/modprobe.d/thinkpad_acpi.conf
+		# 	sudo update-initramfs -u
+		# 	sudo modprobe thinkpad_acpi
+
+		# 	# Enable for current user (ignore failure to enable since GNOME shell might not be running or reload needed)
+		# 	gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
+		# 	if [ -f "$GLOBAL_EXT_DIR/metadata.json" ]; then
+		# 		FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: $EXT_UUID" "success"
+		# 	else
+		# 		FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: $EXT_UUID" "fail"
+		# 	fi
+
+		# 	# Cleanup
+		# 	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		# fi
+		# # END OF THINKPAD THERMAL INSTALLATION
+
+		# Install 'Thinkpad Thermal' GNOME extension for fan control (dynamically fetches latest version per GNOME version)
+
+		#-------------------------------------------------------------------------------------------------------------------
+		# ThinkPad Thermal GNOME Extension
+		# Build and install directly from GitHub source
+		#
+		# No cd commands are used. [to stay in the same working directory - minimal directory changes]
+		#-------------------------------------------------------------------------------------------------------------------
+		if [ "$GNOME_VERSION_CHECK_NUM" -ge 46 ]; then
+			FUN_VERBOSE_INSTALLING "install - Thinkpad Thermal GNOME extension (build from github source latest version)"
+
+			# Clear temp work directory
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+
+			# Install build environment
+			sudo apt update
+			sudo apt install -y nodejs npm node-corepack
+
+			# Enable Corepack/Yarn
+			sudo corepack enable || exit 1
+
+			# Verify
+			node --version >/dev/null || exit 1
+			npm --version >/dev/null || exit 1
+			yarn --version >/dev/null || exit 1
+
+			EXT_UUID="thinkpadthermal@moonlight.drive.vk.gmail.com"
+			EXT_REPO="https://github.com/fmujakitz/thinkpad-thermal.git"
+			EXT_SRC_DIR="./AUTO-INSTALLS-FILES/WORKER-TEMP/thinkpad-thermal"
+			GLOBAL_EXT_DIR="/usr/share/gnome-shell/extensions/${EXT_UUID}"
+
+			# Clone source
+			git clone --depth 1 "$EXT_REPO" "$EXT_SRC_DIR" || exit 1
+
+			# Install/build dependencies as normal user
+			yarn --cwd "$EXT_SRC_DIR" install || exit 1
+
+			# Build installable GNOME extension
+			yarn --cwd "$EXT_SRC_DIR" build:package || exit 1
+
+			# Locate generated package
+			TMP_ZIP=$(find "$EXT_SRC_DIR/dist" -maxdepth 1 -type f -name '*.zip' -print -quit)
+
+			if [ -z "$TMP_ZIP" ]; then
+				echo "ERROR: ThinkPad Thermal build did not produce a ZIP." >&2
+				exit 1
+			fi
+
+			# Global installation
+			sudo rm -rf "$GLOBAL_EXT_DIR"
+			sudo mkdir -p "$GLOBAL_EXT_DIR"
+			sudo chmod -R 777 "$GLOBAL_EXT_DIR"
+			sudo unzip -q "$TMP_ZIP" -d "$GLOBAL_EXT_DIR" || exit 1
+			sudo chmod -R 777 "$GLOBAL_EXT_DIR"
+
+			# Compile schemas
+			if [ -d "$GLOBAL_EXT_DIR/schemas" ]; then
+				sudo glib-compile-schemas "$GLOBAL_EXT_DIR/schemas"
+			fi
+
+			# Add current GNOME version to 'ThinkPad Thermal' extension to bypass missing developer updates.
+			# This conditional method prevents duplicates and perfectly preserves the original list order.
+			#
+			# Process breakdown:
+			# 1. jq --arg v "${GNOME_VERSION_CHECK_NUM}": Passes the system's GNOME version variable into jq as '$v'.
+			# 2. |= (update operator): Applies the conditional logic directly inside the "shell-version" array.
+			# 3. if index($v): Checks if the current version string already exists in the compatibility list.
+			# 4. then .: If found (True), leaves the array completely untouched to avoid duplication.
+			# 5. else . + [$v]: If missing (False), safely appends the system version string to the end of the array.
+			# 6. >temp.json && mv: Streams the clean JSON to a temporary file and overwrites the system path upon success.
+			jq --arg v "${GNOME_VERSION_CHECK_NUM}" '.["shell-version"] |= (if index($v) then . else . + [$v] end)' /usr/share/gnome-shell/extensions/thinkpadthermal@moonlight.drive.vk.gmail.com/metadata.json >temp.json && mv temp.json "/usr/share/gnome-shell/extensions/thinkpadthermal@moonlight.drive.vk.gmail.com/metadata.json"
+
+			# Enable fan control via thinkpad_acpi
+			echo "options thinkpad_acpi fan_control=1" | sudo tee /etc/modprobe.d/thinkpad_acpi.conf
+			sudo update-initramfs -u
+			sudo modprobe thinkpad_acpi
+
+			# Enable for current user (ignore failure to enable since GNOME shell might not be running or reload needed)
+			gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
+			if [ -f "$GLOBAL_EXT_DIR/metadata.json" ]; then
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: $EXT_UUID" "success"
+			else
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: $EXT_UUID" "fail"
+			fi
+
+			# Cleanup
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		fi
+		# END OF THINKPAD THERMAL INSTALLATION
+
+		# Install 'Transparent Top Bar' GNOME extension (dynamically fetches latest version per GNOME version)
+		if [ "$GNOME_VERSION_CHECK_NUM" -ge 46 ]; then
+			FUN_VERBOSE_INSTALLING "install - Transparent Top Bar GNOME extension (dynamic latest version)"
+			EXT_UUID="transparent-top-bar@ftpix.com"
+			GNOME_VER="$GNOME_VERSION_CHECK_NUM"
+			# Clear temp work directory
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			TMP_DIR="./AUTO-INSTALLS-FILES/WORKER-TEMP/transparent-top-bar"
+			mkdir -p "$TMP_DIR"
+			# Fetch latest version & download URL dynamically
+			EXT_INFO=$(curl -s "https://extensions.gnome.org/extension-info/?uuid=${EXT_UUID}&shell_version=${GNOME_VER}")
+			LATEST_VERSION=$(echo "$EXT_INFO" | jq -r '.version')
+			if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" == "null" ]; then
+				echo "Could not fetch latest version for $EXT_UUID and GNOME $GNOME_VER" >&2
+				exit 1
+			fi
+			DOWNLOAD_URL="https://extensions.gnome.org/api/v1/extensions/${EXT_UUID}/versions/${LATEST_VERSION}/?format=zip"
+			TMP_ZIP="${TMP_DIR}/${EXT_UUID}.v${LATEST_VERSION}.zip"
+			# Download the ZIP
+			wget -qO "$TMP_ZIP" "$DOWNLOAD_URL"
+
+			# Global Installation to /usr/share (available for all users)
+			GLOBAL_EXT_DIR="/usr/share/gnome-shell/extensions/${EXT_UUID}"
+			sudo rm -rf "$GLOBAL_EXT_DIR"
+			sudo mkdir -p "$GLOBAL_EXT_DIR"
+			sudo 7z x "$TMP_ZIP" -o"$GLOBAL_EXT_DIR" -aoa >/dev/null
+			sudo chmod -R 755 "$GLOBAL_EXT_DIR"
+
+			# Compile schemas for the extension
+			if [ -d "$GLOBAL_EXT_DIR/schemas" ]; then
+				sudo glib-compile-schemas "$GLOBAL_EXT_DIR/schemas"
+			fi
+
+			# Enable for current user (ignore failure to enable since GNOME shell might not be running or reload needed)
+			gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
+			if [ -f "$GLOBAL_EXT_DIR/metadata.json" ]; then
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: $EXT_UUID" "success"
+			else
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: $EXT_UUID" "fail"
+			fi
+
+			# Cleanup
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		fi
+		# END OF TRANSPARENT TOP BAR INSTALLATION
+
+		# Install 'Hidamari' live wallpaper application via Flatpak.
+		FUN_VERBOSE_INSTALLING "install HIDAMARI live walpaper - flatpak"
+		sudo apt install flatpak -y
+		sudo apt install gnome-software-plugin-flatpak -y                                            # Integrates Flatpak with the GNOME Software center.
+		sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo # Add the Flathub repository.
+		flatpak install -y flathub io.github.jeffshee.Hidamari
+
+		# Pre-populate the Videos directory with sample live wallpaper videos for Hidamari
+		# This is done for both the current user and for new users via /etc/skel.
+		sudo mkdir -p /etc/skel/Videos/Hidamari
+		sudo mkdir -p "$HOME"/Videos/Hidamari
+		sudo cp ./AUTO-INSTALLS-FILES/BACKGROUND-IMAGES-VIDEOS/VIDEOS/* /etc/skel/Videos/Hidamari
+		sudo cp ./AUTO-INSTALLS-FILES/BACKGROUND-IMAGES-VIDEOS/VIDEOS/* "$HOME"/Videos/Hidamari
+		sudo chmod -R 777 /etc/skel/Videos/Hidamari && sudo chmod -R 777 "$HOME"/Videos/Hidamari
+
+		# Install 'Hanabi' live wallpaper application from GitHub
+		if [ "$GNOME_VERSION_CHECK_NUM" -ge 46 ]; then
+			FUN_VERBOSE_INSTALLING "install HANABI live walpaper - from github"
+			# Clear temp work directory
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+			# Install build dependencies
+			sudo apt install -y meson
+			# Clone the repo
+			git clone https://github.com/jeffshee/gnome-ext-hanabi.git \
+				./AUTO-INSTALLS-FILES/WORKER-TEMP/gnome-ext-hanabi
+			# Run the installer
+			cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/gnome-ext-hanabi || exit
+			make install
+			cd "$CD_DIRNAME" || exit
+
+			# Globalize Hanabi
+			EXT_UUID="hanabi-extension@jeffshee.github.io"
+			GLOBAL_EXT_DIR="/usr/share/gnome-shell/extensions/${EXT_UUID}"
+			USER_EXT_DIR="$HOME/.local/share/gnome-shell/extensions/${EXT_UUID}"
+
+			if [ -d "$USER_EXT_DIR" ]; then
+				sudo rm -rf "$GLOBAL_EXT_DIR"
+				sudo mkdir -p "$GLOBAL_EXT_DIR"
+				sudo cp -rf "$USER_EXT_DIR/"* "$GLOBAL_EXT_DIR/"
+				sudo chmod -R 777 "$GLOBAL_EXT_DIR"
+
+				# Compile schemas (Essential for global)
+				if [ -d "$GLOBAL_EXT_DIR/schemas" ]; then
+					sudo glib-compile-schemas "$GLOBAL_EXT_DIR/schemas"
+				fi
+
+				# Remove user-local version to avoid conflicts
+				rm -rf "$USER_EXT_DIR"
+			fi
+
+			# Enable for current user (ignore failure to enable since GNOME shell might not be running or reload needed)
+			gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
+			if [ -f "$GLOBAL_EXT_DIR/metadata.json" ]; then
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: $EXT_UUID" "success"
+			else
+				FUN_TRACK_CUSTOM_INSTALL "Gnome Ext: $EXT_UUID" "fail"
+			fi
+
+			# Cleanup
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.*
+		fi
+
+		# Install gnome-user-share for simple file sharing over the network.
+		FUN_VERBOSE_INSTALLING "gnome-user-share"
+		sudo apt install -y gnome-user-share
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "gnome-user-share"
+
+		# set permissions for the global gnome extensions dir [ /usr/share/gnome-shell/extensions ]
+		sudo chmod -R 777 /usr/share/gnome-shell/
+	fi
+
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	#
+	#                                          END OF GNOME DESKTOP ENVIRONMENT CODE BLOCK
+	#
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	# !SECTION: END GNOME DESKTOP ENVIRONMENT INSTALLATION
+
+	# -------------------------------------------------------------------------------------------------------------------
+	# SECTION: GNOME-UNDERCOVER Setup
+	# -------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "GNOME-UNDERCOVER system setup - WINDOWS 10 THEME - download assets, wallpapers, themes, icons, and setup toggle script"
+	# setup gnome-undercover system [download assets, wallpapers, themes, icons, and toggle script]
+	# this is for our custom-GNOME-UNDERCOVER script that toggles between normal GNOME and a "Windows 10" themed GNOME for undercover purposes.
+	# System-wide installer for gnome-undercover assets
+
+	REPO_URL="https://gitlab.com/kalilinux/packages/kali-undercover.git"
+	TEMP_DIR="./AUTO-INSTALLS-FILES/WORKER-TEMP/kali-undercover"
+	WIN_THEME="Windows-10"
+	WIN_ICONS="Windows-10-Icons"
+
+	# 1. Download Assets
+	echo "Cloning kali-undercover repository..."
+
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	git clone --depth 1 "$REPO_URL" "$TEMP_DIR" || {
+		echo "Failed to download assets"
+		exit 1
+	}
+
+	# 2. Deploy to current user
+	echo "Deploying assets to $HOME..."
+	mkdir -p "$HOME/.local/share/kali-undercover"
+	mkdir -p "$HOME/.local/share/themes"
+	mkdir -p "$HOME/.local/share/icons"
+
+	# Copy the whole repo for internal script logic (wallpapers, scripts)
+	cp -r "$TEMP_DIR/"* "$HOME/.local/share/kali-undercover/"
+
+	# Copy specific theme/icon folders for GNOME to recognize them immediately
+	cp -r "$TEMP_DIR/share/themes/$WIN_THEME" "$HOME/.local/share/themes/"
+	cp -r "$TEMP_DIR/share/icons/$WIN_ICONS" "$HOME/.local/share/icons/"
+
+	# 3. Deploy to /etc/skel for future users
+	echo "Deploying assets to /etc/skel..."
+	sudo mkdir -p "/etc/skel/.local/share/kali-undercover"
+	sudo mkdir -p "/etc/skel/.local/share/themes"
+	sudo mkdir -p "/etc/skel/.local/share/icons"
+
+	# Copy the whole repo for internal script logic (wallpapers, scripts)
+	sudo cp -r "$TEMP_DIR/"* "/etc/skel/.local/share/kali-undercover/"
+
+	# Copy specific theme/icon folders for GNOME to recognize them immediately
+	sudo cp -r "$TEMP_DIR/share/themes/$WIN_THEME" "/etc/skel/.local/share/themes/"
+	sudo cp -r "$TEMP_DIR/share/icons/$WIN_ICONS" "/etc/skel/.local/share/icons/"
+
+	# 4. Install the toggle script to /bin for system-wide access .. and also make anoteh copy of it with name "gnome-undercover" for easier access (fast to type and remember name when wanting to toggle the undercover mode on/off)
+	if [ -f "./AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS/custom-GNOME-UNDERCOVER" ]; then
+		echo "Installing custom-GNOME-UNDERCOVER to /bin..."
+		sudo cp "./AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS/custom-GNOME-UNDERCOVER" "/bin"
+		sudo cp "./AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS/custom-GNOME-UNDERCOVER" "/bin/gnome-undercover"
+		sudo chmod +x /bin/custom-GNOME-UNDERCOVER
+		sudo chmod +x /bin/gnome-undercover
+	else
+		echo "ERROR: custom-GNOME-UNDERCOVER script not found. Skipping installation of the toggle script."
+	fi
+
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	echo "-----------------------------------------------"
+	echo "Installation Complete!"
+	echo "Assets installed for current user and /etc/skel"
+	echo "Command available as: custom-GNOME-UNDERCOVER"
+	echo "Command available as: gnome-undercover"
+	echo "-----------------------------------------------"
+
+	# !SECTION: END GNOME-UNDERCOVER Setup
+
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	#
+	#                                          MATE DESKTOP ENVIRONMENT CODE BLOCK
+	#
+	# This section is dedicated to installing software and configurations specifically for the MATE Desktop Environment.
+	# It will only run if the user has selected a MATE-based distribution (MAIN_CHOICE_SANITIZED contains "1").
+	#
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	# Check if the user's choice includes the MATE DE option.
+	if echo "$MAIN_CHOICE_SANITIZED" | grep -q -o -w "1"; then
+		# Special handling for Linux Mint: remove the `nosnap.pref` file which blocks snapd installation.
+		if [[ $SELECTED_MATE_DE_DISTRO -eq 1 ]]; then # 1 corresponds to Linux Mint in the main script's logic.
+			FUN_VERBOSE_INSTALLING "snapd  for  Linuxmint"
+			sudo rm -rf /etc/apt/preferences.d/nosnap.pref
+			sudo apt update
+			sudo apt install -y snapd
+			# Install the Snap Store (GUI for snaps).
+			sudo snap install snap-store
+		fi
+
+		# Install MATE desktop extras and plugins for the Caja file manager.
+		FUN_VERBOSE_INSTALLING "mate-desktop-environment-extras"
+		sudo apt install -y mate-desktop-environment
+		sudo apt install -y caja-eiciel
+		sudo apt install -y caja-gtkhash
+		sudo apt install -y caja-image-converter
+		sudo apt install -y caja-rename
+		sudo apt install -y caja-seahorse
+		sudo apt install -y dconf-editor
+		sudo apt install -y mate-dock-applet
+		sudo apt install -y mate-menu
+		sudo apt install -y mate-user-share
+		sudo apt install -y mate-tweak
+		sudo apt install -y blueman
+		sudo apt install mate-desktop-environment-extras -y
+
+		FUN_VERBOSE_INSTALLING "caja-gtkhash"
+		sudo apt install caja-gtkhash -y
+	fi
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	#
+	#                                          END OF MATE DESKTOP ENVIRONMENT CODE BLOCK
+	#
+	#:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+
+	# Install `live-boot` utilities, often used for creating live systems.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "live-boot" "live-boot"
+
+	# Install macchanger, a tool for spoofing MAC addresses.
+	FUN_VERBOSE_INSTALLING "macchanger"
+	sudo apt install -y debconf-utils
+	# Pre-seed the answer to prevent the interactive prompt asking whether to run automatically.
+	echo macchanger macchanger/automatically_run boolean false | sudo debconf-set-selections
+	sudo apt install macchanger -y
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "macchanger"
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: VirtualBox Installation
+	#
+	# This script installs VirtualBox using a primary and a fallback method to ensure reliability.
+	#
+	# 1. Primary Method: Attempts a manual installation of VirtualBox 7.X from the official
+	#    Oracle repository. This includes adding the required GPG key and repository source.
+	#
+	# 2. Fallback Method: If any step in the primary method fails (e.g., due to a server outage),
+	#    the script automatically falls back to installing the VirtualBox packages from the
+	#    default system (`apt`) repositories.
+	#
+	# This ensures a successful installation even when external repositories are unavailable.
+	#-------------------------------------------------------------------------------------------------------------------
+
+	# This block attempts the manual installation in a subshell.
+	(
+		echo "Attempting manual installation of VirtualBox 7.X..."
+
+		# PKG_NAME="virtualbox-7.X"
+		FUN_VERBOSE_INSTALLING "Install  VIRTUALBOX 7.X --- MANUALLY Import VirtualBox Repo GPG Key"
+
+		sudo apt update
+		sleep 1
+
+		# Add the Oracle GPG key for the VirtualBox repository.
+		echo "Adding Oracle GPG key..."
+		sudo mkdir -p /etc/apt/keyrings
+		if wget -q -O- https://www.virtualbox.org/download/oracle_vbox_2016.asc | sudo gpg --dearmor --yes --output /etc/apt/keyrings/oracle-virtualbox-2016.gpg; then
+			# Add the VirtualBox repository source file.
+			echo "Adding VirtualBox repository..."
+			cat <<EOF | sudo tee /etc/apt/sources.list.d/virtualbox.sources
+Types: deb
+URIs: https://download.virtualbox.org/virtualbox/debian
+Suites: $(cat /etc/os-release | grep UBUNTU_CODENAME= | cut -d = -f2 | tr -d '[:space:]')
+Components: contrib
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/oracle-virtualbox-2016.gpg
+EOF
+
+			if [ -s /etc/apt/sources.list.d/virtualbox.sources ]; then
+				sudo apt update
+
+				# obtain the latest version number dynamically from the repo
+				# List all available VirtualBox 7.x packages and print the newest one
+				LATEST_VBOX_VERSION=$(apt search virtualbox 2>/dev/null | # Search for packages named "virtualbox", suppress stderr
+					grep -o "^virtualbox-7.*" |                              # Keep only lines starting with "virtualbox-7"
+					awk -F "/" '{print $1}' |                                # Strip everything after "/" to leave just the package name
+					sort -V |                                                # Sort using version-aware ordering (7.0 < 7.1 < 7.2)
+					tail -n1)
+				if [[ -z "$LATEST_VBOX_VERSION" ]]; then
+					echo "Could not determine the latest VirtualBox 7.X version from the repository."
+					exit 1
+				else
+					echo "Latest VirtualBox 7.X version found: $LATEST_VBOX_VERSION"
+				fi
+
+				echo "Installing latest virtualbox-7.X  from apt..."
+
+				sudo apt install -y "$LATEST_VBOX_VERSION"
+
+				# Install the VirtualBox Extension Pack.
+				echo "Installing VirtualBox Extension Pack..."
+				sudo apt install -y debconf-utils
+				echo virtualbox-ext-pack virtualbox-ext-pack/license select true | sudo debconf-set-selections
+				# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+				sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+				if ! command -v VBoxManage >/dev/null 2>&1; then
+					echo "VBoxManage not found. Cannot determine version. Skipping Extension Pack install."
+				else
+					# Extract exact installed version of VirtualBox to download the matching Extension Pack
+					_vbox_version=$(VBoxManage --version | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | tr -d '[:space:]')
+					EXT_PACK_VERSION="$_vbox_version"
+					echo "Downloading Extension Pack version ${EXT_PACK_VERSION}..."
+					wget "https://download.virtualbox.org/virtualbox/${EXT_PACK_VERSION}/Oracle_VirtualBox_Extension_Pack-${EXT_PACK_VERSION}.vbox-extpack" -P ./AUTO-INSTALLS-FILES/WORKER-TEMP
+					echo "Installing downloaded extension pack..."
+					yes | sudo VBoxManage extpack install ./AUTO-INSTALLS-FILES/WORKER-TEMP/*.vbox-extpack
+				fi
+
+				# Install the VirtualBox Guest Additions if the ISO is present on the system.
+				if [ -f /usr/share/virtualbox/VBoxGuestAdditions.iso ]; then
+					echo "VBoxGuestAdditions.iso found. Installing..."
+					FUN_VERBOSE_INSTALLING "VBoxGuestAdditions.iso exists in [/usr/share/virtualbox] ... installing VBoxGuestAdditions.iso"
+					# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+					sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+					7z x /usr/share/virtualbox/VBoxGuestAdditions.iso -o./AUTO-INSTALLS-FILES/WORKER-TEMP -aoa
+					sudo chmod 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/*
+					sudo ./AUTO-INSTALLS-FILES/WORKER-TEMP/VBoxLinuxAdditions.run
+					# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+					sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+				else
+					echo "VBoxGuestAdditions.iso not found. Skipping."
+				fi
+
+				# Add the user to the vboxusers and disk groups.
+				echo "Adding user to vboxusers and disk groups..."
+				sudo usermod -aG vboxusers "$USER"
+				sudo usermod -aG disk "$USER"
+				# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+				sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+				FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "$LATEST_VBOX_VERSION"
+				echo "Manual installation of VirtualBox 7.X successful."
+			else
+				echo "VirtualBox sources file is empty. Fallback to standard repository installation."
+				exit 1
+			fi
+
+		else
+			echo "No valid Oracle GPG key found. Skipping. virtualbox 7.X ---> will install fallback Virtualbox from apt repositories"
+		fi
+
+	) || {
+		# This block will only execute if any command in the above block fails.
+		echo "Manual installation failed. Falling back to standard repository installation."
+		FUN_VERBOSE_INSTALLING " installing virtualbox from apt repositories"
+		sudo apt update
+		sleep 1
+		sudo apt install -y virtualbox virtualbox-ext-pack virtualbox-guest-additions-iso
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "virtualbox"
+
+		# Install the VirtualBox Guest Additions if the ISO is present on the system.
+		if [ -f /usr/share/virtualbox/VBoxGuestAdditions.iso ]; then
+			echo "VBoxGuestAdditions.iso found. Installing..."
+			FUN_VERBOSE_INSTALLING "VBoxGuestAdditions.iso exists in [/usr/share/virtualbox] ... installing VBoxGuestAdditions.iso"
+			# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+			7z x /usr/share/virtualbox/VBoxGuestAdditions.iso -o./AUTO-INSTALLS-FILES/WORKER-TEMP -aoa
+			sudo chmod 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/*
+			sudo ./AUTO-INSTALLS-FILES/WORKER-TEMP/VBoxLinuxAdditions.run
+			# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+		else
+			echo "VBoxGuestAdditions.iso not found. Skipping."
+		fi
+
+		# Add the user to the vboxusers and disk groups.
+		echo "Adding user to vboxusers and disk groups..."
+		sudo usermod -aG vboxusers "$USER"
+		sudo usermod -aG disk "$USER"
+
+	}
+	#-------------------------------------------------------------------------------------------------------------------
+	# !SECTION: END of virtualbox installation code block
+	#-------------------------------------------------------------------------------------------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION - DOCKER INSTALLATION
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING "docker -  Docker is a tool that packages an application and all its requirements into a single \"container\" that runs identically on any Linux machine, regardless of the host's settings"
+
+	sudo apt install docker.io -y
+	sudo systemctl enable --now docker
+
+	# add docker to groups so you don't have to type sudo before every docker command:
+	sudo usermod -aG docker "$(logname)"
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "docker.io"
+	#-------------------------------------------------------------------------------------------------------------------
+	# !SECTION - DOCKER INSTALLATION
+	#-------------------------------------------------------------------------------------------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION - GENYMOTION INSTALLATION
+	#-------------------------------------------------------------------------------------------------------------------
+	# Install genymotion (Android emulator)
+	FUN_VERBOSE_INSTALLING "Genymotion"
+
+	FUN_GENYMOTION_LATEST_VERSION_URL_FETCHER() {
+		# set -euo pipefail
+		# DATE MADE & WORKING of [genymotion dynamic latest release fetcher w/parallelization]: DEC-7-2025
+
+		###############################################################################
+		# Genymotion Latest Version Locator — Hybrid Fast Scanner
+		#
+		# ── What this script does ────────────────────────────────────────────────────
+		#
+		# 1. Builds a list of potential Genymotion versions (MAJOR.MINOR.PATCH)
+		#    using descending ranges so newer versions are tested first.
+		#
+		# 2. For each generated version, it constructs the expected download URL:
+		#
+		#      https://dl.genymotion.com/releases/
+		#          genymotion-X.Y.Z/
+		#          genymotion-X.Y.Z-linux_x64.run
+		#
+		# 3. Uses HTTP HEAD requests (curl -I) to test whether each URL exists
+		#    without downloading the full file.
+		#
+		# 4. Runs checks in parallel (via xargs -P) to massively speed up detection
+		#    while keeping the version generation logic readable and maintainable.
+		#
+		# 5. Collects all valid versions, sorts them using semantic sort (sort -V),
+		#    and selects the highest (newest) version automatically.
+		#
+		# Result:
+		#   Prints the latest version number and its direct download URL.
+		#
+		# ── Why this approach? ──────────────────────────────────────────────────────
+		# • No API dependency
+		# • No reliance on Genymotion's website HTML structure
+		# • Works in CI/CD (GitHub Actions, etc.)
+		# • Easy to future-proof by adjusting version ranges
+		###############################################################################
+
+		DL_BASE="https://dl.genymotion.com/releases"
+		OS_FILE_SUFFIX="linux_x64.run"
+
+		# Informational banners
+		echo "🔎 Hybrid-fast Genymotion version probe..."
+		echo "🔎 Probing latest Genymotion version (fast mode)..."
+		echo "🔎 Hybrid-fast Genymotion version probe..."
+		echo "⚡ Ultra-fast Genymotion version probe..."
+
+		# ---------------------------------------------------------------------------
+		# Version range configuration (future-proofing)
+		# ---------------------------------------------------------------------------
+		# MAJOR versions to scan (space-separated, highest first)
+		_MAJOR="5 4 3"
+
+		# Descending ranges for minor/patch numbers
+		_MINORS=$(seq 30 -1 0)  # 30 → 0
+		_PATCHES=$(seq 30 -1 0) # 30 → 0
+
+		# Holds the final detected version
+		LATEST_FOUND=""
+
+		# ---------------------------------------------------------------------------
+		# Function: check_url
+		# Purpose : Test if a given version's download URL exists
+		# ---------------------------------------------------------------------------
+		check_url() {
+			local ver="$1"
+			local url="${DL_BASE}/genymotion-${ver}/genymotion-${ver}-${OS_FILE_SUFFIX}"
+
+			# HTTP HEAD probe: success means the file exists
+			if curl -fsI "$url" >/dev/null 2>&1; then
+				echo "$ver"
+			fi
+		}
+
+		# Export function + vars so xargs subprocesses can use them
+		export -f check_url
+		export DL_BASE OS_FILE_SUFFIX
+
+		# ---------------------------------------------------------------------------
+		# Build all version candidates in descending order
+		# (kept deliberately readable for future maintenance)
+		# ---------------------------------------------------------------------------
+		VERSION_LIST=$(
+			for major in $_MAJOR; do
+				for minor in $_MINORS; do
+					for patch in $_PATCHES; do
+						echo "${major}.${minor}.${patch}"
+					done
+				done
+			done
+		)
+		# ---------------------------------------------------------------------------
+		# Parallel URL probing (network-bound, not CPU-bound)
+		# TLDR → "Run check_url on every input line, N at a time, using only built-in tools
+		#
+		# This block uses `xargs -P` to run multiple HTTP HEAD checks in parallel.
+		# Each worker effectively runs:  curl -I https://...
+		#
+		# This workload is NETWORK-BOUND:
+		#   • Most time is spent waiting on the network
+		#   • CPU usage is minimal
+		#   • Performance depends more on latency than core count
+		#
+		# Moderate parallelism (8–16 workers) gives the best balance.
+		# Too many workers can reduce performance due to TCP/socket overhead.
+		#
+		# Core execution pattern:
+		#
+		#   xargs -P8 -I{} bash -c 'check_url "$@"' _ {}
+		#
+		# Component breakdown:
+		#
+		#   xargs        → Reads lines from stdin
+		#   -P8          → Runs up to 8 parallel workers
+		#   -I{}         → Replaces {} with each input line
+		#   bash -c      → Spawns a shell to run the command
+		#   'check_url'  → Function executed per URL
+		#   _            → Dummy $0 (required by bash -c)
+		#   {}           → Becomes $1 / $@ inside bash
+		#
+		# Example expansion:
+		#
+		#   Input:  https://example.com
+		#   Runs:   bash -c 'check_url "$@"' _ https://example.com
+		#
+		# Inside bash:
+		#   $0 = _
+		#   $1 = https://example.com
+		#   $@ = https://example.com
+		#
+		# Final executed command:
+		#   check_url https://example.com
+		#
+		# Portable, fast, dependency-free parallelism.
+		# ●─────────────────────────────────────────────────────────────────────────●
+		# ●─────────────────────────────────────────────────────────────────────────●
+		# ●─────────────────────────────────────────────────────────────────────────●
+		# Even nicer alternative: GNU Parallel (when available)
+		# ─────────────────────────────────────────────────────
+		#   cat urls.txt        | parallel -j8 check_url
+		#   parallel -j8 check_url ::: "${url_array[@]}"
+		#
+		# Much more readable, handles quoting perfectly, many extra features.
+		# But xargs -P works everywhere (Linux, macOS, minimal systems) with zero dependencies.
+		# ---------------------------------------------------------------------------
+		FOUND_VERSIONS=$(
+			echo "$VERSION_LIST" |
+				xargs -P8 -I{} bash -c 'check_url "$@"' _ {}
+			# xargs -P16 -I{} bash -c 'check_url "$@"' _ {}
+		)
+		# ---------------------------------------------------------------------------
+		# Pick the highest (latest) version using semantic version sorting
+		# ---------------------------------------------------------------------------
+		LATEST_FOUND=$(echo "$FOUND_VERSIONS" | sort -V | tail -n1)
+		# Safety check
+		if [[ -z "$LATEST_FOUND" ]]; then
+			echo "❌ No valid versions found"
+			exit 1
+		fi
+		# ---------------------------------------------------------------------------
+		# Construct final download URL
+		# ---------------------------------------------------------------------------
+		FINAL_URL_GENYMOTION="${DL_BASE}/genymotion-${LATEST_FOUND}/genymotion-${LATEST_FOUND}-${OS_FILE_SUFFIX}"
+		# ---------------------------------------------------------------------------
+		# Output result
+		# ---------------------------------------------------------------------------
+		echo "✅ Latest version: $LATEST_FOUND"
+		echo "📦 $FINAL_URL_GENYMOTION"
+	}
+	FUN_GENYMOTION_LATEST_VERSION_URL_FETCHER
+
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	wget -P ./AUTO-INSTALLS-FILES/WORKER-TEMP/ "$FINAL_URL_GENYMOTION"
+	sudo chmod 777 ./AUTO-INSTALLS-FILES/WORKER-TEMP/genymotion*
+	sudo ./AUTO-INSTALLS-FILES/WORKER-TEMP/genymotion-*-linux_x64.run -y
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	#-------------------------------------------------------------------------------------------------------------------
+	# !SECTION - GENYMOTION INSTALLATION
+	#-------------------------------------------------------------------------------------------------------------------
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION:  PPA Installation(s) -> for ubuntu specifically
+	#-------------------------------------------------------------------------------------------------------------------
+	if [[ $MAIN_CHOICE_SANITIZED == *"UBUNTU_GNOME_VANILLA"* ]] || [[ $MAIN_CHOICE_SANITIZED == *"UBUNTU_GNOME_FULL_SEND"* ]]; then
+
+		# The mkusb installation. It's a tool for creating bootable media drives.
+		FUN_VERBOSE_INSTALLING "mkusb"
+		echo -ne "\n" | sudo add-apt-repository universe
+		echo -ne "\n" | sudo add-apt-repository -y ppa:mkusb/ppa
+		sudo apt update
+		sudo apt install -y mkusb
+		sudo apt install -y usb-pack-efi # package to make persistent drives
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "mkusb"
+
+		# Install Cubic, a graphical tool for creating custom Ubuntu live ISO images.
+		FUN_VERBOSE_INSTALLING "CUBIC ubuntu"
+		sudo apt update
+		# Add the required 'universe' repository and the Cubic PPA.
+		echo -ne "\n" | sudo apt-add-repository universe
+		echo -ne "\n" | sudo apt-add-repository ppa:cubic-wizard/release
+		sudo apt update
+		sudo apt install --no-install-recommends cubic -y
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "cubic"
+
+		# Install Mainline, a graphical tool for installing the latest Linux kernels.
+		FUN_VERBOSE_INSTALLING " MAINLINE kernel instller VIA gui"
+		echo -ne "\n" | sudo add-apt-repository ppa:cappelikan/ppa
+		echo -ne "\n" | sudo apt update
+		sudo apt install -y mainline
+		FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "mainline"
+
+		# # Install Linux WIFI Hotspot from PPA - > # COMMENTED OUT FOR NOW ( WE ARE BUILDING IT FROM SOURCE )
+		# {
+
+		# 	FUN_VERBOSE_INSTALLING "LINUX-WIFI-HOTSPOT"
+		# 	echo -ne "\n" | sudo add-apt-repository ppa:lakinduakash/lwh
+		# 	sudo apt update
+		# 	sudo apt install linux-wifi-hotspot -y
+		# 	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "linux-wifi-hotspot"
+
+		# 	# Linux 5GHz Hotspot Fix create_ap
+		# 	cat <<-'EOF' | sudo tee /etc/create_ap.conf
+		# 		CHANNEL=149
+		# 		GATEWAY=192.168.12.1
+		# 		WPA_VERSION=2
+		# 		ETC_HOSTS=0
+		# 		DHCP_DNS=gateway
+		# 		NO_DNS=0
+		# 		NO_DNSMASQ=0
+		# 		HIDDEN=0
+		# 		MAC_FILTER=0
+		# 		MAC_FILTER_ACCEPT=/etc/hostapd/hostapd.accept
+		# 		ISOLATE_CLIENTS=0
+		# 		SHARE_METHOD=nat
+		# 		IEEE80211N=1
+		# 		IEEE80211AC=1
+		# 		IEEE80211AX=0
+		# 		HT_CAPAB=[HT40+]
+		# 		VHT_CAPAB=[MAX-MPDU-3895][SHORT-GI-80][TX-STBC-2BY1]
+		# 		DRIVER=nl80211
+		# 		NO_VIRT=0
+		# 		COUNTRY=AU
+		# 		FREQ_BAND=5
+		# 		NEW_MACADDR=
+		# 		DAEMONIZE=0
+		# 		DAEMON_PIDFILE=
+		# 		DAEMON_LOGFILE=/dev/null
+		# 		DNS_LOGFILE=
+		# 		NO_HAVEGED=0
+		# 		WIFI_IFACE=wlan0
+		# 		INTERNET_IFACE=eth0
+		# 		SSID=YOUR_SSID
+		# 		PASSPHRASE=1234567890
+		# 		USE_PSK=0
+		# 		ADDN_HOSTS=
+
+		# 	EOF
+
+		# 	sudo chmod 777 /etc/create_ap.conf
+		# }
+	fi
+	# !SECTION:  END PPA Installation(s) -> for ubuntu specifically
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION:  LINUX WIFI HOTSPOT [BUILD FROM SOURCE] -> for ubuntu specifically
+	#-------------------------------------------------------------------------------------------------------------------
+	if [[ $MAIN_CHOICE_SANITIZED == *"UBUNTU_GNOME_VANILLA"* ]] || [[ $MAIN_CHOICE_SANITIZED == *"UBUNTU_GNOME_FULL_SEND"* ]]; then
+
+		# Install Linux WIFI Hotspot from PPA - > # COMMENTED OUT FOR NOW ( WE ARE BUILDING IT FROM SOURCE )
+		{
+			cd "$CD_DIRNAME" || exit
+
+			FUN_VERBOSE_INSTALLING "LINUX-WIFI-HOTSPOT - BUILD FROM SOURCE Github"
+			# Clean the temporary worker directory to ensure a fresh start.
+			# This command safely removes all files, including hidden ones, without affecting the parent directory.
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+			sudo apt update
+			sudo apt install -y libgtk-3-dev build-essential gcc g++ pkg-config make hostapd libqrencode-dev libpng-dev
+
+			git clone https://github.com/lakinduakash/linux-wifi-hotspot ./AUTO-INSTALLS-FILES/WORKER-TEMP/linux-wifi-hotspot
+			cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/linux-wifi-hotspot
+
+			#build binaries
+			make
+
+			#install
+			sudo make install
+
+			cd "$CD_DIRNAME" || exit
+
+			# Linux 5GHz Hotspot Fix create_ap
+			cat <<-'EOF' | sudo tee /etc/create_ap.conf
+				CHANNEL=149
+				GATEWAY=192.168.12.1
+				WPA_VERSION=2
+				ETC_HOSTS=0
+				DHCP_DNS=gateway
+				NO_DNS=0
+				NO_DNSMASQ=0
+				HIDDEN=0
+				MAC_FILTER=0
+				MAC_FILTER_ACCEPT=/etc/hostapd/hostapd.accept
+				ISOLATE_CLIENTS=0
+				SHARE_METHOD=nat
+				IEEE80211N=1
+				IEEE80211AC=1
+				IEEE80211AX=0
+				HT_CAPAB=[HT40+]
+				VHT_CAPAB=[MAX-MPDU-3895][SHORT-GI-80][TX-STBC-2BY1]
+				DRIVER=nl80211
+				NO_VIRT=0
+				COUNTRY=AU
+				FREQ_BAND=5
+				NEW_MACADDR=
+				DAEMONIZE=0
+				DAEMON_PIDFILE=
+				DAEMON_LOGFILE=/dev/null
+				DNS_LOGFILE=
+				NO_HAVEGED=0
+				WIFI_IFACE=wlan0
+				INTERNET_IFACE=eth0
+				SSID=YOUR_SSID
+				PASSPHRASE=1234567890
+				USE_PSK=0
+				ADDN_HOSTS=
+
+			EOF
+
+			sudo chmod 777 /etc/create_ap.conf
+			sync
+
+			# Clean the temporary worker directory to ensure a fresh start.
+			# This command safely removes all files, including hidden ones, without affecting the parent directory.
+			sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+		}
+
+	fi
+
+	# SECTION:  END LINUX WIFI HOTSPOT [BUILD FROM SOURCE] -> for ubuntu specifically
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Networking and File Sharing
+	#-------------------------------------------------------------------------------------------------------------------
+	# Install Samba for SMB/CIFS file sharing.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "samba" "samba"
+	# Installing smbclient allows Nautilus (the GNOME file manager) to access SMB/CIFS network shares seamlessly
+	# without requiring manual mounting or additional setup on the target machine.
+	FUN_INSTALL_PACKAGE_HELPER_WITH_RETRY "smbclient nbtscan" "smbclient nbtscan"
+
+	# Install Tailscale for secure remote access (VPN) and global management. [access machine over global internet with tailscale vpn]
+	# Enables remote SSH, RDP (via Remmina), and secure control of the master machine from the internet.
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "install TAILSCALE VPN ---"
+	curl -fsSL https://tailscale.com/install.sh | sh
+	# Ensure the daemon is enabled and started
+	sudo systemctl enable --now tailscaled
+
+	# !SECTION: END Networking and File Sharing
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Google Chrome Installation
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING "install google chrome .deb (wget downloaded) file in terminal"
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -P ./AUTO-INSTALLS-FILES/WORKER-TEMP/
+	# Install the local package.
+	sudo apt install -y ./AUTO-INSTALLS-FILES/WORKER-TEMP/google-chrome-stable_current_amd64.deb
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "google-chrome-stable"
+
+	# Modify the Google Chrome launcher script to allow it to be run as the root user.
+	# This is generally discouraged for security reasons but is necessary in some specific environments (like Cubic).
+	# The `--no-sandbox` flag is the key change here.
+	sudo sed -i 's+exec -a "$0" "$HERE/chrome" "$@"+exec -a "$0" "$HERE/chrome" "$@" --user-data-dir --test-type --no-sandbox+g' /opt/google/chrome/google-chrome
+	# !SECTION: END Google Chrome Installation
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Google Chrome Extensions Installation Policies
+	#-------------------------------------------------------------------------------------------------------------------
+
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "Google Chrome Extensions Installation Policies"
+
+	POLICY_DIR="/etc/opt/chrome/policies/managed"
+	POLICY_FILE="$POLICY_DIR/auto_extensions.json"
+	sudo mkdir -p "$POLICY_DIR"
+
+	# overwrite existing auto_extensions.json file with nothing
+	: | sudo tee $POLICY_FILE
+
+	sudo tee "$POLICY_FILE" >/dev/null <<'EOF'
+{
+  "ExtensionInstallForcelist": [
+    "lgblnfidahcdcjddiepkckcfdhpknnjh;https://clients2.google.com/service/update2/crx",
+    "cmedhionkhpnakcndndgjdbohmhepckk;https://clients2.google.com/service/update2/crx",
+    "lmjnegcaeklhafolokijcfjliaokphfk;https://clients2.google.com/service/update2/crx"
+
+  ]
+}
+EOF
+	#  lgblnfidahcdcjddiepkckcfdhpknnjh = Ad Blocker (stands adblock)
+	#  cmedhionkhpnakcndndgjdbohmhepckk = Adblock for Youtube
+	# lmjnegcaeklhafolokijcfjliaokphfk = Video Download Helper
+	echo "Chrome extension policy written. Restart Chrome."
+	sudo chmod -R 777 "$POLICY_DIR"
+	# !SECTION: END Google Chrome Extensions Installation Policies
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: OPERA BROWSER INSTALLATION
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE " INSTALLING OPERA BROWSER"
+	# Clean the temporary worker directory to ensure a fresh start.
+	# This command safely removes all files, including hidden ones, without affecting the parent directory.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	###############################################################################
+	# Opera Browser Latest .deb Downloader
+	#
+	# ── What this code block does ────────────────────────────────────────────────────
+	#
+	# 1. Scrapes the official Opera download repository (get.opera.com) to find
+	#    the highest version number available for Desktop.
+	#
+	# 2. Constructs the direct download URL for the stable .deb package (amd64).
+	#
+	# 3. Downloads the file to the current directory (or a specified one).
+	#
+	# ── Why use this instead of the official 'download' link? ────────────────────
+	# The official 'download.opera.com' links often use redirects and JS-heavy
+	# "thanks" pages that are difficult to handle with simple CLI tools like
+	# wget or curl without complex header management. This script targets the
+	# raw file repository directly.
+	#
+	###############################################################################
+
+	# Set strict mode (optional, but good practice)
+	# set -euo pipefail
+
+	# Configuration
+	BASE_URL="https://get.opera.com/pub/opera/desktop"
+	DOWNLOAD_DIR="./AUTO-INSTALLS-FILES/WORKER-TEMP/"
+
+	# User-facing banners
+	echo "🔎 Probing Opera repository for latest version..."
+
+	# 1. Fetch version list and identify latest stable
+	# We use sort -V (version sort) to handle multi-digit version components correctly.
+	LATEST_VERSION=$(curl -s "${BASE_URL}/" | grep -oP '(?<=href=")\d+\.\d+\.\d+\.\d+(?=/")' | sort -V | tail -n 1)
+
+	if [[ -z "$LATEST_VERSION" ]]; then
+		echo "❌ Error: Could not determine the latest Opera version."
+		exit 1
+	fi
+
+	echo "✅ Found latest version: ${LATEST_VERSION}"
+
+	# 2. Construct download URL
+	# Pattern: https://get.opera.com/pub/opera/desktop/[VERSION]/linux/opera-stable_[VERSION]_amd64.deb
+	DOWNLOAD_URL="${BASE_URL}/${LATEST_VERSION}/linux/opera-stable_${LATEST_VERSION}_amd64.deb"
+	FILENAME="opera-stable_${LATEST_VERSION}_amd64.deb"
+
+	echo "🔗 Target URL: ${DOWNLOAD_URL}"
+	echo "📦 Filename:   ${FILENAME}"
+
+	# 3. Perform Download
+	echo "🚀 Starting download..."
+
+	# Use curl with -L to follow any potential redirects, and -O to save with the filename
+	# Adding -# for a simple progress bar if interactive, or just let it run.
+	if curl -L --progress-bar -o "${DOWNLOAD_DIR}/${FILENAME}" "${DOWNLOAD_URL}"; then
+		echo "✨ Successfully downloaded: ${DOWNLOAD_DIR}/${FILENAME}"
+	else
+		echo "❌ Error: Download failed."
+		exit 1
+	fi
+
+	# now actually install the downloaded .deb package
+	# Use debconf-set-selections to pre-answer the installer question, to atuomatically add the Opera repository to the system's package sources
+	# and auto update the package list, allowing for a seamless installation of the Opera browser without user intervention.
+	echo opera-stable opera-stable/add-deb-source boolean true | sudo debconf-set-selections
+
+	sudo apt install -y "./AUTO-INSTALLS-FILES/WORKER-TEMP/${FILENAME}" || {
+		echo "OPERA BROWSER Installation failed. EXITING the script"
+		exit 1
+	}
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "opera-stable"
+	sync
+	# Cleanup
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# !SECTION: END OPERA BROWSER INSTALLATION
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Debootstrap Directory ENV creation
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "Debootstrap Directory creation - prepare debootstrap environment"
+	_UBUNTU_CODENAME=$(grep ^UBUNTU_CODENAME= /etc/os-release | cut -d= -f2 | tr -d '[:space:]')
+	# prepare debootstrap environment
+	if [ -d "/bin/CUSTOM-DEBOOTSTRAP/DEEBOTSTRAP-DIR-ENV-${_UBUNTU_CODENAME}" ]; then
+		sudo rm -rf "/bin/CUSTOM-DEBOOTSTRAP/DEEBOTSTRAP-DIR-ENV-${_UBUNTU_CODENAME}" >/dev/null
+	fi
+	if [ ! -d "/bin/CUSTOM-DEBOOTSTRAP/DEEBOTSTRAP-DIR-ENV-${_UBUNTU_CODENAME}" ]; then
+		sudo mkdir -p "/bin/CUSTOM-DEBOOTSTRAP/DEEBOTSTRAP-DIR-ENV-${_UBUNTU_CODENAME}"
+		sudo chmod -R 777 "/bin/CUSTOM-DEBOOTSTRAP/DEEBOTSTRAP-DIR-ENV-${_UBUNTU_CODENAME}"
+		sudo debootstrap "${_UBUNTU_CODENAME}" "/bin/CUSTOM-DEBOOTSTRAP/DEEBOTSTRAP-DIR-ENV-${_UBUNTU_CODENAME}" http://archive.ubuntu.com/ubuntu/
+	fi
+	# !SECTION: END Debootstrap Directory ENV creation
+
+	# -------------------------------------------------------------------------------------------------------------------
+	# SECTION: System-Wide Configuration and Customization
+	# -------------------------------------------------------------------------------------------------------------------
+
+	# Copy the `WARES-INCLUDED` directory, containing various documents and resources, to the user's home
+	# directory and to /etc/skel so that all new users receive a copy.
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "copy WARES_INCLUDED from AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED to $HOME & /etc/skel to make available to all users"
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED /etc/skel
+	if sudo cp -rf ./AUTO-INSTALLS-FILES/WARES/WARES-INCLUDED "$HOME"; then
+		FUN_TRACK_CUSTOM_INSTALL "WARES-INCLUDED Docs/Resources" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "WARES-INCLUDED Docs/Resources" "fail"
+	fi
+	sudo chmod -R 777 "$HOME/WARES-INCLUDED" /etc/skel/WARES-INCLUDED
+
+	# Ensure the standard user directories exist in /etc/skel. This prevents issues with some desktop environments
+	# when creating new users if these directories are missing.
+	sudo mkdir /etc/skel/Desktop
+	sudo mkdir /etc/skel/Documents
+	sudo mkdir /etc/skel/Downloads
+	sudo mkdir /etc/skel/Music
+	sudo mkdir /etc/skel/Pictures
+	sudo mkdir /etc/skel/Public
+	sudo mkdir /etc/skel/Templates
+	sudo mkdir /etc/skel/Videos
+
+	# Install the custom shell scripts to `/bin` to make them available system-wide as commands.
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "install CUSTOM-SH-SCRIPTS to /bin/CUSTOM-SH-SCRIPTS & /bin"
+	sudo rm -rf /bin/CUSTOM-SH-SCRIPTS 2>/dev/null # Remove any existing custom scripts directory from /bin.
+	sudo cp -rf "$CD_DIRNAME/AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS" /bin
+	sudo chmod -Rf 777 /bin/CUSTOM-SH-SCRIPTS
+
+	# ==============================================================================
+	# set correct $PATH variables
+	# Description: This script section appends custom directory paths to the system-wide
+	#              /etc/profile file. This ensures that these directories are
+	#              included in the PATH for all users during login.
+	#              It also updates the PATH for the current shell session.
+	# ==============================================================================
+
+	# Define an array of directory paths to be added to the system PATH.
+	PATHS_TO_ADD=(
+		"/bin/CUSTOM-SH-SCRIPTS"
+	)
+	# Target configuration file for system-wide environment variables.
+	PROFILE_FILE="/etc/profile"
+	echo "Checking $PROFILE_FILE for custom path configurations..."
+
+	# FIX 1: Sanitize the existing PATH *once* before the loop starts.
+	# This creates a stable, clean base that won't grow infinitely inside the loop.
+	PATH_BASE=$(echo -n "$PATH" | awk -v RS=: '$0 != "" && !a[$0]++ {printf "%s%s", (i++ ? ":" : ""), $0}')
+
+	for dir in "${PATHS_TO_ADD[@]}"; do
+		# FIX 2: Use the stable PATH_BASE so LINE is identical on every run.
+		LINE="export PATH=$PATH_BASE:$dir"
+
+		# Check if the directory configuration already exists in the profile file.
+		if ! grep -qsF "$LINE" "$PROFILE_FILE"; then
+			echo "Appending $dir to $PROFILE_FILE..."
+			echo "$LINE" | sudo tee -a "$PROFILE_FILE" >/dev/null
+		else
+			echo "Information: $dir already exists in $PROFILE_FILE. Skipping."
+		fi
+
+		# Update the PATH for the current active shell session.
+		case ":${PATH}:" in
+		*":$dir:"*)
+			# Directory is already present in the current PATH.
+			;;
+		*)
+			# Directory is missing; append it to the current PATH.
+			export PATH="$PATH:$dir"
+			;;
+		esac
+	done
+	echo "Update process finished."
+	echo "Updated current session PATH: $PATH"
+	# Clean up script-specific variables to maintain a clean environment.
+	unset PATHS_TO_ADD PROFILE_FILE dir LINE
+	# END set correct $PATH variables for /bin/CUSTOM-SH-SCRIPTS ==============================================================================
+
+	# Also copy the custom scripts directly into /bin for easier access.
+	sudo cp -rf "$CD_DIRNAME/AUTO-INSTALLS-FILES/WARES/CUSTOM-WARES-BY-ME/CUSTOM-SH-SCRIPTS/"* /bin
+	if sudo chmod -R 777 /bin/custom*; then
+		FUN_TRACK_CUSTOM_INSTALL "Custom Admin Scripts (40+ Utils)" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "Custom Admin Scripts (40+ Utils)" "fail"
+	fi
+
+	# Configure `/etc/adduser.conf` to automatically add new users to essential groups.
+	# This grants them permissions for virtualization and disk access out of the box.
+	sudo sed -i 's/#EXTRA_GROUPS=*.*/EXTRA_GROUPS="vboxusers disk libvirt libvirt-qemu kvm"/' /etc/adduser.conf 2>/dev/null
+	sudo sed -i 's/#ADD_EXTRA_GROUPS=*.*/ADD_EXTRA_GROUPS=1/' /etc/adduser.conf 2>/dev/null
+
+	# Disable automatic APT updates and upgrades. This gives the user full control over when updates are installed.
+	sudo sed -i 's/APT::Periodic::Update-Package-Lists "1";/APT::Periodic::Update-Package-Lists "0";/g' /etc/apt/apt.conf.d/20auto-upgrades
+	sudo sed -i 's/APT::Periodic::Unattended-Upgrade "1";/APT::Periodic::Unattended-Upgrade "0";/g' /etc/apt/apt.conf.d/20auto-upgrades
+
+	# Grants the current user passwordless sudo access to specific backup-related commands
+	echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/veracrypt, /usr/bin/mount, /usr/bin/umount, /usr/bin/mkdir, /usr/bin/rsync, /usr/bin/udisksctl" | sudo tee /etc/sudoers.d/custom-veracrypt-backup
+	sudo chmod 0440 /etc/sudoers.d/custom-veracrypt-backup
+
+	################################################################################
+	# REGULATORY DOMAIN REFERENCE FOR LINUX (iw reg set)
+	# [iw reg get] can be used to check current settings and allowed channels/power.
+	#
+	# Goal: Enable 2.4GHz Ch 12/13, 5GHz Ch 36 (Low), and 5GHz Ch 149 (High).
+	# Note: Ch 14 is generally restricted to Japan (JP) in 802.11b mode only.
+	#
+	# Code | 2.4 GHz (12/13) | 5GHz Low (36) | 5GHz High (149) | Max Power (Max)
+	# -----|-----------------|---------------|-----------------|------------------
+	#  AU  |    ALLOWED      |    ALLOWED    |    ALLOWED      |  30 dBm (1W)
+	#  HK  |    ALLOWED      |    ALLOWED    |    ALLOWED      |  30 dBm (1W)
+	#  NZ  |    ALLOWED      |    ALLOWED    |    ALLOWED      |  30 dBm (1W)
+	#  BO  |    ALLOWED      |    DISABLED   |    ALLOWED      |  30 dBm (1W)
+	#  US  |    RESTRICTED   |    ALLOWED    |    ALLOWED      |  30 dBm (1W)
+	#  JP  |    ALLOWED (14) |    ALLOWED    |    DISABLED     |  20 dBm (100mW)
+	#
+	# Best Choice for AP Mode: AU (Australia)
+	################################################################################
+
+	# Set wifi regulatory domain to AU persistently via modprobe
+	# set wifi regulatory domain to AU (AUSTRALIA): australia is probably one of the most permisive regions (Max tx power & channels)
+	echo "options cfg80211 ieee80211_regdom=AU" | sudo tee /etc/modprobe.d/cfg80211.conf
+
+	# Apply the setting immediately for the current session
+	sudo iw reg set AU
+
+	# Fix - RTL8192CU (OLD) wifi adapter -> blacklist the old driver and force the system to use the modern one
+	echo "blacklist rtl8192cu" | sudo tee /etc/modprobe.d/blacklist-rtl8192cu.conf
+	echo "options rtl8xxxu ht40_2g=1 dma_check=1" | sudo tee /etc/modprobe.d/rtl8xxxu.conf
+
+	#  blacklist the Bluetooth component of Realtek USB combo module [rtl8821cu] while keeping its WiFi functionality active. via udev rule
+	cat <<'EOF' | sudo tee /etc/udev/rules.d/81-blacklist-rtl8821cu-bluetooth.rules
+# This udev rule blacklists the Bluetooth component of the Realtek USB combo module (rtl8821cu) while keeping its WiFi functionality active.
+# It matches the device based on its vendor and product IDs, and then applies a blacklist to the Bluetooth interface.	
+# Disable Bluetooth for Realtek 0bda:c820 combo USB module
+# SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="c820", ATTR{bInterfaceNumber}=="00", ATTR{authorized}="0"
+# SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="c820", ATTR{bInterfaceNumber}=="01", ATTR{authorized}="0"
+# ^^^^^^^ The old authorized="0" rule was like unplugging the Bluetooth wires. QEMU couldn't see them, so the whole "combo" device would error out when passed to the VM.
+# ^^^^^^^ This new unbind rule is like leaving the wires plugged in but telling the host "don't touch this." QEMU can now safely grab the "unclaimed" Bluetooth interfaces and pass them into the VM along with the WiFi.
+# Disable Bluetooth for Realtek 0bda:c820 combo USB module
+# Interface 00 & 01 are Bluetooth. Interface 02 is WiFi.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="c820", ATTR{bInterfaceNumber}=="00", RUN+="/bin/sh -c 'echo $kernel > /sys/bus/usb/drivers/btusb/unbind'"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="c820", ATTR{bInterfaceNumber}=="01", RUN+="/bin/sh -c 'echo $kernel > /sys/bus/usb/drivers/btusb/unbind'"
+EOF
+	sudo udevadm control --reload-rules && sudo udevadm trigger
+
+	# The following section for adding a GRUB menu entry for persistence is commented out.
+	# It's left for documentation purposes, as modifying GRUB correctly often requires manual intervention
+	# within the ISO creation process itself, rather than on the live system.
+	## if mount | grep ' / ' | grep "^/cow on /"; then
+	## 		BANNER_PKG_NAME_MSG="ADD a separate GRUB boot menu entry for persistence [UBUNTU PERSISTENCE], if runnig from a live USB / iso"
+	## 		FUN_VERBOSE_INSTALLING_NO_APT_UPDATE
+	## 		sudo chmod 777 /etc/grub.d/40_custom
+	## 		cat <<EOF >/etc/grub.d/40_custom
+	## menuentry "Try Ubuntu with Persistence" {
+	##     set gfxpayload=keep
+	##     linux   /casper/vmlinuz  file=/cdrom/preseed/ubuntu.seed boot=casper quiet splash persistent ---
+	##     initrd  /casper/initrd
+	## }
+	## EOF
+	## 		sudo update-grub
+	## fi
+	# !SECTION: END System-Wide Configuration and Customization
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Systemd Service for Boot-Time Commands
+	# Creates a systemd service to run essential commands every time the system boots.
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "C-CO-OM-MA-AN-ND-DS-S TO RUN AT BOOT UP  ... via systemd unit file :: to run : AT BOOT UP"
+
+	sudo mkdir -p /etc/systemd/system/CUST-SYSD
+	sudo chmod 777 -R /etc/systemd/system/CUST-SYSD
+
+	# Create the executable script that the systemd service will run.
+	cat <<'EOF' | sudo tee /etc/systemd/system/CUST-SYSD/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.bash
+#!/bin/bash
+# This script is executed at boot by the corresponding .service file.
+# It performs maintenance and initialization tasks.
+# Ensure system is ready for user interaction and services are fully loaded.
+
+# This command attempts to fix any broken package installations.
+sudo dpkg --configure -a
+# Ensures the libvirt daemon is running for virtualization.
+sudo systemctl start libvirtd
+# Refreshes the icon caches, which can fix missing or incorrect icons.
+sudo update-icon-caches /usr/share/icons/*
+
+# restart samba service (in case of changes to how net devices are connected)
+sudo systemctl restart smbd nmbd
+
+# libvirt-qemu user read and execute permissions on all active user media mount points so QEMU virtual machines can access connected storage drives.
+# [because ubuntu 26.04 mounts external drives under /run/media which is a volatile tmpfs that resets permissions on boot, we need to re-apply permissions whenever a drive is connected]
+# for d in /run/media/*; do [ -d "$d" ] && sudo /usr/bin/setfacl -m u:libvirt-qemu:rx "$d # -> one liner , but we opt for the multi line syntax
+for d in /run/media/*; do
+    [ -d "$d" ] && sudo /usr/bin/setfacl -m u:libvirt-qemu:rx "$d"
+done
+
+###
+# 🧠 Purpose: Automatically adds the first non-root user (UID ≥ 1000, with a home in /home)
+#            to the appropriate groups for virtualization support (libvirt, libvirt-qemu, kvm),
+#            and sets necessary permissions for directory traversal by libvirt-qemu.
+#
+# 📌 Note:
+# - This logic typically applies on first boot or provisioning, and assumes a single primary user setup.
+# - Can be extracted into a separate script (recommended location: /usr/local/bin).
+#   That path is ideal for admin-maintained executables outside package manager control.
+###
+
+# 🛡️ Flag file to prevent re-running this script multiple times
+FLAG_FILE="/var/lib/add_user_to_kvm_groups_done"
+
+if [ -f "$FLAG_FILE" ]; then
+    echo "Script already executed. Exiting."
+    exit 0
+fi
+
+# 🔍 Identify the primary non-root user (UID ≥ 1000 and home directory under /home)
+PRIMARY_USER=$(awk -F: '$3 >= 1000 && $6 ~ /^\/home\// {print $1; exit}' /etc/passwd)
+
+# 🔐 Grant libvirt-qemu user directory traversal permission on the primary user's mount
+# This is required if the virtual machines access resources on external drives mounted at /media/<user>/ or /run/media/<user>/
+
+sudo setfacl -m u:libvirt-qemu:rx "/media/$PRIMARY_USER"
+
+# libvirt-qemu access to all user mount points in /run/media whenever a filesystem-capable drive is connected
+# Because /run/media is a volatile tmpfs (RAM) that resets permissions on boot, this rule automatically re-grants libvirt-qemu access whenever a drive is mounted.
+cat <<'INNEREOF' | sudo tee /etc/udev/rules.d/99-qemu-mount-perms.rules
+# Grant libvirt-qemu access to ALL user media directories on plug or boot bind
+SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ACTION=="add|bind", RUN+="/bin/sh -c 'for d in /run/media/*; do [ -d \"$d\" ] && /usr/bin/setfacl -m u:libvirt-qemu:rx \"$d\"; done'"
+INNEREOF
+
+sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# 👤 Add the identified user to necessary groups for virtualization tools to work
+if [ -n "$PRIMARY_USER" ]; then
+    echo "Adding user '$PRIMARY_USER' to virtualization-related groups..."
+    usermod -aG libvirt "$PRIMARY_USER"
+    usermod -aG libvirt-qemu "$PRIMARY_USER"
+    usermod -aG kvm "$PRIMARY_USER"
+    echo "User '$PRIMARY_USER' successfully added to groups."
+    
+    # ✅ Mark as completed to avoid re-running on next boot
+    touch "$FLAG_FILE"
+else
+    echo "❗ No eligible user found (UID ≥ 1000, /home/*). Skipping group assignments."
+fi
+
+### ✅ End of virtualization group auto-setup logic ###
+EOF
+
+	# Create the systemd service unit file.
+	cat <<EOF | sudo tee /etc/systemd/system/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.service
+[Unit]
+Description=Run script at startup after all systemd services are loaded
+After=network.target
+Wants=network.target
+
+[Service]
+ExecStart=/etc/systemd/system/CUST-SYSD/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.bash
+RestartSec=5
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	# Make the script executable, reload the systemd daemon, and enable the service to start on boot.
+	sudo chmod 777 /etc/systemd/system/CUST-SYSD/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.bash
+	sudo systemctl daemon-reload
+	sudo systemctl enable C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.service
+	sudo systemctl start C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP.service
+	# !SECTION: END Systemd Service for Boot-Time Commands
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Systemd Path Monitor Service -> this is what actually fixed the issue of libvirt-qemu losing access to external drives on connection (for vm use)
+	# so qemu gets access to external drives on connection (for vm use)
+	# [because ubuntu 26.04 mounts external drives under /run/media which is a volatile tmpfs that resets permissions on boot, we need to re-apply permissions whenever a drive is connected]
+	# Creates a systemd path monitor service to watch your /run/media directory
+	#-------------------------------------------------------------------------------------------------------------------
+
+	# create systemd path monitor file
+	cat <<EOF | sudo tee /etc/systemd/system/qemu-media-watch.path
+[Unit]
+Description=Watch /run/media for new mounts
+
+[Path]
+PathChanged=/run/media
+Unit=qemu-media-watch.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	# create the corresponding service file that applies the ACL permissions to libvirt-qemu whenever a new drive is mounted under /run/media
+	cat <<'EOF' | sudo tee /etc/systemd/system/qemu-media-watch.service
+[Unit]
+Description=Apply QEMU ACL permissions
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for d in /run/media/*; do [ -d "$d" ] && /usr/bin/setfacl -m u:libvirt-qemu:rx "$d"; done'
+EOF
+
+	# enable and start the path monitor service
+	sudo systemctl daemon-reload
+	sudo systemctl enable qemu-media-watch.path
+	sudo systemctl enable --now qemu-media-watch.path
+	sudo systemctl start qemu-media-watch.path
+	# !SECTION: END Systemd Path Monitor Service
+
+	#-------------------------------------------------------------------------------------------------------------------
+	# SECTION: Crontab for Boot-Time Commands
+	# Provides a fallback/redundant method using cron to run commands at boot. This is useful for systems
+	# where systemd might not be the primary init system or for ensuring the commands run.
+	#-------------------------------------------------------------------------------------------------------------------
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "RUN COMMANDS AT BOOT UP  ... via crontab .. non interactively"
+
+	# Create a temporary crontab file.
+	cat <<EOF | sudo tee /tmp/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP-CRONTAB.tmp
+@reboot sleep 12 && sudo update-icon-caches /usr/share/icons/*
+@reboot sleep 12 && sudo dpkg --configure -a
+@reboot sleep 12 && sudo systemctl start libvirtd
+EOF
+
+	# Install the crontab file for the root user.
+	sudo crontab /tmp/C-CO-OM-MA-AN-ND-DS-S-TO-RUN-AT-BOOT-UP-CRONTAB.tmp
+	# !SECTION: END Crontab for Boot-Time Commands
+
+	# Stop the sudo keep-alive process
+	echo "Stopping sudo keep-alive process..."
+	kill "$SUDO_KEEPALIVE_PID"
+
+} ## END OF FUNCTION FUN_WARES_FOR_GNOME_AND_MATE_DE

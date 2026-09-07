@@ -1,0 +1,256 @@
+#!/bin/bash
+
+# =============================================================================
+# GNOME Remote Desktop RDP Configurator
+#
+# Description:
+#   This script provides a user-friendly whiptail interface to configure
+#   GNOME's built-in Remote Desktop for either Mirrored or Headless RDP sessions.
+#
+# Modes:
+#   1. Mirrored Mode: Shares the active desktop session (what you see on the
+#      physical monitor). Runs as a user service, typically on port 3390.
+#   2. Headless Mode: Creates a virtual desktop session that runs in the
+#      background, accessible even when no user is logged in locally.
+#      Runs as a system service, typically on port 3389.
+#
+# Dependencies:
+#   - whiptail
+#   - gnome-remote-desktop
+#   - remmina
+#   - remmina-plugin-rdp
+#   - ufw (Uncomplicated Firewall)
+# =============================================================================
+
+# Define a custom color scheme for whiptail dialogs to improve readability.
+export NEWT_COLORS='
+root=yellow,magenta
+window=brown,white
+dialog=lightgray,gray
+frame=black,yellow
+border=yellow,gray
+shadow=brightgreen,brightblue
+title=yellow,gray
+button=yellow,gray
+actbutton=red,lightgray
+focus=lightgray,magenta
+highlight=red,lightgray
+checkbox=magenta,brightmagenta
+actcheckbox=gray,brightgreen
+compactbutton=black,white
+radiobutton=brightmagenta,magenta
+textbox=green,black
+acttextbox=black,lightgray
+text=brightblue,yellow
+infobox=cyan,magenta
+label=black,red
+roottext=black,brightmagenta
+helpline=green,brightgreen
+menu=brightmagenta,white
+menuitem=black,red
+listbox=white,gray
+actlistbox=black,brightblue
+item=brightblue,brightred
+actsellistbox=black,brightmagenta
+sellistbox=yellow,black
+scrollbar=red,brightmagenta
+statusbar=magenta,brightgreen
+cursor=lightgray,blue
+entry=brown,blue
+disentry=brightgreen,lightgray
+emptyscale=black,lightgray
+fullscale=brightgreen,lightgray
+'
+
+# --- Dependency Check ---
+# Ensures all required packages are installed before the script proceeds.
+for PACKAGE in gnome-remote-desktop remmina remmina-plugin-rdp; do
+	# Check if the package is installed using `apt list`.
+	if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+		echo "Dependency '$PACKAGE' is not installed. Attempting to install..."
+		# If a dependency is missing, update package lists and install it.
+		sudo apt update
+		sudo apt install -y $PACKAGE
+
+		# Verify that the installation was successful.
+		if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+			echo "ERROR: Failed to install dependency '$PACKAGE'. Please install it manually and re-run the script."
+			exit 1 # Exit with an error code if installation failed.
+		fi
+	fi
+done
+
+# --- Function Definitions ---
+
+# =============================================================================
+# FUNCTION: FUN_REMMINA_MIRRORED_SCREEN
+#
+# Configures RDP to mirror the currently active user session.
+# This mode is ideal for remote assistance or accessing the current desktop.
+# It runs as a user-level service on port 3390.
+# =============================================================================
+FUN_REMMINA_MIRRORED_SCREEN() {
+
+	printf " Configuring [Mirrored] RDP Remmina Remote Desktop Connection...\n PORT: 3390\n USERNAME: $(logname)\n"
+
+	# Programmatically enable RDP sharing and allow remote control via gsettings.
+	# This is equivalent to toggling the options in the GNOME Settings GUI.
+	echo "Enabling RDP and remote control via gsettings..."
+	gsettings set org.gnome.desktop.remote-desktop.rdp enable true
+	gsettings set org.gnome.desktop.remote-desktop.rdp view-only false
+
+	# Prompt the user to enter a password for the RDP connection.
+	_PASSWORD_FOR_REMMINA_INPUT=$(whiptail --title "Input Password for [Mirrored] RDP" \
+		--passwordbox "Enter a password for user: $(logname)\nThis will be for RDP on port 3390." 0 0 "" 3>&1 1>&2 2>&3)
+
+	# Sanitize the password to remove leading/trailing whitespace.
+	_PASSWORD_FOR_REMMINA_INPUT=$(echo "$_PASSWORD_FOR_REMMINA_INPUT" | tr -d '[:space:]')
+
+	# Exit if the user cancels the password prompt.
+	if [ -z "$_PASSWORD_FOR_REMMINA_INPUT" ]; then
+		echo "Password input cancelled. Aborting."
+		return 1
+	fi
+
+	# Disable the system-wide service to prevent conflicts with the user-level service.
+	# The command may fail if the service is not active, which is acceptable.
+	sudo systemctl disable --now gnome-remote-desktop.service 2>/dev/null
+
+	# Enable and start the RDP service for the current user.
+	# This runs as a user service, not a system-wide one.
+	systemctl --user enable --now gnome-remote-desktop.service
+	systemctl --user enable gnome-remote-desktop.service # Ensure it's enabled
+
+	# Allow incoming RDP connections on port 3390 through the firewall.
+	sudo ufw allow 3390/tcp
+	sudo ufw allow 3389/tcp
+
+	# Set the RDP credentials for the current user's session.
+	grdctl rdp set-credentials "$(logname)" "$_PASSWORD_FOR_REMMINA_INPUT"
+
+	# Enable lingering for the user. This allows the user's services (like this
+	# RDP session) to start at boot and run even when the user is not logged in.
+	sudo loginctl enable-linger "$(logname)"
+
+	# Reload daemons and restart the services to apply all changes.
+	systemctl --user daemon-reload
+	sudo systemctl daemon-reload
+	systemctl --user restart gnome-remote-desktop.service
+	# A restart of the system service might also be needed in some edge cases.
+	sudo systemctl restart gnome-remote-desktop.service 2>/dev/null
+
+	echo "Mirrored RDP service configured and restarted."
+}
+
+# =============================================================================
+# FUNCTION: FUN_REMMINA_HEADLESS
+#
+# Configures RDP to run in headless mode.
+# This creates a new, virtual desktop session that is not visible on the local
+# display. It is useful for running a dedicated remote session that persists
+# even when the local user is logged out.
+# It runs as a system-level service on port 3389.
+# =============================================================================
+FUN_REMMINA_HEADLESS() {
+
+	printf " Configuring [Headless] RDP Remmina Remote Desktop Connection...\n PORT: 3389\n USERNAME: $(logname)\n"
+
+	# Programmatically enable RDP sharing for the target user.
+	# These settings must be applied for the user who will be logging in remotely.
+	echo "Enabling RDP and remote control via gsettings for user $(logname)..."
+	sudo -u "$(logname)" gsettings set org.gnome.desktop.remote-desktop.rdp enable true
+	sudo -u "$(logname)" gsettings set org.gnome.desktop.remote-desktop.rdp view-only false
+
+	# Also set the gsettings for the root user, which can be necessary for the system service.
+	sudo gsettings set org.gnome.desktop.remote-desktop.rdp enable true
+	sudo gsettings set org.gnome.desktop.remote-desktop.rdp view-only false
+
+	# Prompt the user to enter a password for the headless RDP connection.
+	_PASSWORD_FOR_REMMINA_INPUT=$(whiptail --title "Input Password for [Headless] RDP" \
+		--passwordbox "Enter a password for user: $(logname)\nThis will be for RDP on port 3389." 0 0 "" 3>&1 1>&2 2>&3)
+
+	# Sanitize the password to remove leading/trailing whitespace & any kind of spaces
+	_PASSWORD_FOR_REMMINA_INPUT=$(echo "$_PASSWORD_FOR_REMMINA_INPUT" | tr -d '[:space:]')
+
+	# Exit if the user cancels the password prompt.
+	if [ -z "$_PASSWORD_FOR_REMMINA_INPUT" ]; then
+		echo "Password input cancelled. Aborting."
+		return 1
+	fi
+
+	# Disable the user-level service to prevent conflicts with the system-level service.
+	# The command may fail if the service is not active, which is acceptable.
+	systemctl --user disable --now gnome-remote-desktop.service 2>/dev/null
+
+	# Enable and start the system-level service for headless mode.
+	sudo systemctl enable --now gnome-remote-desktop.service
+	sudo systemctl enable gnome-remote-desktop.service # Ensure it's enabled
+
+	# Allow incoming RDP connections on port 3389 through the firewall.
+	sudo ufw allow 3390/tcp
+	sudo ufw allow 3389/tcp
+
+	# Programmatically enable the system-wide remote desktop service.
+	# This is equivalent to toggling 'Remote Login' in the GNOME Settings GUI.
+	grdctl --system rdp enable
+
+	# Set credentials for the system-level service.
+	sudo grdctl --system rdp set-credentials "$(logname)" "$_PASSWORD_FOR_REMMINA_INPUT"
+
+	# Enable lingering for the user. This allows the user's services to run
+	# in the background, which is required for the headless session to be created.
+	sudo loginctl enable-linger "$(logname)"
+
+	# Reload daemon and restart the system service to apply all changes.
+	sudo systemctl daemon-reload
+	sudo systemctl restart gnome-remote-desktop.service
+
+	echo "Headless RDP service configured and restarted."
+	echo "A reboot is recommended to ensure all changes are properly activated."
+}
+
+# --- Main Execution ---
+
+# Display the main menu to the user to select the desired RDP mode.
+# The choice is stored in the _MASTER_CHOICE_REMMINA variable.
+_MASTER_CHOICE_REMMINA=$(whiptail --title "Select Remmina RDP  display share MODE" --menu "Select Remmina RDP  display share MODE" 0 0 4 \
+	1 "[mirrored] RDP Remmina - Mirrored" \
+	2 "[headless] RDP Remmina - Headless" \
+	3 "Help / About" \
+	4 "Exit" 3>&1 1>&2 2>&3)
+
+# Exit if no choice was made (e.g., user pressed Esc or Cancel).
+if [ -z "$_MASTER_CHOICE_REMMINA" ]; then
+	echo "No selection was made. Exiting."
+	exit 1
+fi
+
+# --- Script Entry Point ---
+# Route execution based on the user's menu choice.
+case $_MASTER_CHOICE_REMMINA in
+1)
+	# User chose Mirrored mode.
+	FUN_REMMINA_MIRRORED_SCREEN
+	;;
+2)
+	# User chose Headless mode.
+	FUN_REMMINA_HEADLESS
+	;;
+3)
+	# User chose Help / About.
+	whiptail --title "Help / About" --msgbox "GNOME Remote Desktop RDP Configurator\n\nDescription:\nThis script configures GNOME's built-in Remote Desktop for Mirrored or Headless RDP sessions.\n\nModes:\n1. Mirrored Mode: Shares the active desktop session (port 3390, user service).\n2. Headless Mode: Creates a virtual desktop session (port 3389, system service).\n\nDependencies:\n- whiptail\n- gnome-remote-desktop\n- remmina\n- remmina-plugin-rdp\n- ufw" 0 0
+	;;
+4)
+	# User chose Exit.
+	echo "Exiting."
+	exit 0
+	;;
+*)
+	# Handle an unexpected or invalid choice.
+	echo "Invalid Choice '$_MASTER_CHOICE_REMMINA' ...... exiting"
+	exit 1
+	;;
+esac
+
+# Clean up by unsetting the custom whiptail colors.
+unset NEWT_COLORS

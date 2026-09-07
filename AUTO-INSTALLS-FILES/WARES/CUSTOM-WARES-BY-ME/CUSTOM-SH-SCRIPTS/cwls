@@ -1,0 +1,89 @@
+#!/bin/bash
+
+# Ensure directory exists before doing anything else
+if [ ! -d /bin/CUSTOM-SH-SCRIPTS ]; then
+	echo -e "\e[48;5;1m THE DIRECTORY [/bin/CUSTOM-SH-SCRIPTS] DOES NOT EXIST \e[0m"
+	exit 1
+fi
+
+while true; do
+	export NEWT_COLORS='
+    root=white,red
+    window=white,gray
+    border=lightgray,gray
+    shadow=white,black
+    button=black,green
+    actbutton=black,red
+    compactbutton=lightgray,black
+    title=yellow,gray
+    roottext=red,black
+    textbox=lightgray,gray
+    acttextbox=gray,white
+    entry=black,lightgray
+    disentry=gray,black
+    checkbox=black,lightgray
+    actcheckbox=black,green
+    emptyscale=,lightgray
+    fullscale=,brown
+    listbox=black,lightgray
+    actlistbox=lightgray,black
+    actsellistbox=black,green
+    '
+
+	# 1. Dynamically read script filenames into a Bash array
+	# This avoids messy text parsing and temporary file generation
+	options=()
+
+	# Add a custom Exit/Separator line at the very top of the menu array
+	options+=("0" "____ EXIT MENU ____")
+
+	index=1
+	for file in /bin/CUSTOM-SH-SCRIPTS/custom*; do
+		if [ -e "$file" ]; then
+			filename=$(basename "$file")
+			options+=("$index" "$filename")
+			index=$((index + 1))
+		fi
+	done
+
+	# Calculate height parameters dynamically
+	total_items=${#options[@]}
+	menu_items=$((total_items / 2))
+
+	# 2. Pass the array safely to whiptail using "${options[@]}"
+	selection=$(whiptail --title "cwls Custom Wares List" \
+		--menu "Select a script to run:" 0 0 $menu_items \
+		"${options[@]}" \
+		3>&1 1>&2 2>&3)
+
+	# Exit if user hits Cancel, ESC, or selects the custom exit option (0)
+	if [ -z "$selection" ] || [ "$selection" -eq 0 ]; then
+		unset NEWT_COLORS
+		# clear
+		exit 0
+	fi
+
+	unset NEWT_COLORS
+
+	# # 3. Retrieve the matching filename directly out of the array matching our index selection
+	# # Bash arrays are 0-indexed, index maps directly to (selection * 2) - 1 for descriptions
+	# array_desc_index=$(((selection * 2) - 1))
+	# selected_script="${options[$array_desc_index]}"
+
+	# FIX: Calculate the correct array index based on selection
+	# Since index 0 is "0" and index 1 is "EXIT", selection "1" must point to index 3.
+	array_desc_index=$(((selection * 2) + 1))
+	selected_script="${options[$array_desc_index]}"
+
+	clear
+	echo "========================================="
+	echo "Running: $selection      $selected_script"
+	echo "========================================="
+	echo ""
+
+	# 4. Safely execute the target script using its absolute path
+	"/bin/CUSTOM-SH-SCRIPTS/$selected_script"
+
+	echo ""
+	# read -n 1 -s -r -p "Press any key to return to the menu..."
+done

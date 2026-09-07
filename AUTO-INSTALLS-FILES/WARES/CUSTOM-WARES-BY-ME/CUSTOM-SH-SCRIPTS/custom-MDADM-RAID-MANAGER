@@ -1,0 +1,444 @@
+#!/bin/bash
+
+# =============================================================================
+#
+#          MDADM RAID MANAGER TUI
+#
+# A comprehensive interactive utility for managing Linux Software RAID (MDADM).
+#
+#
+# =============================================================================
+
+# --- 1. Root Privilege Check ---
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[1;48;5;196m" "Error: This script must be run as root. Please use sudo." "\e[0m"
+	echo -e "\e[1;48;5;196m" "Trying to relaunch with sudo..." "\e[0m"
+	sudo "$0" "$@"
+	exit $?
+fi
+
+# --- 2. Dependency Check ---
+for PACKAGE in mdadm whiptail parted lsblk; do
+	if ! command -v "$PACKAGE" &>/dev/null; then
+		if ! dpkg -s "$PACKAGE" &>/dev/null; then
+			echo "Dependency '$PACKAGE' is not installed. Attempting to install..."
+			sudo apt update
+			sudo apt install -y "$PACKAGE"
+			if ! command -v "$PACKAGE" &>/dev/null; then
+				echo "Failed to install dependency '$PACKAGE'. Please install it manually."
+				exit 1
+			fi
+		fi
+	fi
+done
+
+# --- 3. Aesthetics (NEWT_COLORS) ---
+# "Server Room" Theme: Blues, Cyans, and White
+export NEWT_COLORS=' 
+root=white,black
+border=cyan,black
+window=white,blue
+shadow=black,gray
+title=white,blue
+button=black,cyan
+actbutton=white,blue
+checkbox=cyan,black
+actcheckbox=white,blue
+entry=black,cyan
+label=white,blue
+listbox=white,black
+actlistbox=black,cyan
+textbox=white,black
+acttextbox=black,cyan
+helpline=white,blue
+roottext=cyan,black
+emptyscale=black,cyan
+fullscale=white,blue
+disentry=gray,black
+compactbutton=white,gray
+actsellistbox=white,cyan
+sellistbox=white,black
+'
+
+# --- 4. Helper Functions ---
+
+# Simple spinner for long operations
+fun_spinner() {
+	local pid=$!
+	local delay=0.1
+	local spinstr='|/-\'
+	while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
+		local temp=${spinstr#?}
+		printf " [%c]  " "$spinstr"
+		local spinstr=$temp${spinstr%"$temp"}
+		sleep $delay
+		printf "\b\b\b\b\b\b"
+	done
+	printf "    \b\b\b\b"
+}
+
+# --- 5. Core Functions ---
+
+FUN_CREATE_ARRAY() {
+	# 1. Select RAID Level
+	local RAID_LEVEL
+	RAID_LEVEL=$(whiptail --title "Select RAID Level" --menu "Choose the RAID level for the new array:" 0 0 6 \
+		"0" "RAID 0 (Striping - Performance, No Redundancy)" \
+		"1" "RAID 1 (Mirroring - Redundancy)" \
+		"5" "RAID 5 (Striping with Parity - Balanced)" \
+		"6" "RAID 6 (Striping with Double Parity)" \
+		"10" "RAID 10 (Mirrored Striping)" \
+		3>&1 1>&2 2>&3)
+
+	if [ -z "$RAID_LEVEL" ]; then return; fi
+
+	# 2. Select Devices (Superior Pattern)
+	# List available block devices (exclude loop, ram, and existing md devices)
+	# We use lsblk to get potential candidates (sd*, nvme*, vd*)
+	readarray -t device_list < <(lsblk -dpn -o NAME,SIZE,MODEL,TYPE | grep -E 'disk|part' | grep -v '/dev/loop' | grep -v '/dev/md')
+
+	if [ ${#device_list[@]} -eq 0 ]; then
+		whiptail --msgbox "No suitable block devices found to create an array." 0 0
+		return
+	fi
+
+	local options=()
+	declare -A device_map
+	local i=1
+
+	for line in "${device_list[@]}"; do
+		# Extract device path
+		local dev_path=$(echo "$line" | awk '{print $1}')
+		# Create a description string
+		local desc=$(echo "$line" | awk '{$1=""; print $0}' | xargs)
+		options+=("$i" "$dev_path [$desc]" "OFF")
+		device_map[$i]="$dev_path"
+		((i++))
+	done
+
+	local CHOSEN_INDICES
+	CHOSEN_INDICES=$(whiptail --title "Select Devices" --checklist "Select devices to include in RAID $RAID_LEVEL:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ -z "$CHOSEN_INDICES" ]; then
+		whiptail --msgbox "No devices selected. Operation cancelled." 0 0
+		return
+	fi
+
+	# Convert indices to actual device paths
+	local SELECTED_DEVICES=""
+	local DEV_COUNT=0
+	for index in $CHOSEN_INDICES; do
+		# Remove quotes from index
+		index=$(echo "$index" | tr -d '"')
+		SELECTED_DEVICES="$SELECTED_DEVICES ${device_map[$index]}"
+		((DEV_COUNT++))
+	done
+
+	# 3. Validation based on RAID level
+	case "$RAID_LEVEL" in
+	0) MIN_DEVS=2 ;;
+	1) MIN_DEVS=2 ;;
+	5) MIN_DEVS=3 ;;
+	6) MIN_DEVS=4 ;;
+	10) MIN_DEVS=4 ;;
+	esac
+
+	if [ "$DEV_COUNT" -lt "$MIN_DEVS" ]; then
+		whiptail --msgbox "Error: RAID $RAID_LEVEL requires at least $MIN_DEVS devices. You selected $DEV_COUNT." 0 0
+		return
+	fi
+
+	# 4. Array Name
+	local ARRAY_NAME
+	ARRAY_NAME=$(whiptail --inputbox "Enter the device node for the new array (e.g., /dev/md0):" 0 0 "/dev/md0" 3>&1 1>&2 2>&3)
+	if [ -z "$ARRAY_NAME" ]; then return; fi
+
+	# 5. Final Confirmation (Destructive)
+	local CONFIRM_MSG="About to create RAID $RAID_LEVEL array '$ARRAY_NAME' with $DEV_COUNT devices:\n\n$SELECTED_DEVICES\n\nWARNING: THIS WILL ERASE ALL DATA ON THESE DEVICES.\n\nAre you sure?"
+	if ! whiptail --title "SANITY CHECK" --yesno "$CONFIRM_MSG" 0 0; then
+		return
+	fi
+
+	# 6. Execute
+	echo "Creating Array..."
+	# --force is often needed if disks were previously used
+	# sudo mdadm --create --verbose /dev/md0 --level=0 --raid-devices=2 /dev/sdb /dev/sdc
+	local CMD="mdadm --create --verbose $ARRAY_NAME --level=$RAID_LEVEL --raid-devices=$DEV_COUNT $SELECTED_DEVICES --force"
+
+	# Capture output to temp file for display
+	local LOG_FILE=$(mktemp)
+	echo "Running: $CMD" >"$LOG_FILE"
+	$CMD >>"$LOG_FILE" 2>&1
+
+	if [ $? -eq 0 ]; then
+		whiptail --title "Success" --textbox "$LOG_FILE" 0 0
+
+		# Save config prompt
+		if whiptail --yesno "Array created. Do you want to update /etc/mdadm/mdadm.conf now?" 0 0; then
+			FUN_SAVE_CONFIG
+		fi
+	else
+		whiptail --title "Error" --msgbox "Failed to create array. Check the log." 0 0
+		whiptail --textbox "$LOG_FILE" 0 0
+	fi
+	rm -f "$LOG_FILE"
+}
+
+FUN_MANAGE_ARRAY() {
+	# List active arrays
+	if ! grep -q "^md" /proc/mdstat; then
+		whiptail --msgbox "No active RAID arrays found in /proc/mdstat." 0 0
+		return
+	fi
+
+	# Parse /proc/mdstat for array names (simple parsing)
+	# md0 : active raid1 sdb[1] sdc[0]
+	readarray -t md_lines < <(grep "^md" /proc/mdstat)
+
+	local options=()
+	declare -A md_map
+	local i=1
+
+	for line in "${md_lines[@]}"; do
+		local md_dev=$(echo "$line" | awk '{print $1}')
+		local md_type=$(echo "$line" | awk '{print $4}')
+		local md_status=$(echo "$line" | awk '{print $3}')
+
+		options+=("$i" "/$dev_path [$md_type - $md_status]")
+		md_map[$i]="/$dev_path"
+		((i++))
+	done
+
+	local CHOICE_IDX
+	CHOICE_IDX=$(whiptail --title "Select Array to Manage" --menu "Choose an array:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ -z "$CHOICE_IDX" ]; then return; fi
+
+	local SELECTED_ARRAY="${md_map[$CHOICE_IDX]}"
+
+	# Action Menu for Selected Array
+	while true; do
+		local ACTION
+		ACTION=$(whiptail --title "Manage $SELECTED_ARRAY" --menu "Choose an action:" 0 0 8 \
+			"1" "View Details (mdadm --detail)" \
+			"2" "Stop Array" \
+			"3" "Delete Array (Stop + Zero Superblock)" \
+			"4" "Add Spare Device" \
+			"5" "Remove Device (Must be failed/detached)" \
+			"6" "Fail Device (Simulate Failure)" \
+			"7" "Watch /proc/mdstat (Monitor Sync)" \
+			"8" "Back" \
+			3>&1 1>&2 2>&3)
+
+		case "$ACTION" in
+		1)
+			local tmp=$(mktemp)
+			mdadm --detail "$SELECTED_ARRAY" >"$tmp"
+			whiptail --textbox "$tmp" 0 0
+			rm "$tmp"
+			;;
+		2)
+			if whiptail --yesno "Stop $SELECTED_ARRAY? Ensure it is unmounted first." 0 0; then
+				# Attempt unmount first just in case
+				umount "$SELECTED_ARRAY" 2>/dev/null
+				if mdadm --stop "$SELECTED_ARRAY"; then
+					whiptail --msgbox "Array stopped." 0 0
+					return # Exit management menu as array is gone
+				else
+					whiptail --msgbox "Failed to stop array. Is it mounted or in use?" 0 0
+				fi
+			fi
+			;;
+		3)
+			if whiptail --title "DANGER" --yesno "This will STOP the array and ZERO the superblocks on all constituent devices.\n\nDATA WILL BE LOST.\n\nProceed?" 0 0; then
+				# Get member devices before stopping
+				local members=$(mdadm --detail "$SELECTED_ARRAY" | grep -o "/dev/sd[a-z0-9]*\|/dev/nvme[0-9]n[0-9]p[0-9]*")
+
+				umount "$SELECTED_ARRAY" 2>/dev/null
+				if mdadm --stop "$SELECTED_ARRAY"; then
+					echo "Zeroing superblocks on: $members"
+					for dev in $members; do
+						mdadm --zero-superblock "$dev"
+					done
+					whiptail --msgbox "Array deleted and superblocks zeroed." 0 0
+					return
+				else
+					whiptail --msgbox "Failed to stop array. Cannot delete." 0 0
+				fi
+			fi
+			;;
+		4)
+			# Add Spare
+			local spare_dev
+			spare_dev=$(whiptail --inputbox "Enter path to spare device (e.g. /dev/sdd):" 0 0 3>&1 1>&2 2>&3)
+			if [ -n "$spare_dev" ]; then
+				if mdadm --manage "$SELECTED_ARRAY" --add "$spare_dev"; then
+					whiptail --msgbox "Device added." 0 0
+				else
+					whiptail --msgbox "Failed to add device." 0 0
+				fi
+			fi
+			;;
+		5)
+			# Remove Device
+			local dev_to_remove
+			dev_to_remove=$(whiptail --inputbox "Enter device to remove (e.g. /dev/sdb):" 0 0 3>&1 1>&2 2>&3)
+			if [ -n "$dev_to_remove" ]; then
+				if mdadm --manage "$SELECTED_ARRAY" --remove "$dev_to_remove"; then
+					whiptail --msgbox "Device removed." 0 0
+				else
+					whiptail --msgbox "Failed to remove device (is it marked as faulty?)." 0 0
+				fi
+			fi
+			;;
+		6)
+			# Fail Device
+			local dev_to_fail
+			dev_to_fail=$(whiptail --inputbox "Enter device to mark as FAULTY (e.g. /dev/sdb):" 0 0 3>&1 1>&2 2>&3)
+			if [ -n "$dev_to_fail" ]; then
+				if whiptail --yesno "Are you sure you want to mark $dev_to_fail as faulty?" 0 0; then
+					if mdadm --manage "$SELECTED_ARRAY" --fail "$dev_to_fail"; then
+						whiptail --msgbox "Device marked as faulty." 0 0
+					else
+						whiptail --msgbox "Failed." 0 0
+					fi
+				fi
+			fi
+			;;
+		7)
+			watch -n 1 cat /proc/mdstat
+			;;
+		8 | *)
+			break
+			;;
+		esac
+	done
+}
+
+FUN_ASSEMBLE_SCAN() {
+	echo "Scanning for arrays..."
+	local output
+	output=$(mdadm --assemble --scan --verbose 2>&1)
+	whiptail --title "Assemble Scan Result" --msgbox "$output" 0 0
+}
+
+FUN_SAVE_CONFIG() {
+	local CONFIG_FILE="/etc/mdadm/mdadm.conf"
+	if whiptail --title "Save Configuration" --yesno "This will regenerate $CONFIG_FILE based on currently active arrays.\n\nExisting configuration will be backed up.\n\nProceed?" 0 0; then
+		# Backup
+		cp "$CONFIG_FILE" "${CONFIG_FILE}.bak.$(date +%s)"
+
+		# Write header
+		echo "DEVICE partitions" >"$CONFIG_FILE"
+
+		# Scan and append
+		mdadm --detail --scan >>"$CONFIG_FILE"
+
+		# Update initramfs (crucial for boot)
+		whiptail --infobox "Updating initramfs... this may take a moment." 0 0
+		update-initramfs -u
+
+		whiptail --msgbox "Configuration saved and initramfs updated.\n\nBackup saved to ${CONFIG_FILE}.bak.*" 0 0
+	fi
+}
+
+FUN_FORMAT_ARRAY() {
+	# List arrays to format
+	readarray -t md_lines < <(grep "^md" /proc/mdstat | awk '{print "/dev/"$1}')
+
+	if [ ${#md_lines[@]} -eq 0 ]; then
+		whiptail --msgbox "No active arrays to format." 0 0
+		return
+	fi
+
+	local options=()
+	declare -A md_map
+	local i=1
+	for dev in "${md_lines[@]}"; do
+		options+=("$i" "$dev")
+		md_map[$i]="$dev"
+		((i++))
+	done
+
+	local CHOICE_IDX
+	CHOICE_IDX=$(whiptail --title "Format Array" --menu "Select array to format:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ -z "$CHOICE_IDX" ]; then return; fi
+	local TARGET_DEV="${md_map[$CHOICE_IDX]}"
+
+	# Select FS
+	local FS
+	FS=$(whiptail --menu "Select Filesystem:" 0 0 4 \
+		"ext4" "EXT4 (Standard Linux)" \
+		"btrfs" "BTRFS (Advanced)" \
+		"xfs" "XFS (High Performance)" \
+		"vfat" "FAT32 (Compatibility)" \
+		3>&1 1>&2 2>&3)
+
+	if [ -z "$FS" ]; then return; fi
+
+	if ! whiptail --yesno "WARNING: Formatting $TARGET_DEV as $FS will erase all data.\n\nProceed?" 0 0; then return; fi
+
+	echo "Formatting..."
+	case "$FS" in
+	ext4) mkfs.ext4 -F "$TARGET_DEV" ;;
+	btrfs) mkfs.btrfs -f "$TARGET_DEV" ;;
+	xfs) mkfs.xfs -f "$TARGET_DEV" ;;
+	vfat) mkfs.vfat -F 32 "$TARGET_DEV" ;;
+	esac
+
+	if [ $? -eq 0 ]; then
+		whiptail --msgbox "Formatting complete." 0 0
+	else
+		whiptail --msgbox "Formatting failed." 0 0
+	fi
+}
+
+FUN_SHOW_ABOUT() {
+	whiptail --title "About MDADM Manager" --msgbox \
+		"MDADM RAID MANAGER TUI
+
+This tool simplifies the management of Linux Software RAID arrays.
+
+Features:
+- Create RAID 0, 1, 5, 6, 10 arrays.
+- Manage existing arrays (Stop, Delete, Detail).
+- Manage devices (Add spare, Remove faulty).
+- Save configuration to /etc/mdadm/mdadm.conf and update initramfs.
+- Format arrays.
+
+Author: LINUX-OASIS
+" 0 0
+}
+
+# --- 6. Main Loop ---
+
+while true; do
+	CHOICE=$(whiptail --title "MDADM RAID MANAGER" --menu "Select Option:" 0 0 15 \
+		"1" "[CREATE] New RAID Array" \
+		"2" "[MANAGE] Existing Array (Stop/Add/Remove/Fail)" \
+		"3" "[ASSEMBLE] Scan & Assemble Arrays" \
+		"4" "[CONFIG] Save Config & Update Initramfs" \
+		"5" "[FORMAT] Format Array (mkfs)" \
+		"6" "[STATUS] View /proc/mdstat" \
+		"7" "Help / About" \
+		"8" "Exit" \
+		3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then
+		exit 0
+	fi
+
+	case "$CHOICE" in
+	1) FUN_CREATE_ARRAY ;;
+	2) FUN_MANAGE_ARRAY ;;
+	3) FUN_ASSEMBLE_SCAN ;;
+	4) FUN_SAVE_CONFIG ;;
+	5) FUN_FORMAT_ARRAY ;;
+	6)
+		watch -n 1 cat /proc/mdstat
+		;;
+	7) FUN_SHOW_ABOUT ;;
+	8) exit 0 ;;
+	esac
+done

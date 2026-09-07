@@ -1,0 +1,2852 @@
+#!/bin/bash
+
+# #############################################################################
+#
+#                       PROTO-BTRFS-MANAGER
+#
+#  An interactive TUI for comprehensive BTRFS filesystem management.
+#  Features include:
+#  - Creating BTRFS filesystems on single drives (with optional partitioning)
+#    or as RAID arrays (RAID0, RAID1, RAID10, RAID5, RAID6, etc.).
+#  - Live management of BTRFS devices (add, remove, replace, convert RAID profiles).
+#  - Full subvolume lifecycle management (list, create, delete, snapshot).
+#  - Snapshot backup and restore capabilities using 'btrfs send/receive'.
+#  - Filesystem maintenance tasks (scrub, balance, defragment).
+#  - Mounting, unmounting, and viewing detailed filesystem information.
+#
+# #############################################################################
+
+# ==============================================================================
+#                           CONFIGURATION & SETUP
+# ==============================================================================
+
+# Set custom whiptail colors for a better user interface.
+export NEWT_COLORS='border=gray,red
+window=brown,blue
+shadow=green,brightred
+title=white,brightred
+button=cyan,lightray
+actbutton=black,yellow
+checkbox=brightred,black
+actcheckbox=gray,white
+entry=white,gray
+label=black,magenta
+listbox=white,gray
+actlistbox=black,yellow
+textbox=brightred,black
+acttextbox=black,yellow
+helpline=brightblue,cyan
+roottext=brightmagenta,black
+emptyscale=magenta,gray
+fullscale=brightgreen,green
+disentry=brightmagenta,magenta
+compactbutton=magenta,gray
+actsellistbox=brightred,black
+sellistbox=green,gray'
+
+# Ensure script is run as root.
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[1;48;5;202m" "Please run as root or with sudo" "\e[0m"
+	sudo $0
+	exit 1
+fi
+
+# Check for whiptail dependency.
+if ! command -v whiptail &>/dev/null; then
+	echo "whiptail is not installed. Please install it to use this script."
+	exit 1
+fi
+
+if ! command -v uuidgen &>/dev/null; then
+	echo "uuidgen is not installed. Please install it to use this script (package: uuid-runtime)."
+	exit 1
+fi
+
+if ! command -v smartctl &>/dev/null; then
+	echo "smartctl is not installed. Please install it to use this script (package: smartmontools)."
+	exit 1
+fi
+
+# Note: verbose debug logging and CLI wrappers removed per user request.
+# The script now calls the system 'btrfs' binary directly.
+
+# Global variable to hold the currently selected mount point
+CURRENT_MOUNT_POINT=""
+
+# ------------------------------------------------------------------------------
+# Helpers to validate filesystem types
+# ------------------------------------------------------------------------------
+# ==============================================================================
+# FUNCTION:    FUN_IS_BTRFS
+# DESCRIPTION: Checks if a given mount point is a BTRFS filesystem.
+# PARAMETERS:
+#   $1: mp - The mount point path to check.
+# RETURNS:     0 if it is a BTRFS filesystem, 1 otherwise.
+# ==============================================================================
+function FUN_IS_BTRFS() {
+	local mp="$1"
+	if [ -z "$mp" ]; then
+		return 1
+	fi
+	# findmnt returns the filesystem type for the target
+	local fstype
+	fstype=$(findmnt -n -o FSTYPE --target "$mp" 2>/dev/null || echo "")
+	[ "$fstype" = "btrfs" ]
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_VALIDATE_BTRFS_OR_ERROR
+# DESCRIPTION: Validates if a given mount point is a BTRFS filesystem. If not,
+#              it displays an error message via whiptail.
+# PARAMETERS:
+#   $1: mp - The mount point path to validate.
+# RETURNS:     0 if it is a BTRFS filesystem, 1 otherwise.
+# ==============================================================================
+function FUN_VALIDATE_BTRFS_OR_ERROR() {
+	local mp="$1"
+	if ! FUN_IS_BTRFS "$mp"; then
+		return 1
+	fi
+	return 0
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_GET_AND_VALIDATE_MOUNT_POINT
+# DESCRIPTION: Ensures a valid BTRFS mount point is selected and stored in the
+#              global CURRENT_MOUNT_POINT variable. If a mount point is already
+#              selected, it confirms with the user. If not, it prompts for one.
+# PARAMETERS:  None.
+# OUTPUT:      Sets the global variable CURRENT_MOUNT_POINT.
+# RETURNS:     0 on success, 1 on failure (cancellation or invalid selection).
+# ==============================================================================
+function FUN_GET_AND_VALIDATE_MOUNT_POINT() {
+	# If a mount point is already selected, confirm if the user wants to continue using it.
+	if [ -n "$CURRENT_MOUNT_POINT" ]; then
+		if whiptail --title "Confirm Mount Point" --yesno "Continue operating on '$CURRENT_MOUNT_POINT'?" 0 0; then
+			return 0 # User confirmed, no change needed.
+		fi
+	fi
+
+	# If no mount point is set, or the user wants to change it, prompt for a new one.
+	local selected_mp
+	selected_mp=$(FUN_SELECT_MOUNT_POINT)
+	if [ $? -ne 0 ] || [ -z "$selected_mp" ]; then
+		whiptail --title "Cancelled" --msgbox "Mount point selection cancelled or invalid." 0 0
+		CURRENT_MOUNT_POINT="" # Clear any previous selection
+		return 1
+	fi
+
+	# Validate the selected mount point.
+	if [ ! -d "$selected_mp" ]; then
+		whiptail --title "Error" --msgbox "The path '$selected_mp' is not a directory." 0 0
+		return 1
+	fi
+
+	if ! FUN_IS_BTRFS "$selected_mp"; then
+		whiptail --title "Error" --msgbox "The path '$selected_mp' is not a BTRFS filesystem." 0 0
+		return 1
+	fi
+
+	# If validation passes, set the global variable.
+	CURRENT_MOUNT_POINT="$selected_mp"
+	return 0
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SELECT_SUBVOLUME
+# DESCRIPTION: Displays a menu of subvolumes for the user to choose from, with
+#              optional filtering.
+# PARAMETERS:
+#   $1: mount_point - The mount point of the BTRFS filesystem.
+#   $2: title - The title to display on the whiptail menu.
+#   $3: menu_text - The text to display above the menu options.
+#   $4: filter - Optional. "all", "writable", or "readonly". Defaults to "all".
+# OUTPUT:      Prints the selected subvolume's relative path to stdout.
+# RETURNS:     0 on successful selection, 1 on cancellation or no items found.
+# ==============================================================================
+function FUN_SELECT_SUBVOLUME() {
+	local mount_point="$1"
+	local title="$2"
+	local menu_text="$3"
+	local filter="${4:-all}" # Default to "all" if not provided
+
+	local subvolume_lines
+	readarray -t subvolume_lines < <(btrfs subvolume list -a "$mount_point" | sort -k 9)
+
+	if [ ${#subvolume_lines[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "No subvolumes found on $mount_point." 0 0
+		return 1
+	fi
+
+	local menu_options=()
+	for line in "${subvolume_lines[@]}"; do
+		local path
+		path=$(echo "$line" | awk '{$1=$2=$3=$4=$5=$6=$7=$8=""; print $0}' | sed 's/^ *//')
+		local id
+		id=$(echo "$line" | awk '{print $2}')
+		local description="ID: $id"
+
+		local add_to_menu=false
+		if [ "$filter" == "all" ]; then
+			add_to_menu=true
+		else
+			local is_readonly
+			is_readonly=$(btrfs property get -ts "$mount_point/$path" ro 2>/dev/null | awk '/ro=/ {print $2}')
+
+			if [ "$filter" == "readonly" ] && [ "$is_readonly" == "true" ]; then
+				description+=" [Read-Only]"
+				add_to_menu=true
+			elif [ "$filter" == "writable" ] && [ "$is_readonly" != "true" ]; then
+				description+=" [Writable]"
+				add_to_menu=true
+			fi
+		fi
+
+		if [ "$add_to_menu" = true ]; then
+			menu_options+=("$path" "$description")
+		fi
+	done
+
+	if [ ${#menu_options[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "No subvolumes match the filter '$filter'." 0 0
+		return 1
+	fi
+
+	local SELECTED_SUBVOLUME
+	SELECTED_SUBVOLUME=$(whiptail --title "$title" --menu "$menu_text" 0 0 0 "${menu_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$SELECTED_SUBVOLUME" ]; then
+		whiptail --title "Cancelled" --msgbox "No subvolume selected." 0 0
+		return 1
+	fi
+
+	echo "$SELECTED_SUBVOLUME"
+	return 0
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SUGGEST_RAID_PROFILE
+# DESCRIPTION: Suggests an optimal BTRFS RAID profile based on the number of
+#              selected drives.
+# PARAMETERS:
+#   $1: count - The number of drives selected.
+# RETURNS:     Prints the suggested RAID profile string to stdout.
+# ==============================================================================
+function FUN_SUGGEST_RAID_PROFILE() {
+	local count=$1
+	local profile_data
+
+	case "$count" in
+	1)
+		profile_data="single"
+		;;
+	2)
+		profile_data="raid1"
+		;;
+	3)
+		profile_data="raid1c3"
+		;;
+	*)
+		# For 4 or more drives
+		if ((count % 2 == 0)); then
+			# Even number of drives >= 4, suggest raid10
+			profile_data="raid10"
+		else
+			# Odd number of drives >= 5, suggest raid1c4 for max mirrors
+			profile_data="raid1c4"
+		fi
+		;;
+	esac
+
+	echo "$profile_data"
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SELECT_REPEATING_HEX
+# DESCRIPTION: Prompts the user to select a hexadecimal digit to generate a
+#              UUID where all characters are the selected digit.
+# PARAMETERS:  None.
+# RETURNS:     Prints the generated repeating hexadecimal UUID to stdout on
+#              success, or returns 1 on cancellation.
+# ==============================================================================
+function FUN_SELECT_REPEATING_HEX() {
+	local choices=(0 0 1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 9 9 A A B B C C D D E E F F)
+	local REPEATED_HEX
+	REPEATED_HEX=$(whiptail --title "Select Repeating Hex" \
+		--menu "Choose a hex digit to repeat in the new UUID:" 0 0 0 "${choices[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$REPEATED_HEX" ]; then
+		return 1
+	fi
+
+	REPEATED_HEX=$(echo "$REPEATED_HEX" | tr -d '[:space:]')
+
+	local REPEAT_UUID
+	REPEAT_UUID="$(printf '%*s' 8 '' | tr ' ' "$REPEATED_HEX")-\
+$(printf '%*s' 4 '' | tr ' ' "$REPEATED_HEX")-\
+$(printf '%*s' 4 '' | tr ' ' "$REPEATED_HEX")-\
+$(printf '%*s' 4 '' | tr ' ' "$REPEATED_HEX")-\
+$(printf '%*s' 12 '' | tr ' ' "$REPEATED_HEX")"
+
+	echo "$REPEAT_UUID"
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_ENSURE_UNMOUNTED
+# DESCRIPTION: Checks if a device is mounted. If so, it prompts the user to
+#              unmount it. Essential before destructive operations.
+# PARAMETERS:
+#   $1: device - The device path (e.g., /dev/sdb) to check.
+# RETURNS:     0 if the device is unmounted (or was never mounted), 1 if
+#              it's mounted and the user cancels or unmount fails.
+# ==============================================================================
+function FUN_ENSURE_UNMOUNTED() {
+	local device=$1
+	local mountpoint
+	mountpoint=$(lsblk -o MOUNTPOINT -n "$device" | tr -d '[:space:]')
+	if [[ -n $mountpoint ]]; then
+		if whiptail --yesno "$device is mounted at $mountpoint. It must be unmounted to change the UUID. Unmount now?" 0 0; then
+			sudo umount "$device"
+			if [ $? -ne 0 ]; then
+				whiptail --title "Error" --msgbox "Failed to unmount $device. Cannot proceed." 0 0
+				return 1
+			fi
+			whiptail --title "Success" --msgbox "$device unmounted successfully." 0 0
+			return 0
+		else
+			whiptail --title "Cancelled" --msgbox "Cannot proceed while the device is mounted. Operation cancelled." 0 0
+			return 1
+		fi
+	fi
+	return 0
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SCRUB
+# DESCRIPTION: Executes a BTRFS scrub command (start, status, or cancel)
+#              on a specified mount point and displays the result.
+# PARAMETERS:
+#   $1: command - The scrub command to execute ("start", "status", "cancel").
+#   $2: mount_point - The mount point of the BTRFS filesystem.
+# RETURNS:     None (displays output via whiptail).
+# ==============================================================================
+function FUN_SCRUB() {
+	local command=$1
+	local mount_point=$2
+	local output
+	output=$(btrfs scrub "$command" "$mount_point" 2>&1)
+	whiptail --title "Scrub Result" --msgbox "Scrub $command on: $mount_point\n\nOutput:\n$output" 0 0
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MOUNT
+# DESCRIPTION: Mounts a source device to a destination path with optional
+#              mount options. Sets a global flag `mount_ran` to indicate success.
+# PARAMETERS:
+#   $1: source - The device or UUID to mount.
+#   $2: destination - The mount point.
+#   $3: options - Optional mount options (e.g., "-o degraded").
+# OUTPUT:      Sets the global variable `mount_ran` to true on success.
+# ==============================================================================
+function FUN_MOUNT() {
+	local source=$1
+	local destination=$2
+	local options=$3
+
+	# Build command in an array to safely handle optional arguments without `eval`
+	local -a cmd_array
+	cmd_array=(mount)
+	if [[ -n "$options" ]]; then
+		cmd_array+=($options)
+	fi
+	cmd_array+=("$source" "$destination")
+
+	# Execute the command from the array.
+	if "${cmd_array[@]}" >/dev/null 2>&1; then
+		return 0 # Success
+	else
+		return 1 # Failure
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_DO_UNMOUNT
+# DESCRIPTION: Unmounts a specified mount point and removes any associated
+#              symbolic links in the user's BTRFS-MOUNTS directory.
+# PARAMETERS:
+#   $1: mount_point - The path of the mount point to unmount.
+# RETURNS:     0 on successful unmount, 1 otherwise.
+# ==============================================================================
+function FUN_DO_UNMOUNT() {
+	local mount_point=$1
+	if [ -z "$mount_point" ]; then
+		whiptail --title "Error" --msgbox "Mount point is empty." 0 0
+		return 1
+	fi
+
+	# Remove any symbolic links in ~/BTRFS-MOUNTS/ that point to this mount point
+	local REAL_USER=${SUDO_USER:-$(logname)}
+	local full_output=""
+	for link in /home/$REAL_USER/BTRFS-MOUNTS/*; do
+		if [ -L "$link" ] && [[ $(readlink "$link") == "$mount_point" ]]; then
+			unlink "$link"
+			if [ $? -ne 0 ]; then
+				full_output+="Error: Failed to remove symbolic link: $link\n"
+			else
+				full_output+="Symbolic link removed: $link\n"
+			fi
+		fi
+	done
+
+	local output
+	local exit_code
+
+	# First, try a standard unmount
+	output=$(umount "$mount_point" 2>&1)
+	exit_code=$?
+
+	# If standard unmount fails, try a lazy and forced unmount
+	if [ $exit_code -ne 0 ]; then
+		output+=$(umount -lf "$mount_point" 2>&1)
+		exit_code=$?
+	fi
+
+	if [ $exit_code -eq 0 ]; then
+		full_output+="Success: Filesystem '$mount_point' unmounted successfully.\n"
+		sudo rmdir "$mount_point" 2>/dev/null
+		whiptail --title "Unmount Success" --msgbox "$full_output" 0 0
+		return 0
+	else
+		full_output+="Error: Failed to unmount filesystem '$mount_point'.\n"
+		full_output+="Output: $output\n"
+		whiptail --title "Unmount Error" --msgbox "$full_output" 0 0
+		return 1
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_CLEANUP
+# DESCRIPTION: Attempts to unmount and remove a directory if it's a mount point,
+#              or just remove the directory if it's empty. Used for temporary
+#              mount points.
+# PARAMETERS:
+#   $1: mount_point - The path to the mount point or directory to clean up.
+# ==============================================================================
+function FUN_CLEANUP() {
+	local mount_point
+	mount_point="$1"
+
+	if [ -n "$mount_point" ] && mountpoint -q "$mount_point"; then
+		# Try a standard unmount first, fallback to lazy/forced.
+		umount "$mount_point" 2>/dev/null || umount -lf "$mount_point" 2>/dev/null
+		sudo rmdir "$mount_point" 2>/dev/null
+	elif [ -d "$mount_point" ]; then
+		sudo rmdir "$mount_point" 2>/dev/null
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_DEVICE_ADD
+# DESCRIPTION: Adds one or more block devices to an existing BTRFS filesystem.
+# PARAMETERS:
+#   $1: mount_point - The mount point of the target BTRFS filesystem.
+#   $@: devices_to_add - An array of block device paths to add.
+# RETURNS:     0 if all devices were added successfully, 1 otherwise.
+# ==============================================================================
+function FUN_DEVICE_ADD() {
+	local mount_point=$1
+	shift
+	local devices_to_add=("$@")
+	local full_output=""
+
+	# First, confirm all devices to be added
+	local confirmation_list=""
+	for device in "${devices_to_add[@]}"; do
+		confirmation_list+="- $device\n"
+	done
+
+	if (whiptail --title "Confirm Add Devices" --yesno "The following devices will be added in the background:\n\n$confirmation_list\nProceed?" 0 0); then
+		for device in "${devices_to_add[@]}"; do
+			local log_file="/tmp/btrfs_add_${device##*/}.log"
+			# Run the add command in the background, logging its output
+			(btrfs device add -f "$device" "$mount_point" >"$log_file" 2>&1 &)
+			full_output+="Device add for '$device' started in the background. Log: $log_file\n"
+		done
+		whiptail --title "In Progress" --msgbox "$full_output" 0 0
+		return 0 # Return success as tasks are backgrounded
+	else
+		whiptail --title "Cancelled" --msgbox "Device add operation cancelled." 0 0
+		return 1
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_BALANCE
+# DESCRIPTION: Initiates a BTRFS balance operation on a specified mount point
+#              with optional arguments.
+# PARAMETERS:
+#   $1: mount_point - The mount point of the BTRFS filesystem.
+#   $@: balance_args - Optional arguments to pass to `btrfs balance start`.
+# RETURNS:     0 on success, 1 if mount point is empty.
+# ==============================================================================
+function FUN_BALANCE() {
+	local mount_point=$1
+	if [ -z "$mount_point" ]; then
+		whiptail --title "Error" --msgbox "Mount point is empty. Cannot proceed." 0 0
+		return 1
+	fi
+	local balance_args=("${@:2}")
+	local cmd="btrfs balance start --force ${balance_args[*]} \"$mount_point\""
+
+	if (whiptail --title "Confirm Balance" --yesno "This operation can be very time-consuming. Execute the following command?\n\n$cmd" 0 0); then
+		# Balance is a long-running process. We run it and show a message.
+		(btrfs balance start --force "${balance_args[@]}" "$mount_point")
+		whiptail --title "In Progress" --msgbox "Balance command started in the background. You can check progress with 'btrfs balance status'." 0 0
+	else
+		whiptail --title "Cancelled" --msgbox "Balance operation cancelled." 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_BALANCE_STATUS
+# DESCRIPTION: Displays the status of a BTRFS balance operation on a specified
+#              mount point.
+# PARAMETERS:
+#   $1: mount_point - The mount point of the BTRFS filesystem.
+# RETURNS:     0 on success, 1 on failure (e.g., mount point not found).
+# ==============================================================================
+function FUN_BALANCE_STATUS() {
+	local mount_point=$1
+	local output
+	output=$(btrfs balance status "$mount_point" 2>&1)
+	whiptail --title "Balance Status" --msgbox "Balance status for '$mount_point'.\n\nOutput:\n$output" 0 0
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_DEFRAGMENT
+# DESCRIPTION: Initiates a BTRFS defragmentation operation on a specified
+#              mount point with optional arguments.
+# PARAMETERS:
+#   $1: mount_point - The mount point of the BTRFS filesystem.
+#   $@: defrag_args - Optional arguments to pass to `btrfs filesystem defragment`.
+# RETURNS:     0 on success, 1 if mount point is empty.
+# ==============================================================================
+function FUN_DEFRAGMENT() {
+	local mount_point=$1
+	if [ -z "$mount_point" ]; then
+		whiptail --title "Error" --msgbox "Mount point is empty. Cannot proceed." 0 0
+		return 1
+	fi
+	local defrag_args=("${@:2}")
+	local cmd="btrfs filesystem defragment -r ${defrag_args[*]} \"$mount_point\""
+
+	if (whiptail --title "Confirm Defragment" --yesno "This operation can be time-consuming. Execute the following command?\n\n$cmd" 0 0); then
+		(btrfs filesystem defragment -r "${defrag_args[@]}" "$mount_point")
+		whiptail --title "In Progress" --msgbox "Defragment command started in the background." 0 0
+	else
+		whiptail --title "Cancelled" --msgbox "Defragment operation cancelled." 0 0
+	fi
+}
+
+function FUN_FS_DETAILS() {
+	local mount_point=$1
+	local output_show
+	local output_usage
+	local temp_file
+
+	# Create a temporary file and ensure it's cleaned up on exit
+	temp_file=$(mktemp) || {
+		whiptail --title "Error" --msgbox "Failed to create a temporary file." 0 0
+		return 1
+	}
+	trap 'rm -f "$temp_file"' RETURN
+
+	output_show=$(btrfs filesystem show "$mount_point" 2>&1)
+	output_usage=$(btrfs filesystem usage "$mount_point" 2>&1)
+
+	{
+		echo "--- Filesystem Details for $mount_point ---"
+		echo -e "\n== Filesystem Show ==\n$output_show\n"
+		echo -e "\n== Filesystem Usage ==\n$output_usage"
+	} >"$temp_file"
+
+	# Use a textbox for scrollable content. 0 0 makes it auto-size.
+	whiptail --title "Filesystem Details" --textbox "$temp_file" 0 0 --scrolltext
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SUBVOLUME_LIST
+# DESCRIPTION: Lists all subvolumes on a given BTRFS filesystem and allows the
+#              user to select one to view its details.
+# PARAMETERS:
+#   $1: MOUNT_POINT - The mount point of the BTRFS filesystem.
+# ==============================================================================
+function FUN_SUBVOLUME_LIST() {
+	local MOUNT_POINT="$1" # Expect a validated mount point.
+
+	# Fetch subvolumes
+	local subvolume_lines
+	readarray -t subvolume_lines < <(btrfs subvolume list -a "$MOUNT_POINT" | sort -k 9)
+
+	if [ ${#subvolume_lines[@]} -eq 0 ]; then
+		whiptail --title "No Subvolumes" --msgbox "No subvolumes found on $MOUNT_POINT." 0 0
+		return 0
+	fi
+
+	# Build menu options
+	local menu_options=()
+	for line in "${subvolume_lines[@]}"; do
+		local id path
+		id=$(echo "$line" | awk '{print $2}')
+		path=$(echo "$line" | awk '{$1=$2=$3=$4=$5=$6=$7=$8=""; print $0}' | sed 's/^ *//')
+		menu_options+=("$path" "ID: $id")
+	done
+
+	while true; do
+		local MENU_HEIGHT=$((${#menu_options[@]} / 2))
+		if [ "$MENU_HEIGHT" -gt 10 ]; then MENU_HEIGHT=10; fi
+
+		local SELECTED
+		SELECTED=$(whiptail --title "Subvolumes on $MOUNT_POINT" \
+			--menu "Select a subvolume to view details (Cancel to go back)" \
+			0 0 0 "${menu_options[@]}" 3>&1 1>&2 2>&3)
+
+		if [ $? -ne 0 ] || [ -z "$SELECTED" ]; then
+			return 0
+		fi
+
+		# Fetch subvolume info
+		local details
+		details=$(btrfs subvolume show "$MOUNT_POINT/$SELECTED" 2>&1)
+
+		# Use a single sed command to format the details for better readability,
+		# then pipe to awk to add an extra blank line after each entry for spacing.
+		# This reformats indented "Key : Value" lines to "Key: Value" for consistency,
+		# and leaves other lines (like the header) untouched.
+
+		# sed -E 's/^[[:space:]]+([^:]+):[[:space:]]*(.*)/\1: \2/'
+		# -E → enable extended regex (so we don’t need to escape parentheses).
+		# ^[[:space:]]+ → match leading spaces/tabs at the beginning of the line.
+		# ([^:]+) → capture everything up to the first colon (:) → this becomes key.
+		# [[:space:]]* → match optional spaces after the colon.
+		# (.*) → capture the rest of the line → this becomes value.
+		# \1: \2 → replace the line with key: value format (trims leading whitespace).
+
+		# awk '{print; print ""}'
+		# Reads each line from sed.
+		# print → print the line itself.
+		# print "" → adds an empty line after each line for readability.
+		local formatted_details
+		formatted_details=$(echo -e "$details" | sed -E 's/^[[:space:]]+([^:]+):[[:space:]]*(.*)/\1: \2/' | awk '{print; print ""}')
+
+		whiptail --scrolltext --title "Subvolume Details - $SELECTED" --msgbox "$formatted_details" 0 0
+	done
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SUBVOLUME_CREATE
+# DESCRIPTION: Creates a new BTRFS subvolume.
+# PARAMETERS:
+#   $1: mount_point - The mount point of the BTRFS filesystem.
+#   $2: subvolume_name - The relative path/name for the new subvolume.
+# ==============================================================================
+function FUN_SUBVOLUME_CREATE() {
+	local subvolume_path=$1
+	local output
+	output=$(btrfs subvolume create "$subvolume_path" 2>&1)
+	if [ $? -eq 0 ]; then
+		whiptail --title "Success" --msgbox "Subvolume '$subvolume_path' created successfully." 0 0
+	else
+		whiptail --title "Error" --msgbox "Failed to create subvolume.\n\n$output" 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SUBVOLUME_DELETE
+# DESCRIPTION: Deletes a BTRFS subvolume after user confirmation.
+# PARAMETERS:
+#   $1: subvolume_path - The full path to the subvolume to be deleted.
+# ==============================================================================
+function FUN_SUBVOLUME_DELETE() {
+	local subvolume_path=$1
+
+	if (whiptail --title "Confirm Deletion" --yesno "Are you sure you want to delete the subvolume at '$subvolume_path'? This is irreversible." 0 0); then
+		local output
+		output=$(btrfs subvolume delete "$subvolume_path" 2>&1)
+		if [ $? -eq 0 ]; then
+			whiptail --title "Success" --msgbox "Subvolume deleted successfully." 0 0
+		else
+			whiptail --title "Error" --msgbox "Failed to delete subvolume.\n\n$output" 0 0
+		fi
+	else
+		whiptail --title "Cancelled" --msgbox "Deletion cancelled." 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SUBVOLUME_SNAPSHOT
+# DESCRIPTION: Creates a snapshot of a BTRFS subvolume.
+# PARAMETERS:
+#   $1: source_path - The full path to the source subvolume.
+#   $2: dest_path - The full path for the destination snapshot.
+#   $3: read_only - "true" to create a read-only snapshot, otherwise "false".
+# ==============================================================================
+function FUN_SUBVOLUME_SNAPSHOT() {
+	local source_path=$1
+	local dest_path=$2
+	local read_only=$3 # "true" or "false"
+
+	local -a cmd_array=(btrfs subvolume snapshot)
+
+	if [ "$read_only" == "true" ]; then
+		cmd_array+=("-r")
+	fi
+
+	cmd_array+=("$source_path" "$dest_path")
+
+	local cmd_str="${cmd_array[*]}"
+
+	if (whiptail --title "Confirm Snapshot Creation" --yesno "Execute the following command?\n\n$cmd_str" 0 0); then
+		local output
+		output=$("${cmd_array[@]}" 2>&1)
+		local exit_code=$?
+
+		if [ $exit_code -eq 0 ]; then
+			whiptail --title "Success" --msgbox "Snapshot created successfully from '$source_path' to '$dest_path'." 0 0
+		else
+			whiptail --title "Error" --msgbox "Failed to create snapshot.\n\nOutput:\n$output" 0 0
+		fi
+	else
+		whiptail --title "Cancelled" --msgbox "Snapshot creation cancelled." 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SUBVOLUME_RESTORE
+# DESCRIPTION: Restores a subvolume from a snapshot by deleting the target
+#              and replacing it with a new snapshot of the source.
+# PARAMETERS:
+#   $1: source_snap_path - The full path to the source snapshot.
+#   $2: target_subvol_path - The full path of the subvolume to be replaced.
+# ==============================================================================
+function FUN_SUBVOLUME_RESTORE() {
+	local source_snap_path=$1
+	local target_subvol_path=$2
+	local full_output=""
+	local success=false
+
+	# First, delete the target subvolume
+	local delete_output
+	delete_output=$(btrfs subvolume delete "$target_subvol_path" 2>&1)
+	if [ $? -ne 0 ]; then
+		full_output+="Failed to delete target subvolume '$target_subvol_path'.\n"
+		full_output+="Output:\n$delete_output"
+	else
+		full_output+="Successfully deleted target subvolume '$target_subvol_path'.\n\n"
+
+		# If deletion was successful, create a new r/w snapshot from the source
+		local snapshot_output
+		snapshot_output=$(btrfs subvolume snapshot "$source_snap_path" "$target_subvol_path" 2>&1)
+		if [ $? -ne 0 ]; then
+			full_output+="Failed to create new snapshot at '$target_subvol_path'.\n"
+			full_output+="Output:\n$snapshot_output\n\n"
+			full_output+="WARNING: The original subvolume was deleted but the restore failed. The path '$target_subvol_path' is now empty."
+		else
+			full_output+="Successfully restored snapshot to '$target_subvol_path'."
+			success=true
+		fi
+	fi
+
+	if [ "$success" = true ]; then
+		whiptail --title "Restore Success" --msgbox "$full_output" 0 0
+	else
+		whiptail --title "Restore Failed" --msgbox "$full_output" 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SEND_RECEIVE
+# DESCRIPTION: Performs a 'btrfs send | btrfs receive' operation to back up
+#              a snapshot. Supports incremental backups.
+# PARAMETERS:
+#   $1: source_snap - The full path to the source snapshot to send.
+#   $2: parent_snap - The full path to the parent snapshot for an
+#                    incremental send (optional).
+#   $3: dest_path - The destination directory to receive the snapshot.
+# ==============================================================================
+function FUN_SEND_RECEIVE() {
+	local source_snap="$1"
+	local parent_snap="$2" # Can be empty
+	local dest_path="$3"
+
+	local -a send_cmd=("btrfs" "send")
+	if [ -n "$parent_snap" ]; then
+		send_cmd+=("-p" "$parent_snap")
+	fi
+	send_cmd+=("$source_snap")
+
+	local receive_cmd=("btrfs" "receive" "$dest_path")
+
+	local full_cmd_str="${send_cmd[*]} | ${receive_cmd[*]}"
+
+	if (whiptail --title "Confirm Send/Receive" --yesno "Execute the following command?\n\n$full_cmd_str" 0 0); then
+		# This can be a long operation, show progress.
+		# Using a temporary file to capture stderr from both commands.
+		local temp_log
+		temp_log=$(mktemp)
+
+		whiptail --title "In Progress" --infobox "Sending snapshot... this may take a while." 0 0
+
+		# The pipe needs to be handled carefully.
+		# We execute with sudo and capture stdout and stderr.
+		{ sudo "${send_cmd[@]}" | sudo "${receive_cmd[@]}"; } >"$temp_log" 2>&1
+		local exit_code=$?
+
+		local output
+		output=$(cat "$temp_log")
+		rm -f "$temp_log"
+
+		if [ $exit_code -eq 0 ]; then
+			whiptail --title "Success" --msgbox "Snapshot sent successfully.\n\nOutput:\n$output" 0 0
+		else
+			whiptail --title "Error" --msgbox "Failed to send snapshot.\n\nOutput:\n$output" 0 0
+		fi
+	else
+		whiptail --title "Cancelled" --msgbox "Send/Receive operation cancelled." 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_DEVICE_REMOVE
+# DESCRIPTION: Removes a device from a BTRFS filesystem. This can be a long
+#              running operation if data needs to be moved off the device.
+# PARAMETERS:
+#   $1: mount_point - The mount point of the BTRFS filesystem.
+#   $2: device_to_remove - The path to the block device to remove.
+# RETURNS:     0 if the device was removed successfully, 1 otherwise.
+# ==============================================================================
+function FUN_DEVICE_REMOVE() {
+	local mount_point=$1
+	local device_to_remove=$2
+	local cmd_str="btrfs device remove $device_to_remove $mount_point"
+	local log_file="/tmp/btrfs_remove_${device_to_remove##*/}.log"
+
+	if (whiptail --title "Confirm Remove Device" --yesno "This can take a long time if data needs to be moved. The operation will start in the background. Execute the following command?\n\n$cmd_str" 0 0); then
+		# Run the command in the background and log its output
+		(btrfs device remove "$device_to_remove" "$mount_point" >"$log_file" 2>&1 &)
+
+		whiptail --title "In Progress" --msgbox "Device removal for '$device_to_remove' has started in the background.\n\nThis can be a very long operation.\n\nMonitor progress with 'btrfs balance status $mount_point' or check the log file:\n$log_file" 0 0
+		# Since we are backgrounding, we assume start success and return 0.
+		return 0
+	else
+		whiptail --title "Cancelled" --msgbox "Device removal cancelled." 0 0
+		return 1
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_DEVICE_REPLACE
+# DESCRIPTION: Starts a BTRFS device replacement operation, which replaces a
+#              source device with a target device in the background.
+# PARAMETERS:
+#   $1: src_device - The source device to be replaced (can be a path or 'missing').
+#   $2: target_device - The new device to add to the filesystem.
+#   $3: mount_point - The mount point of the BTRFS filesystem.
+# RETURNS:     The exit code of the 'btrfs replace start' command.
+# ==============================================================================
+function FUN_DEVICE_REPLACE() {
+	local src_device=$1
+	local target_device=$2
+	local mount_point=$3
+	local cmd_str="btrfs replace start -b $src_device $target_device $mount_point"
+
+	if (whiptail --title "Confirm Replace" --yesno "This operation will start in the background and can be very time-consuming. Execute the following command?\n\n$cmd_str" 0 0); then
+		# Start the replace in the background
+		btrfs replace start -b "$src_device" "$target_device" "$mount_point"
+		local _rc=$?
+		if [ $_rc -eq 0 ]; then
+			whiptail --title "In Progress" --msgbox "BTRFS replace started in the background.\n\nYou can monitor its progress from the main menu using 'Filesystem Details' or 'Balance/Scrub/Replace Status'." 0 0
+		else
+			whiptail --title "Error" --msgbox "Failed to start BTRFS replace operation. Exit code: $_rc" 0 0
+		fi
+		return $_rc
+	else
+		whiptail --title "Cancelled" --msgbox "Replace operation cancelled." 0 0
+		return 1
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_CREATE_RAID
+# DESCRIPTION: Creates a new BTRFS filesystem with specified RAID level,
+#              label, compression, and devices. This is a DESTRUCTIVE operation.
+# PARAMETERS:
+#   $1: raid_level - The BTRFS RAID level for data and metadata (e.g., "raid1").
+#   $2: fs_label - The label for the new filesystem (can be empty).
+#   $3: compression_alg - The compression algorithm (e.g., "zstd", "zlib", "lzo", "none").
+#   $4: compression_level - The compression level (for zstd, can be empty).
+#   $@: devices - An array of block device paths to include in the RAID.
+# RETURNS:     0 on success, 1 on failure (e.g., no devices selected, mkfs fails).
+# ==============================================================================
+function FUN_CREATE_RAID() {
+	local raid_level=$1
+	local fs_label=$2
+	local compression_alg=$3
+	local compression_level=$4
+	shift 4
+	local -a devices=("$@")
+
+	if [ ${#devices[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "No devices were selected for RAID creation." 0 0
+		return 1
+	fi
+
+	# Build the mkfs.btrfs command
+	local -a cmd_array
+	cmd_array=(mkfs.btrfs -f)
+
+	# Add data and metadata RAID levels
+	cmd_array+=(-d "$raid_level" -m "$raid_level")
+
+	# Add label if provided
+	if [ -n "$fs_label" ]; then
+		cmd_array+=(-L "$fs_label")
+	fi
+
+	# Add devices
+	cmd_array+=("${devices[@]}")
+
+	# Create a string version for display
+	local cmd_str="${cmd_array[*]}"
+
+	# Handle compression options separately for display and execution
+	local mount_opts=""
+	if [ "$compression_alg" != "none" ]; then
+		if [ "$compression_alg" == "zstd" ] && [ -n "$compression_level" ]; then
+			mount_opts="compress=$compression_alg:$compression_level"
+		else
+			mount_opts="compress=$compression_alg"
+		fi
+		cmd_str+=" (with mount option: -o $mount_opts)"
+	fi
+
+	if (whiptail --title "Confirm DESTRUCTIVE Operation" --yesno "This will format the selected devices and is IRREVERSIBLE. Execute the following command?\n\n$cmd_str" 0 0); then
+		local output
+		output=$("${cmd_array[@]}" 2>&1)
+		local exit_code=$?
+
+		if [ $exit_code -eq 0 ]; then
+			local msg="BTRFS filesystem created successfully on ${#devices[@]} device(s) with RAID level '$raid_level'."
+			if [ -n "$mount_opts" ]; then
+				msg+="\n\nTo use the specified compression, mount with: -o $mount_opts"
+			fi
+
+			local TEMP_MOUNT
+			TEMP_MOUNT=$(mktemp -d /tmp/btrfs-temp-mount-XXXXXX)
+			if [ -z "$TEMP_MOUNT" ]; then
+				whiptail --title "Error" --msgbox "Failed to create temporary mount point for ownership setting." 0 0
+				whiptail --title "Success" --msgbox "$msg" 0 0 # Still show success for fs creation
+				return
+			fi
+
+			# Mount, chown, and unmount
+			if mount "${devices[0]}" "$TEMP_MOUNT"; then
+				local REAL_USER=${SUDO_USER:-$(logname)}
+				chown "$REAL_USER:$REAL_USER" "$TEMP_MOUNT"
+				umount "$TEMP_MOUNT"
+				rmdir "$TEMP_MOUNT"
+				msg+="\n\nOwnership of the new filesystem has been automatically set to '$REAL_USER'."
+				whiptail --title "Success" --msgbox "$msg" 0 0
+			else
+				whiptail --title "Error" --msgbox "Failed to mount the new filesystem to set ownership. Please set ownership manually after mounting." 0 0
+				# Cleanup in case of mount failure
+				rmdir "$TEMP_MOUNT" &>/dev/null
+				whiptail --title "Success" --msgbox "$msg" 0 0 # Still show success for fs creation
+			fi
+		else
+			whiptail --title "Error" --msgbox "Failed to create BTRFS filesystem.\n\nOutput:\n$output" 0 0
+		fi
+	else
+		whiptail --title "Cancelled" --msgbox "RAID creation cancelled." 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_GET_AVAILABLE_DEVICES
+# DESCRIPTION: Returns a space-separated list of unused block device paths.
+#              It attempts to exclude devices already part of a specified
+#              BTRFS filesystem.
+# PARAMETERS:
+#   $1: mount_point - The mount point of the BTRFS filesystem to check against.
+# RETURNS:     A space-separated string of available device paths (e.g., "/dev/sdb /dev/sdc").
+# ==============================================================================
+function FUN_GET_AVAILABLE_DEVICES() {
+	# Returns a space-separated list of unused block device paths (e.g. /dev/sdb)
+	# relative to the provided mount point. Attempts to exclude devices that are
+	# already part of the btrfs filesystem.
+	local mount_point="$1"
+	local -a available_devices_list=()
+	local -a used_devices=()
+
+	# Collect device paths that are currently part of the btrfs filesystem
+	if [ -n "$mount_point" ]; then
+		# btrfs filesystem show prints lines containing device paths as the last field
+		readarray -t used_devices < <(btrfs filesystem show "$mount_point" 2>/dev/null | awk '/devid/ {print $NF}')
+	fi
+
+	# Iterate through block devices (physical devices only)
+	while read -r dev; do
+		local devpath="/dev/$dev"
+		local in_use=false
+		for ud in "${used_devices[@]}"; do
+			if [ "$ud" = "$devpath" ]; then
+				in_use=true
+				break
+			fi
+		done
+		if ! $in_use; then
+			available_devices_list+=("$devpath")
+		fi
+	done < <(lsblk -d -n -o NAME)
+
+	# Print as space separated values to allow callers to read into an array
+	echo "${available_devices_list[@]}"
+}
+
+# ==============================================================================
+#                           USER INTERFACE FUNCTIONS
+# ==============================================================================
+
+# ==============================================================================
+# FUNCTION:    FUN_SELECT_MOUNT_POINT
+# DESCRIPTION: Displays a menu of currently mounted BTRFS filesystems for the
+#              user to choose from. Includes an option for manual input.
+# OUTPUT:      Prints the selected mount point path to stdout on success.
+# RETURNS:     0 on successful selection, 1 on cancellation or invalid input.
+# ==============================================================================
+function FUN_SELECT_MOUNT_POINT() {
+	local mounted_filesystems
+	readarray -t mounted_filesystems < <(findmnt --list -n -t btrfs -o TARGET,SOURCE)
+
+	local choice
+	if [ ${#mounted_filesystems[@]} -eq 0 ]; then
+		# If no mounted btrfs filesystems, force manual input
+		whiptail --title "No Mounted BTRFS Filesystems" --msgbox "No mounted BTRFS filesystems were found. You will need to enter the mount point manually." 0 0
+		choice=$(whiptail --inputbox "Enter the mount point of the BTRFS filesystem" 0 0 3>&1 1>&2 2>&3)
+		if [ $? -ne 0 ] || [ -z "$choice" ]; then
+			return 1
+		fi
+		echo "$choice"
+		return 0
+	fi
+
+	local menu_options=()
+	for fs in "${mounted_filesystems[@]}"; do
+		local fs_source
+		fs_source=$(echo "$fs" | awk '{print $2}')
+		local fs_target
+		fs_target=$(echo "$fs" | awk '{print $1}')
+		menu_options+=("$fs_target" "$fs_source")
+	done
+	menu_options+=("MANUAL" "Enter mount point manually")
+
+	local list_height=$((${#menu_options[@]} / 2))
+	if [ "$list_height" -gt 10 ]; then list_height=10; fi
+	local dialog_height=$((list_height + 8))
+
+	choice=$(whiptail --title "Select a BTRFS Mount Point" --menu "Choose a mounted BTRFS filesystem" 0 0 0 "${menu_options[@]}" 3>&1 1>&2 2>&3)
+	local exit_code=$?
+
+	if [ $exit_code -ne 0 ]; then
+		return 1
+	fi
+
+	if [ -z "$choice" ]; then
+		# This can happen if the menu is empty and the user presses OK.
+		return 1
+	fi
+
+	if [ "$choice" == "MANUAL" ]; then
+		choice=$(whiptail --inputbox "Enter the mount point of the BTRFS filesystem" 0 0 3>&1 1>&2 2>&3)
+		if [ $? -ne 0 ] || [ -z "$choice" ]; then
+			return 1
+		fi
+	fi
+
+	echo "$choice"
+	return 0
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_SUBVOLUME_PROPERTIES
+# DESCRIPTION: Provides a UI to manage properties of a subvolume.
+# PARAMETERS:  None (uses global CURRENT_MOUNT_POINT).
+# ==============================================================================
+function FUN_MENU_SUBVOLUME_PROPERTIES() {
+	local subvolume_rel_path
+	subvolume_rel_path=$(FUN_SELECT_SUBVOLUME "$CURRENT_MOUNT_POINT" "Select Subvolume" "Choose a subvolume to manage its properties" "all")
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	local subvolume_full_path="$CURRENT_MOUNT_POINT/$subvolume_rel_path"
+
+	local is_readonly
+	is_readonly=$(btrfs property get -ts "$subvolume_full_path" ro 2>/dev/null | awk '/ro=/ {print $2}')
+
+	local new_state_str
+	local new_state_bool
+	if [ "$is_readonly" == "true" ]; then
+		new_state_str="Writable"
+		new_state_bool="false"
+	else
+		new_state_str="Read-Only"
+		new_state_bool="true"
+	fi
+
+	if (whiptail --title "Toggle Read-Only Property" --yesno "Subvolume '$subvolume_rel_path' is currently: ${is_readonly:-writable}.\n\nDo you want to change it to be $new_state_str?" 0 0); then
+		local output
+		output=$(btrfs property set -ts "$subvolume_full_path" ro "$new_state_bool" 2>&1)
+		if [ $? -eq 0 ]; then
+			whiptail --title "Success" --msgbox "Property changed successfully." 0 0
+		else
+			whiptail --title "Error" --msgbox "Failed to change property.\n\n$output" 0 0
+		fi
+	else
+		whiptail --title "Cancelled" --msgbox "Operation cancelled." 0 0
+	fi
+}
+
+function FUN_MENU_SUBVOLUME() {
+	while true; do
+		# Ensure a mount point is selected.
+		if ! FUN_GET_AND_VALIDATE_MOUNT_POINT; then
+			return 1
+		fi
+
+		local CHOICE
+		CHOICE=$(whiptail --title "Subvolume Management - $CURRENT_MOUNT_POINT" --menu "Choose an operation" 0 0 0 \
+			"1" "List Subvolumes" \
+			"2" "Create Subvolume" \
+			"3" "Delete Subvolume" \
+			"4" "Create Snapshot" \
+			"5" "Send Snapshot (Backup)" \
+			"6" "Restore from Snapshot" \
+			"7" "Manage Properties" \
+			"8" "Change Mount Point" \
+			"9" "Go Back" 3>&1 1>&2 2>&3)
+
+		if [ $? -ne 0 ]; then break; fi
+
+		case $CHOICE in
+		"1")
+			FUN_SUBVOLUME_LIST "$CURRENT_MOUNT_POINT"
+			;;
+		"2")
+			FUN_MENU_SUBVOLUME_CREATE
+			;;
+		"3")
+			FUN_MENU_SUBVOLUME_DELETE
+			;;
+		"4")
+			FUN_MENU_SUBVOLUME_SNAPSHOT
+			;;
+		"5")
+			FUN_MENU_SEND_SNAPSHOT
+			;;
+		"6")
+			FUN_MENU_RESTORE_SNAPSHOT
+			;;
+		"7")
+			FUN_MENU_SUBVOLUME_PROPERTIES
+			;;
+		"8")
+			# Clear the global mount point to force re-selection
+			CURRENT_MOUNT_POINT=""
+			;;
+		"9")
+			break
+			;;
+		esac
+	done
+}
+
+function FUN_MENU_SUBVOLUME_LIST() {
+	FUN_SUBVOLUME_LIST "$CURRENT_MOUNT_POINT"
+}
+
+function FUN_MENU_SUBVOLUME_CREATE() {
+	local SUBVOLUME_NAME
+	SUBVOLUME_NAME=$(whiptail --inputbox "Enter the name for the new subvolume (relative path under $CURRENT_MOUNT_POINT)" 0 0 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ] || [ -z "$SUBVOLUME_NAME" ]; then
+		whiptail --title "Cancelled" --msgbox "No subvolume name entered. Operation cancelled." 0 0
+		return 1
+	fi
+
+	FUN_SUBVOLUME_CREATE "$CURRENT_MOUNT_POINT/$SUBVOLUME_NAME"
+}
+
+function FUN_MENU_SUBVOLUME_DELETE() {
+	local SUBVOLUME_TO_DELETE
+	SUBVOLUME_TO_DELETE=$(FUN_SELECT_SUBVOLUME "$CURRENT_MOUNT_POINT" "Select Subvolume to Delete" "Choose a subvolume to delete (paths are relative to $CURRENT_MOUNT_POINT)" "all")
+	if [ $? -ne 0 ]; then
+		# FUN_SELECT_SUBVOLUME shows its own error/cancel messages
+		return 1
+	fi
+
+	FUN_SUBVOLUME_DELETE "$CURRENT_MOUNT_POINT/$SUBVOLUME_TO_DELETE"
+}
+
+function FUN_MENU_SUBVOLUME_SNAPSHOT() {
+	local SOURCE_SUBVOLUME
+	SOURCE_SUBVOLUME=$(FUN_SELECT_SUBVOLUME "$CURRENT_MOUNT_POINT" "Select Source Subvolume" "Choose a source subvolume for the snapshot (paths are relative to $CURRENT_MOUNT_POINT)" "all")
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	local SNAPSHOT_NAME
+	SNAPSHOT_NAME=$(whiptail --inputbox "Enter the name for the new snapshot (relative path under $CURRENT_MOUNT_POINT)" 0 0 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ] || [ -z "$SNAPSHOT_NAME" ]; then
+		whiptail --title "Cancelled" --msgbox "No snapshot name entered. Operation cancelled." 0 0
+		return 1
+	fi
+
+	local read_only=false
+	if (whiptail --title "Read-only?" --yesno "Create a read-only snapshot?" 0 0); then
+		read_only=true
+	fi
+
+	FUN_SUBVOLUME_SNAPSHOT "$CURRENT_MOUNT_POINT/$SOURCE_SUBVOLUME" "$CURRENT_MOUNT_POINT/$SNAPSHOT_NAME" "$read_only"
+}
+
+function FUN_MENU_SEND_SNAPSHOT() {
+	# 1. Select source snapshot (must be read-only)
+	local SOURCE_SNAP_REL_PATH
+	SOURCE_SNAP_REL_PATH=$(FUN_SELECT_SUBVOLUME "$CURRENT_MOUNT_POINT" "Select Source Snapshot to Send" "Choose a READ-ONLY snapshot to send" "readonly")
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+	local SOURCE_SNAP_FULL_PATH="$CURRENT_MOUNT_POINT/$SOURCE_SNAP_REL_PATH"
+
+	# 2. Ask about incremental and select parent
+	local PARENT_SNAP_FULL_PATH=""
+	if (whiptail --title "Incremental Send" --yesno "Is this an incremental send (i.e., do you want to send only the changes from a parent snapshot)?" 0 0); then
+		local PARENT_SNAP_REL_PATH
+		PARENT_SNAP_REL_PATH=$(FUN_SELECT_SUBVOLUME "$CURRENT_MOUNT_POINT" "Select Parent Snapshot" "Choose the PARENT snapshot (must be an ancestor of the source)" "all")
+		if [ $? -ne 0 ]; then
+			whiptail --title "Cancelled" --msgbox "No parent snapshot selected. Proceeding with a full send." 0 0
+		else
+			PARENT_SNAP_FULL_PATH="$CURRENT_MOUNT_POINT/$PARENT_SNAP_REL_PATH"
+		fi
+	fi
+
+	# 3. Get destination path
+	local DEST_PATH
+	DEST_PATH=$(whiptail --inputbox "Enter the destination path to receive the snapshot.\n(e.g., /mnt/backup_drive/snapshots)" 0 0 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ] || [ -z "$DEST_PATH" ]; then
+		whiptail --title "Cancelled" --msgbox "No destination path entered. Operation cancelled." 0 0
+		return 1
+	fi
+
+	# Check if destination exists and is a directory
+	if [ ! -d "$DEST_PATH" ]; then
+		if (whiptail --title "Destination Not Found" --yesno "Destination path '$DEST_PATH' does not exist. Create it?" 0 0); then
+			sudo mkdir -p "$DEST_PATH"
+			if [ $? -ne 0 ]; then
+				whiptail --title "Error" --msgbox "Failed to create destination path. Aborting." 0 0
+				return 1
+			fi
+		else
+			whiptail --title "Cancelled" --msgbox "Destination path does not exist. Operation cancelled." 0 0
+			return 1
+		fi
+	fi
+
+	# 4. Call the logic function
+	FUN_SEND_RECEIVE "$SOURCE_SNAP_FULL_PATH" "$PARENT_SNAP_FULL_PATH" "$DEST_PATH"
+}
+
+function FUN_MENU_RESTORE_SNAPSHOT() {
+	# --- 1. Select SOURCE snapshot ---
+	local SOURCE_SUBVOL_REL_PATH
+	SOURCE_SUBVOL_REL_PATH=$(FUN_SELECT_SUBVOLUME "$CURRENT_MOUNT_POINT" "Step 1: Select SOURCE Snapshot" "Choose the snapshot you want to restore FROM" "all")
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	# --- 2. Select TARGET subvolume to be overwritten ---
+	local TARGET_SUBVOL_REL_PATH
+	TARGET_SUBVOL_REL_PATH=$(FUN_SELECT_SUBVOLUME "$CURRENT_MOUNT_POINT" "Step 2: Select TARGET Subvolume" "Choose the subvolume to BE REPLACED BY the snapshot" "writable")
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	# --- 3. Safety Checks ---
+	if [ "$SOURCE_SUBVOL_REL_PATH" == "$TARGET_SUBVOL_REL_PATH" ]; then
+		whiptail --title "Error" --msgbox "Source and target cannot be the same. Operation cancelled." 0 0
+		return 1
+	fi
+
+	local SOURCE_FULL_PATH="$CURRENT_MOUNT_POINT/$SOURCE_SUBVOL_REL_PATH"
+	local TARGET_FULL_PATH="$CURRENT_MOUNT_POINT/$TARGET_SUBVOL_REL_PATH"
+
+	# --- 4. Final Confirmation ---
+	local confirmation_msg="This is a DESTRUCTIVE operation and cannot be undone.\n\n"
+	confirmation_msg+="The TARGET subvolume:\n'$TARGET_SUBVOL_REL_PATH'\n\n"
+	confirmation_msg+="will be PERMANENTLY DELETED and replaced with the content of the SOURCE snapshot:\n'$SOURCE_SUBVOL_REL_PATH'\n\n"
+	confirmation_msg+="Are you absolutely sure you want to proceed?"
+
+	if (whiptail --title "!!! CONFIRM DESTRUCTIVE RESTORE !!!" --yesno "$confirmation_msg" 0 0); then
+		FUN_SUBVOLUME_RESTORE "$SOURCE_FULL_PATH" "$TARGET_FULL_PATH"
+	else
+		whiptail --title "Cancelled" --msgbox "Restore operation cancelled." 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION: FUN_FORMAT_BTRFS
+# DESCRIPTION: Formats a device with BTRFS, with optional partitioning.
+# ==============================================================================
+function FUN_FORMAT_BTRFS() {
+	local device=$1
+	local fs_label=$2
+	local compression_alg=$3
+	local compression_level=$4
+	local partition_mode=$5
+
+	if [ -z "$device" ]; then
+		whiptail --title "Error" --msgbox "No device specified for formatting." 0 0
+		return 1
+	fi
+
+	local target_device=$device
+	local device_to_format_display=$device
+
+	# Partitioning logic for whole disks
+	if [ "$partition_mode" == "create_partition" ]; then
+		if ! (whiptail --title "Confirm Partitioning" --yesno "This will create a new GPT partition table on '$device', destroying all existing partitions and data. A new partition will be created to span the entire disk.\n\nAre you sure you want to proceed?" 0 0); then
+			whiptail --title "Cancelled" --msgbox "Operation cancelled." 0 0
+			return 1
+		fi
+
+		whiptail --title "In Progress" --infobox "Creating partition table on $device..." 0 0
+
+		sudo wipefs --force -a "$device" >/dev/null 2>&1
+
+		sudo parted -s "$device" mklabel gpt
+		if [ $? -ne 0 ]; then
+			whiptail --title "Error" --msgbox "Failed to create GPT partition table on $device." 0 0
+			return 1
+		fi
+
+		sudo parted -s -a opt "$device" mkpart primary 0% 100%
+		if [ $? -ne 0 ]; then
+			whiptail --title "Error" --msgbox "Failed to create new partition on $device." 0 0
+			return 1
+		fi
+
+		sudo partprobe "$device"
+		sleep 2
+
+		if [[ "$device" == /dev/nvme* || "$device" == /dev/mmcblk* ]]; then
+			target_device="${device}p1"
+		else
+			target_device="${device}1"
+		fi
+
+		if [ ! -b "$target_device" ]; then
+			local found_part
+			found_part=$(lsblk -ln -o NAME "${device}" | grep -v "^${device##*/}$" | tail -n 1)
+			if [ -n "$found_part" ]; then
+				target_device="/dev/$found_part"
+			else
+				whiptail --title "Error" --msgbox "Could not find the newly created partition on $device. Aborting." 0 0
+				return 1
+			fi
+		fi
+
+		device_to_format_display="$target_device (on disk $device)"
+	fi
+
+	local -a cmd_array
+	cmd_array=(mkfs.btrfs -f)
+
+	if [ -n "$fs_label" ]; then
+		cmd_array+=(-L "$fs_label")
+	fi
+
+	cmd_array+=("$target_device")
+	local cmd_str="${cmd_array[*]}"
+
+	local mount_opts=""
+	if [ "$compression_alg" != "none" ]; then
+		if [ "$compression_alg" == "zstd" ] && [ -n "$compression_level" ]; then
+			mount_opts="compress=$compression_alg:$compression_level"
+		else
+			mount_opts="compress=$compression_alg"
+		fi
+		cmd_str+=" (with mount option: -o $mount_opts)"
+	fi
+
+	if (whiptail --title "Confirm DESTRUCTIVE Operation" --yesno "This will format '$device_to_format_display' and is IRREVERSIBLE. All data will be lost. Execute the following command?\n\n$cmd_str" 0 0); then
+		local output
+		output=$("${cmd_array[@]}" 2>&1)
+		local exit_code=$?
+
+		if [ $exit_code -eq 0 ]; then
+			local msg="BTRFS filesystem created successfully on '$device_to_format_display'."
+			if [ -n "$mount_opts" ]; then
+				msg+="\n\nTo use the specified compression, mount with: -o $mount_opts"
+			fi
+
+			local TEMP_MOUNT
+			TEMP_MOUNT=$(mktemp -d /tmp/btrfs-temp-mount-XXXXXX)
+			if [ -z "$TEMP_MOUNT" ]; then
+				whiptail --title "Success" --msgbox "$msg\n\nWarning: Failed to create temporary mount point for ownership setting." 0 0
+				return
+			fi
+
+			if mount "$target_device" "$TEMP_MOUNT"; then
+				local REAL_USER=${SUDO_USER:-$(logname)}
+				chown "$REAL_USER:$REAL_USER" "$TEMP_MOUNT"
+				umount "$TEMP_MOUNT"
+				rmdir "$TEMP_MOUNT"
+				msg+="\n\nOwnership of the new filesystem has been automatically set to '$REAL_USER'."
+				whiptail --title "Success" --msgbox "$msg" 0 0
+			else
+				whiptail --title "Warning" --msgbox "Failed to mount the new filesystem to set ownership. Please set ownership manually after mounting." 0 0
+				rmdir "$TEMP_MOUNT" &>/dev/null
+				whiptail --title "Success" --msgbox "$msg" 0 0
+			fi
+		else
+			whiptail --title "Error" --msgbox "Failed to create BTRFS filesystem.\n\nOutput:\n$output" 0 0
+		fi
+	else
+		whiptail --title "Cancelled" --msgbox "Formatting operation cancelled." 0 0
+	fi
+	sudo partprobe
+}
+
+# ==============================================================================
+# FUNCTION: FUN_MENU_FORMAT_BTRFS
+# DESCRIPTION: UI for formatting a single device as BTRFS.
+# ==============================================================================
+function FUN_MENU_FORMAT_BTRFS() {
+	local device_lines
+	readarray -t device_lines < <(lsblk --list -n -o NAME,SIZE,FSTYPE,TYPE,MOUNTPOINT)
+	if [ ${#device_lines[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "No block devices found." 0 0
+		return
+	fi
+
+	local menu_options=()
+	for line in "${device_lines[@]}"; do
+		local name size fstype type mountpoint
+		read -r name size fstype type mountpoint <<<"$line"
+
+		local status="[$type]"
+		if [ -n "$mountpoint" ]; then
+			status="[Mounted at $mountpoint]"
+		elif [ -n "$fstype" ]; then
+			status+="[$fstype]"
+		fi
+
+		local description
+		description=$(printf "%-10s %-10s %s" "$name" "$size" "$status")
+		menu_options+=("/dev/$name" "$description")
+	done
+
+	local CHOSEN_DEVICE
+	CHOSEN_DEVICE=$(whiptail --title "Select Device to Format" --menu \
+		"WARNING: The selected device will be formatted. ALL DATA WILL BE LOST.\n\nNAME       SIZE       STATUS" 0 0 0 \
+		"${menu_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$CHOSEN_DEVICE" ]; then
+		whiptail --title "Cancelled" --msgbox "No device selected. Operation cancelled." 0 0
+		return
+	fi
+
+	local device_info
+	device_info=$(lsblk -n -o FSTYPE,MOUNTPOINT "$CHOSEN_DEVICE" | tr -d '[:space:]')
+	if [ -n "$device_info" ]; then
+		if ! (whiptail --title "Confirm Overwrite" --yesno \
+			"Device $CHOSEN_DEVICE appears to be in use or contain data ($device_info).\n\nAre you absolutely sure you want to format it?" 0 0); then
+			whiptail --title "Cancelled" --msgbox "Operation cancelled." 0 0
+			return
+		fi
+	fi
+
+	local device_type
+	device_type=$(lsblk -n -d -o TYPE "$CHOSEN_DEVICE")
+	local partition_mode="format_existing"
+
+	if [ "$device_type" == "disk" ] || [ "$device_type" == "loop" ]; then
+		local partition_choice
+		partition_choice=$(whiptail --title "Partitioning Scheme" --menu \
+			"You have selected a whole disk ($CHOSEN_DEVICE). How should it be formatted?" 0 0 0 \
+			"1" "Create a GPT partition table and use the first partition (Recommended)" \
+			"2" "Format the entire disk without a partition table (Partitionless)" \
+			3>&1 1>&2 2>&3)
+
+		if [ $? -ne 0 ]; then
+			whiptail --title "Cancelled" --msgbox "Operation cancelled." 0 0
+			return
+		fi
+
+		if [ "$partition_choice" == "1" ]; then
+			partition_mode="create_partition"
+		fi
+	fi
+
+	local FS_LABEL
+	FS_LABEL=$(whiptail --title "Filesystem Label" --inputbox \
+		"\nEnter a label for the new filesystem (optional)" 0 0 3>&1 1>&2 2>&3)
+
+	local compression_alg
+	compression_alg=$(whiptail --title "Compression" --menu \
+		"Choose a compression algorithm for the filesystem" 0 0 4 \
+		"none" "No compression" \
+		"zlib" "ZLIB compression" \
+		"zstd" "ZSTD compression" \
+		"lzo" "LZO compression" 3>&1 1>&2 2>&3)
+
+	local compression_level=""
+	if [ "$compression_alg" == "zstd" ]; then
+		compression_level=$(whiptail --inputbox \
+			"Enter ZSTD compression level (1-15)" 0 0 "3" 3>&1 1>&2 2>&3)
+	fi
+
+	FUN_FORMAT_BTRFS "$CHOSEN_DEVICE" "$FS_LABEL" "$compression_alg" "$compression_level" "$partition_mode"
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_RAID
+# DESCRIPTION: Provides a user interface for creating a new BTRFS RAID array.
+#              Guides the user through device selection, RAID level, label,
+#              and compression options.
+# PARAMETERS:  None.
+# RETURNS:     None (interacts directly with the user via whiptail).
+# ==============================================================================
+function FUN_MENU_RAID() {
+	# Step 1: Select devices
+	local device_lines
+	readarray -t device_lines < <(lsblk --list -n -o NAME,SIZE)
+	if [ ${#device_lines[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "No block devices found." 0 0
+		return
+	fi
+
+	local checklist_options=()
+	for line in "${device_lines[@]}"; do
+		local name size
+		read -r name size <<<"$line"
+		local description
+		description=$(printf "% -12s %s" "$name" "$size")
+		checklist_options+=("/dev/$name" "$description" "OFF")
+	done
+
+	local MENU_HEIGHT
+	MENU_HEIGHT=$((${#checklist_options[@]} / 3))
+	local CHOSEN_DEVICES
+	CHOSEN_DEVICES=$(whiptail --title "Device Selection" --checklist \
+		"Choose devices for the RAID array (use spacebar to select)\n\nNAME         SIZE" 0 0 "$MENU_HEIGHT" \
+		"${checklist_options[@]}" 3>&1 1>&2 2>&3)
+	# Use eval to correctly parse the space-separated, quoted string from whiptail
+	local -a devices_array
+	read -r -a devices_array <<<"$CHOSEN_DEVICES"
+
+	if [ ${#devices_array[@]} -eq 0 ]; then
+		whiptail --title "Cancelled" --msgbox "No devices selected. Operation cancelled." 0 0
+		return
+	fi
+
+	# Step 2: Suggest and select RAID level
+	local drive_count=${#devices_array[@]}
+	local suggested_profile
+	suggested_profile=$(FUN_SUGGEST_RAID_PROFILE "$drive_count")
+
+	local RAID_LEVEL
+	RAID_LEVEL=$(whiptail --title "RAID Level Selection" --menu "Based on selecting $drive_count drives, the recommended profile is '$suggested_profile'.\n\nChoose a RAID level (data and metadata):" 0 0 9 \
+		"$suggested_profile" "(Recommended)" \
+		"single" "Single device profile (JBOD)" \
+		"raid0" "RAID 0 (Striping)" \
+		"raid1" "RAID 1 (Mirroring, 2 copies)" \
+		"raid1c3" "RAID 1 (Mirroring, 3 copies)" \
+		"raid1c4" "RAID 1 (Mirroring, 4 copies)" \
+		"raid5" "RAID 5 (Parity)" \
+		"raid6" "RAID 6 (Double Parity)" \
+		"raid10" "RAID 10 (Mirroring + Striping)" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ]; then return; fi
+
+	# Step 3: Get other options and create the array
+	local FS_LABEL
+	FS_LABEL=$(whiptail --title "Filesystem Label" --inputbox "\nEnter a label for the new filesystem (optional)" 0 0 3>&1 1>&2 2>&3)
+
+	local compression_alg
+	compression_alg=$(whiptail --title "Compression" --menu "Choose a compression algorithm for the filesystem" 0 0 4 \
+		"none" "No compression" \
+		"zlib" "ZLIB compression" \
+		"zstd" "ZSTD compression" \
+		"lzo" "LZO compression" 3>&1 1>&2 2>&3)
+
+	local compression_level=""
+	if [ "$compression_alg" == "zstd" ]; then
+		compression_level=$(whiptail --inputbox "Enter ZSTD compression level (1-15)" 0 0 "3" 3>&1 1>&2 2>&3)
+	fi
+
+	FUN_CREATE_RAID "$RAID_LEVEL" "$FS_LABEL" "$compression_alg" "$compression_level" "${devices_array[@]}"
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_SCRUB
+# DESCRIPTION: Provides a user interface for managing BTRFS scrub operations
+#              (start, status, cancel) on a selected mount point.
+# PARAMETERS:  None.
+# RETURNS:     1 if no mount point is selected or validation fails.
+# ==============================================================================
+function FUN_MENU_SCRUB() {
+	if ! FUN_GET_AND_VALIDATE_MOUNT_POINT; then
+		return 1
+	fi
+	local SCRUB_CHOICE
+	SCRUB_CHOICE=$(whiptail --title "Scrubbing Options" --menu "Choose a scrub operation for '$CURRENT_MOUNT_POINT'" 0 0 4 \
+		"start" "Start a new scrub" \
+		"status" "Check scrub status" \
+		"cancel" "Cancel a running scrub" \
+		"Go Back" "" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ]; then return; fi
+
+	case $SCRUB_CHOICE in
+	"start" | "status" | "cancel")
+		FUN_SCRUB "$SCRUB_CHOICE" "$CURRENT_MOUNT_POINT"
+		;;
+	"Go Back")
+		return
+		;;
+	esac
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_MOUNT
+# DESCRIPTION: Provides a user interface for mounting BTRFS filesystems.
+#              Allows selection of devices, degraded mode, and creates
+#              symbolic links in a user-specific mount directory.
+# PARAMETERS:  None.
+# RETURNS:     None (interacts directly with the user via whiptail).
+# ==============================================================================
+function FUN_MENU_MOUNT() {
+	local REAL_USER=${SUDO_USER:-$(logname)}
+
+	# Ensure a per-user Btrfs mount directory exists in $HOME
+	if [[ ! -d "/home/$REAL_USER/BTRFS-MOUNTS" ]]; then
+		sudo mkdir -p "/home/$REAL_USER/BTRFS-MOUNTS"
+		sudo chown -R "$REAL_USER:$REAL_USER" "/home/$REAL_USER/BTRFS-MOUNTS"
+		sudo chmod -R 777 "/home/$REAL_USER/BTRFS-MOUNTS"
+	fi
+
+	local -a lsblk_lines
+	readarray -t lsblk_lines < <(lsblk -P -n -o NAME,FSTYPE,LABEL,UUID,SIZE,MOUNTPOINT)
+
+	local -a checklist_options=()
+	local format_string="%-8s %-10s %-20s %-36s %-s"
+	local format_string_header="%-12s %-8s %-10s %-20s %-36s %-s"
+
+	for line in "${lsblk_lines[@]}"; do
+		eval "$line"
+		if [ -z "${FSTYPE}" ] || [ "${FSTYPE}" != "btrfs" ]; then
+			continue
+		fi
+		[ -z "${LABEL}" ] && LABEL="-"
+		[ -z "${UUID}" ] && UUID="-"
+		[ -z "${SIZE}" ] && SIZE="-"
+		[ -z "${MOUNTPOINT}" ] && MOUNTPOINT="-"
+		local display
+		display=$(printf "$format_string" "${FSTYPE}" "${SIZE}" "${LABEL}" "${UUID}" "${MOUNTPOINT}")
+		checklist_options+=("/dev/${NAME}" "$display" "OFF")
+	done
+
+	local SELECTED_SOURCES_STR
+	if [ ${#checklist_options[@]} -eq 0 ]; then
+		whiptail --title "No BTRFS Filesystems Found" --msgbox "No BTRFS filesystems detected to mount." 0 0
+		return
+	else
+		local MENU_HEIGHT=$((${#checklist_options[@]} / 3 + 8))
+		local menu_header="Choose BTRFS device(s) to mount (use spacebar to select)\n\n"
+		menu_header+=$(printf "$format_string_header" "NAME" "FSTYPE" "SIZE" "LABEL" "UUID" "MOUNTPOINT")
+		SELECTED_SOURCES_STR=$(whiptail --title "Select BTRFS Filesystem(s)" --checklist "$menu_header" 0 0 "$MENU_HEIGHT" "${checklist_options[@]}" 3>&1 1>&2 2>&3)
+		if [ $? -ne 0 ]; then return; fi
+	fi
+
+	local -a SELECTED_SOURCES_ARRAY
+	read -r -a SELECTED_SOURCES_ARRAY <<<"$SELECTED_SOURCES_STR"
+
+	if [ ${#SELECTED_SOURCES_ARRAY[@]} -eq 0 ]; then
+		whiptail --title "Cancelled" --msgbox "No source device(s) selected." 0 0
+		return
+	fi
+
+	local mount_options=""
+	if ! (whiptail --title "Degraded Mode" --yes-button "No" --no-button "Yes" --yesno "Mount in degraded mode?" 0 0); then
+		mount_options="-o degraded"
+	fi
+
+	local -a TEMP_MOUNT_POINTS_TO_CLEANUP=()
+	trap 'for mp in "${TEMP_MOUNT_POINTS_TO_CLEANUP[@]}"; do FUN_CLEANUP "$mp"; done' EXIT
+
+	local MOUNT_PLAN=() # Stores "SOURCE:DESTINATION:LABEL"
+	local confirmation_list=""
+
+	for SOURCE in "${SELECTED_SOURCES_ARRAY[@]}"; do
+		local SOURCE_SANITIZED_NAME=$(basename "$SOURCE")
+		local LABEL=$(lsblk -n -o LABEL -d "/dev/${SOURCE_SANITIZED_NAME}" 2>/dev/null || echo "")
+		local DESTINATION=""
+
+		# Always use temporary mount points
+		if [ -n "$LABEL" ]; then
+			DESTINATION="$(mktemp -d "/tmp/${SOURCE_SANITIZED_NAME}-${LABEL}-CUSTOM-BTRFS-MOUNTPOINT-XXXX")"
+		else
+			DESTINATION="$(mktemp -d "/tmp/${SOURCE_SANITIZED_NAME}-CUSTOM-BTRFS-MOUNTPOINT-XXXX")"
+		fi
+
+		if [ -z "$DESTINATION" ]; then
+			overall_error_msg+="Failed to pre-create temporary mount point for $SOURCE.\n"
+			continue
+		fi
+		TEMP_MOUNT_POINTS_TO_CLEANUP+=("$DESTINATION")
+
+		sudo chown -R "$REAL_USER:$REAL_USER" "$DESTINATION"
+		sudo chmod -R 777 "$DESTINATION"
+
+		MOUNT_PLAN+=("$SOURCE:$DESTINATION:$LABEL")
+		confirmation_list+="- $SOURCE -> $DESTINATION\n"
+	done
+
+	if [ ${#MOUNT_PLAN[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "No valid mount operations could be planned." 0 0
+		return
+	fi
+
+	if (whiptail --title "Confirm Mount" --yesno "Are you sure you want to mount the following filesystem(s)?\nWill Run: mount $mount_options <source> <destination>\n\n$confirmation_list" 0 0); then
+		local overall_success_msg=""
+		local overall_error_msg=""
+
+		for entry in "${MOUNT_PLAN[@]}"; do
+			IFS=':' read -r SOURCE DESTINATION LABEL <<<"$entry"
+
+			if FUN_MOUNT "$SOURCE" "$DESTINATION" "$mount_options"; then
+				overall_success_msg+="Successfully mounted $SOURCE to $DESTINATION.\n"
+				local EPHIMERAL_MOUNT_POINT
+				if [ -n "$LABEL" ]; then
+					EPHIMERAL_MOUNT_POINT="/home/$REAL_USER/BTRFS-MOUNTS/$SOURCE_SANITIZED_NAME-$LABEL"
+				else
+					EPHIMERAL_MOUNT_POINT="/home/$REAL_USER/BTRFS-MOUNTS/$SOURCE_SANITIZED_NAME"
+				fi
+				ln -sfn "$DESTINATION" "$EPHIMERAL_MOUNT_POINT"
+				overall_success_msg+="  -> Symlinked to $EPHIMERAL_MOUNT_POINT\n"
+			else
+				overall_error_msg+="Failed to mount $SOURCE to $DESTINATION.\n"
+			fi
+		done
+	else
+		whiptail --title "Cancelled" --msgbox "Mount operation cancelled." 0 0
+		return
+	fi
+
+	# Final summary message
+	local final_msg="Mount Operations Summary:\n\n"
+	if [ -n "$overall_success_msg" ]; then
+		final_msg+="Successful mounts:\n$overall_success_msg\n"
+	fi
+	if [ -n "$overall_error_msg" ]; then
+		final_msg+="Failed mounts:\n$overall_error_msg\n"
+	fi
+
+	whiptail --scrolltext --title "Mount Results" --msgbox "$final_msg" 0 0
+
+	trap - EXIT
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_UNMOUNT
+# DESCRIPTION: Provides a user interface for unmounting BTRFS filesystems.
+#              Allows selection of one or more mounted filesystems to unmount.
+# PARAMETERS:  None.
+# RETURNS:     1 if no filesystems are selected.
+# ==============================================================================
+function FUN_MENU_UNMOUNT() {
+	local mounted_filesystems
+	readarray -t mounted_filesystems < <(findmnt --list -n -t btrfs -o TARGET,SOURCE)
+
+	if [ ${#mounted_filesystems[@]} -eq 0 ]; then
+		whiptail --title "No Mounted BTRFS Filesystems" --msgbox "No mounted BTRFS filesystems were found to unmount." 0 0
+		return 0
+	fi
+
+	local checklist_options=()
+	for fs in "${mounted_filesystems[@]}"; do
+		local fs_target
+		local fs_source
+		fs_target=$(echo "$fs" | awk '{print $1}')
+		fs_source=$(echo "$fs" | awk '{print $2}')
+		checklist_options+=("$fs_target" "Source: $fs_source" "OFF")
+	done
+
+	local MENU_HEIGHT=$((${#checklist_options[@]} / 2 + 7))
+	local SELECTED_STR
+	SELECTED_STR=$(whiptail --scrolltext --title "Select Filesystem(s) to Unmount" --checklist "Choose one or more filesystems to unmount" 0 0 10 "${checklist_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$SELECTED_STR" ]; then
+		whiptail --title "Cancelled" --msgbox "No filesystems selected. Operation cancelled." 0 0
+		return 1
+	fi
+
+	local -a SELECTED_ARRAY
+	read -r -a SELECTED_ARRAY <<<"$SELECTED_STR"
+
+	local confirmation_list=""
+	for mp in "${SELECTED_ARRAY[@]}"; do
+		confirmation_list+="- $mp\n"
+	done
+
+	if (whiptail --title "Confirm Unmount" --yesno "Are you sure you want to unmount the following filesystem(s)?\n\n$confirmation_list" 0 0); then
+		local full_output=""
+		for mp in "${SELECTED_ARRAY[@]}"; do
+			# FUN_DO_UNMOUNT now handles its own whiptail output, so we just call it.
+			FUN_DO_UNMOUNT "$mp"
+		done
+		whiptail --title "Finished" --msgbox "All unmount operations attempted." 0 0
+	else
+		whiptail --title "Cancelled" --msgbox "Unmount operation cancelled." 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_DEVICE_ADD
+# DESCRIPTION: Provides a user interface for adding one or more devices to an
+#              existing BTRFS filesystem.
+# PARAMETERS:  None.
+# RETURNS:     1 if no mount point is selected or validation fails.
+# ==============================================================================
+function FUN_MENU_DEVICE_ADD() {
+	# Find available (unused) block devices
+	local -a available_devices
+	read -r -a available_devices < <(FUN_GET_AVAILABLE_DEVICES "$CURRENT_MOUNT_POINT")
+
+	if [ ${#available_devices[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "No available (unused) block devices found." 0 0
+		return
+	fi
+
+	local checklist_options=()
+	for dev_path in "${available_devices[@]}"; do
+		local size model serial
+		read -r size model serial < <(lsblk -d -n -o SIZE,MODEL,SERIAL "$dev_path")
+		local dev_name
+		dev_name=$(basename "$dev_path")
+		local description
+		description=$(printf "%-10s | %-6s | %-20s | %s" "$dev_name" "$size" "$model" "$serial")
+		checklist_options+=("$dev_path" "$description" "OFF")
+	done
+
+	local MENU_HEIGHT=$((${#checklist_options[@]} / 3))
+	local CHOSEN_DEVICES
+	CHOSEN_DEVICES=$(whiptail --title "Select Device(s) to Add" --checklist \
+		"Choose devices to add to '$CURRENT_MOUNT_POINT' (use spacebar to select)\n\nNAME       | SIZE   | MODEL                | SERIAL" 0 0 "$MENU_HEIGHT" \
+		"${checklist_options[@]}" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+	if [ -z "$CHOSEN_DEVICES" ]; then
+		whiptail --title "Cancelled" --msgbox "No devices selected." 0 0
+		return 1
+	fi
+
+	local -a devices_array
+	read -r -a devices_array <<<"$CHOSEN_DEVICES"
+
+	if FUN_DEVICE_ADD "$CURRENT_MOUNT_POINT" "${devices_array[@]}"; then
+		if (whiptail --title "Rebalance Recommended" --yesno "Device(s) are being added in the background.\n\nIt is recommended to rebalance the filesystem to distribute data across the new device(s).\n\nWould you like to start a balance now?" 0 0); then
+			FUN_MENU_ADVANCED_BALANCE
+		fi
+	fi
+}
+
+# ==============================================================================
+# FUNCTION: FUN_MENU_DEVICE_REMOVE
+# DESCRIPTION: UI for removing a device from a BTRFS filesystem.
+# ==============================================================================
+function FUN_MENU_DEVICE_REMOVE() {
+	readarray -t device_lines < <(btrfs filesystem show "$CURRENT_MOUNT_POINT" | awk '/devid/ {printf "%s|%s|%s\n", $2, $NF, $4}')
+
+	if [ ${#device_lines[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "Could not find any devices for filesystem at '$CURRENT_MOUNT_POINT'." 0 0
+		return
+	fi
+
+	local menu_options=()
+	menu_options+=("missing" "A failed or physically disconnected device")
+
+	for line in "${device_lines[@]}"; do
+		local devid path size
+		IFS='|' read -r devid path size <<<"$line"
+		menu_options+=("$path" "ID: $devid, Size: $size")
+	done
+
+	local MENU_HEIGHT=$((${#menu_options[@]} / 2))
+	local DEVICE_TO_REMOVE
+	DEVICE_TO_REMOVE=$(whiptail --title "Select Device to Remove" --menu "Choose a device to remove from '$CURRENT_MOUNT_POINT'" 0 0 "$MENU_HEIGHT" \
+		"${menu_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$DEVICE_TO_REMOVE" ]; then
+		whiptail --title "Cancelled" --msgbox "No device selected." 0 0
+		return
+	fi
+
+	FUN_DEVICE_REMOVE "$CURRENT_MOUNT_POINT" "$DEVICE_TO_REMOVE"
+}
+
+# ==============================================================================
+# FUNCTION: FUN_MENU_DEVICE_REPLACE
+# DESCRIPTION: UI for replacing a device in a BTRFS filesystem.
+# ==============================================================================
+function FUN_MENU_DEVICE_REPLACE() {
+	local device_lines
+	readarray -t device_lines < <(btrfs filesystem show "$CURRENT_MOUNT_POINT" | awk '/^\s*devid/ {printf "%s|%s|%s\n", $2, $NF, $4}')
+
+	if [ ${#device_lines[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "Could not find any devices for filesystem at '$CURRENT_MOUNT_POINT'." 0 0
+		return
+	fi
+
+	local src_options=()
+	declare -A src_id_map
+	local i=1
+
+	src_options+=("missing" "A failed or physically disconnected device")
+	src_id_map[$i]="${#src_options[@]}"
+	((i++))
+
+	for line in "${device_lines[@]}"; do
+		local devid path size
+		IFS='|' read -r devid path size <<<"$line"
+		src_options+=("$path" "ID: $devid, Size: $size")
+		src_id_map[$i]="${#src_options[@]}"
+		((i++))
+	done
+
+	local MENU_HEIGHT=${#src_id_map[@]}
+	local SRC_DEVICE
+	SRC_DEVICE=$(whiptail --title "Select Source Device (to be REPLACED)" --menu "Choose the device to replace in '$CURRENT_MOUNT_POINT'" 0 0 "$MENU_HEIGHT" \
+		"${src_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$SRC_DEVICE" ]; then
+		whiptail --title "Cancelled" --msgbox "No source device selected." 0 0
+		return
+	fi
+
+	# --- Select Target Device (the new device) ---
+	local -a available_devices
+	read -r -a available_devices < <(FUN_GET_AVAILABLE_DEVICES "$CURRENT_MOUNT_POINT")
+
+	if [ ${#available_devices[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "No available (unused) block devices found to use as a target." 0 0
+		return
+	fi
+
+	local target_options=()
+	for dev_path in "${available_devices[@]}"; do
+		local size
+		size=$(lsblk -d -n -o SIZE "$dev_path")
+		target_options+=("$dev_path" "Size: $size")
+	done
+
+	local TARGET_MENU_HEIGHT=$((${#target_options[@]} / 2))
+	local TARGET_DEVICE
+	TARGET_DEVICE=$(whiptail --title "Select Target Device (the NEW device)" --menu "Choose the new device to add to the filesystem" 0 0 "$TARGET_MENU_HEIGHT" \
+		"${target_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$TARGET_DEVICE" ]; then
+		whiptail --title "Cancelled" --msgbox "No target device selected." 0 0
+		return
+	fi
+
+	# --- Execute Replace ---
+	FUN_DEVICE_REPLACE "$SRC_DEVICE" "$TARGET_DEVICE" "$CURRENT_MOUNT_POINT"
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_DEVICE_REMOVE_MISSING
+# DESCRIPTION: Provides a user interface to remove a 'missing' device from a
+#              BTRFS filesystem.
+# PARAMETERS:  None.
+# RETURNS:     1 if no mount point is selected or validation fails.
+# ==============================================================================
+function FUN_DEVICE_REMOVE_MISSING() {
+	local cmd_str="btrfs device remove missing \"$CURRENT_MOUNT_POINT\""
+	if (whiptail --title "Confirm Remove Missing Device" --yesno "Are you sure you want to remove the 'missing' device from '$CURRENT_MOUNT_POINT'?\n\nThis command is: $cmd_str" 0 0); then
+		local output
+		output=$(btrfs device remove missing "$CURRENT_MOUNT_POINT" 2>&1)
+		local exit_code=$?
+
+		if [ $exit_code -eq 0 ]; then
+			whiptail --title "Success" --msgbox "Missing device removed successfully from '$CURRENT_MOUNT_POINT'.\n\nOutput:\n$output" 0 0
+		else
+			whiptail --title "Error" --msgbox "Failed to remove missing device from '$CURRENT_MOUNT_POINT'.\n\nOutput:\n$output" 0 0
+		fi
+	else
+		whiptail --title "Cancelled" --msgbox "Operation cancelled." 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_FS_DETAILS
+# DESCRIPTION: Provides a user interface to display detailed information
+#              (filesystem show and usage) for a selected BTRFS mount point.
+# PARAMETERS:  None.
+# RETURNS:     1 if no mount point is selected or validation fails.
+# ==============================================================================
+function FUN_MENU_FS_DETAILS() {
+	if ! FUN_GET_AND_VALIDATE_MOUNT_POINT; then
+		return 1
+	fi
+
+	FUN_FS_DETAILS "$CURRENT_MOUNT_POINT"
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_START_BALANCE
+# DESCRIPTION: Provides a user interface to start a BTRFS balance operation
+#              on a selected mount point.
+# PARAMETERS:  None.
+# RETURNS:     1 if no mount point is selected or validation fails.
+# ==============================================================================
+function FUN_MENU_START_BALANCE() {
+	if ! FUN_GET_AND_VALIDATE_MOUNT_POINT; then
+		return 1
+	fi
+
+	# Call the advanced balance menu
+	FUN_MENU_ADVANCED_BALANCE
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_ADVANCED_BALANCE
+# DESCRIPTION: Provides a UI for building an advanced btrfs balance command
+#              with various filters.
+# PARAMETERS:  None (uses global CURRENT_MOUNT_POINT).
+# ==============================================================================
+function FUN_MENU_ADVANCED_BALANCE() {
+	local -a balance_args=()
+	local filter_summary="None"
+
+	while true; do
+		local CHOICE
+		CHOICE=$(whiptail --title "Advanced Balance Builder" --menu \
+			"Building balance command for: $CURRENT_MOUNT_POINT\n\nCurrent filters: $filter_summary" \
+			0 0 0 \
+			"1" "Add Data filter (dusage)" \
+			"2" "Add Metadata filter (musage)" \
+			"3" "Add System filter (susage)" \
+			"4" "Clear All Filters" \
+			"5" "EXECUTE BALANCE" \
+			"6" "Cancel" 3>&1 1>&2 2>&3)
+
+		case $CHOICE in
+		"1")
+			local DUSAGE
+			DUSAGE=$(whiptail --inputbox "Enter data usage percentage (e.g., 50)" 0 0 "50" 3>&1 1>&2 2>&3)
+			if [ $? -eq 0 ] && [ -n "$DUSAGE" ]; then
+				balance_args+=("-dusage=$DUSAGE")
+			fi
+			;;
+		"2")
+			local MUSAGE
+			MUSAGE=$(whiptail --inputbox "Enter metadata usage percentage (e.g., 30)" 0 0 "30" 3>&1 1>&2 2>&3)
+			if [ $? -eq 0 ] && [ -n "$MUSAGE" ]; then
+				balance_args+=("-musage=$MUSAGE")
+			fi
+			;;
+		"3")
+			local SUSAGE
+			SUSAGE=$(whiptail --inputbox "Enter system usage percentage (e.g., 10)" 0 0 "10" 3>&1 1>&2 2>&3)
+			if [ $? -eq 0 ] && [ -n "$SUSAGE" ]; then
+				balance_args+=("-susage=$SUSAGE")
+			fi
+			;;
+		"4")
+			balance_args=()
+			;;
+		"5")
+			if [ ${#balance_args[@]} -eq 0 ]; then
+				if ! (whiptail --title "No Filters" --yesno "You have not selected any filters. This will run a full balance on the filesystem. Continue?" 0 0); then
+					continue
+				fi
+			fi
+			FUN_BALANCE "$CURRENT_MOUNT_POINT" "${balance_args[@]}"
+			break
+			;;
+		"6")
+			whiptail --title "Cancelled" --msgbox "Balance operation cancelled." 0 0
+			return 1
+			;;
+		esac
+		filter_summary="${balance_args[*]}"
+		if [ -z "$filter_summary" ]; then
+			filter_summary="None"
+		fi
+	done
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_DEFRAGMENT
+# DESCRIPTION: Provides a user interface to start a BTRFS defragmentation
+#              operation on a selected mount point, with optional compression.
+# PARAMETERS:  None.
+# RETURNS:     1 if no mount point is selected or validation fails.
+# ==============================================================================
+function FUN_MENU_DEFRAGMENT() {
+	if ! FUN_GET_AND_VALIDATE_MOUNT_POINT; then
+		return 1
+	fi
+
+	local compression_choice
+	compression_choice=$(whiptail --title "Compression" --menu "Choose a compression algorithm to apply during defragmentation, or none." 0 0 4 \
+		"none" "No compression" \
+		"zlib" "ZLIB compression" \
+		"zstd" "ZSTD compression" \
+		"lzo" "LZO compression" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then
+		whiptail --title "Cancelled" --msgbox "Defragment operation cancelled." 0 0
+		return 1
+	fi
+
+	local -a defrag_args
+	if [ "$compression_choice" != "none" ]; then
+		defrag_args+=("-c$compression_choice")
+	fi
+
+	FUN_DEFRAGMENT "$CURRENT_MOUNT_POINT" "${defrag_args[@]}"
+}
+
+function FUN_MENU_BALANCE_STATUS() {
+	if ! FUN_GET_AND_VALIDATE_MOUNT_POINT; then
+		return 1
+	fi
+
+	local output
+	output=$(btrfs balance status "$CURRENT_MOUNT_POINT" 2>&1)
+	local _rc=$?
+
+	local temp_file
+	temp_file=$(mktemp) || {
+		whiptail --title "Error" --msgbox "Failed to create temporary file." 0 0
+		return 1
+	}
+	trap 'rm -f "$temp_file"' RETURN
+
+	{
+		echo "Balance Status for '$CURRENT_MOUNT_POINT':"
+		echo
+		echo "$output"
+		echo
+		echo "Command 'btrfs balance status $CURRENT_MOUNT_POINT' finished with exit code ${_rc}."
+	} >"$temp_file"
+
+	whiptail --title "Balance Status" --textbox "$temp_file" 0 0 --scrolltext
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_BALANCE_DEFRAG
+# DESCRIPTION: Presents a sub-menu for BTRFS balance and defragmentation
+#              operations.
+# PARAMETERS:  None.
+# RETURNS:     None (interacts directly with the user via whiptail).
+# ==============================================================================
+function FUN_MENU_BALANCE_DEFRAG() {
+	if ! FUN_GET_AND_VALIDATE_MOUNT_POINT; then
+		return 1
+	fi
+
+	local CHOICE
+	CHOICE=$(whiptail --title "Balance & Defrag" --menu "Choose an operation for '$CURRENT_MOUNT_POINT'" 0 0 3 \
+		"1" "Start a Balance" \
+		"2" "Start a Defragmentation" \
+		"3" "View Balance Status" 3>&1 1>&2 2>&3)
+
+	case $CHOICE in
+	"1")
+		FUN_MENU_START_BALANCE
+		;;
+	"2")
+		FUN_MENU_DEFRAGMENT
+		;;
+	"3")
+		FUN_MENU_BALANCE_STATUS
+		;;
+	esac
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_CONVERT_PROFILE
+# DESCRIPTION: Provides a user interface for converting the data and/or
+#              metadata RAID profiles of an existing BTRFS filesystem.
+# PARAMETERS:  None.
+# RETURNS:     1 if no mount point is selected or validation fails.
+# ==============================================================================
+function FUN_MENU_CONVERT_PROFILE() {
+	if ! FUN_GET_AND_VALIDATE_MOUNT_POINT; then
+		return 1
+	fi
+
+	local DATA_PROFILE
+	DATA_PROFILE=$(
+		whiptail --title "Data & Metadata Profiles / RAID Conversion" --menu "Select the TARGET DATA profile for '$CURRENT_MOUNT_POINT':" 0 0 9 \
+			"dup" "Duplicate (Two Copies on Same Drive)" \
+			"single" "Single (No Redundancy)" \
+			"raid0" "RAID 0 (Striping)" \
+			"raid1" "RAID 1 (Mirroring)" \
+			"raid1c3" "RAID 1c3 (Triple Mirroring)" \
+			"raid1c4" "RAID 1c4 (Quad Mirroring)" \
+			"raid5" "RAID 5 (Parity)" \
+			"raid6" "RAID 6 (Double Parity)" \
+			"raid10" "RAID 10 (Mirror+Stripe)" \
+			3>&1 1>&2 2>&3
+	)
+	if [ $? -ne 0 ]; then return; fi
+
+	local META_PROFILE
+	if (whiptail --title "Metadata Profile" --yesno "Use the same profile ('$DATA_PROFILE') for METADATA?" 0 0); then
+		META_PROFILE=$DATA_PROFILE
+	else
+		META_PROFILE=$(whiptail --title "RAID Conversion" --menu "Select the TARGET METADATA profile:\n(It is recommended to use raid1 or higher for metadata.)" 0 0 9 \
+			"dup" "Duplicate (Two Copies on Same Drive)" \
+			"single" "Single (No Redundancy)" \
+			"raid0" "RAID 0 (Striping)" \
+			"raid1" "RAID 1 (Mirroring)" \
+			"raid1c3" "RAID 1c3 (Triple Mirroring)" \
+			"raid1c4" "RAID 1c4 (Quad Mirroring)" \
+			"raid5" "RAID 5 (Parity)" \
+			"raid6" "RAID 6 (Double Parity)" \
+			"raid10" "RAID 10 (Mirror+Stripe)" \
+			3>&1 1>&2 2>&3)
+		if [ $? -ne 0 ]; then return; fi
+	fi
+
+	local -a balance_args=()
+	balance_args+=("-dconvert=$DATA_PROFILE")
+	balance_args+=("-mconvert=$META_PROFILE")
+
+	FUN_BALANCE "$CURRENT_MOUNT_POINT" "${balance_args[@]}"
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_SELECT_BTRFS_DEVICE
+# DESCRIPTION: Displays a menu of BTRFS block devices for the user to choose from.
+# PARAMETERS:
+#   $1: title - The title for the whiptail menu.
+#   $2: menu_text - The instructional text for the menu.
+# OUTPUT:      Prints the selected device path (e.g., /dev/sda1) to stdout.
+# RETURNS:     0 on successful selection, 1 on cancellation or no devices found.
+# ==============================================================================
+function FUN_SELECT_BTRFS_DEVICE() {
+	local title="$1"
+	local menu_text="$2"
+
+	local -a lsblk_lines
+	readarray -t lsblk_lines < <(lsblk -P -n -o NAME,FSTYPE,LABEL,UUID,SIZE,MODEL,SERIAL)
+
+	local -a menu_options=()
+	local format_string="%-8s %-10s %-15s %-20s %s"
+	local header="%-12s ${format_string}"
+	local menu_header
+	printf -v menu_header "$header" "NAME" "FSTYPE" "SIZE" "MODEL" "SERIAL" "LABEL/UUID"
+
+	for line in "${lsblk_lines[@]}"; do
+		eval "$line"
+		if [ -z "${FSTYPE}" ] || [ "${FSTYPE}" != "btrfs" ]; then
+			continue
+		fi
+		[ -z "${LABEL}" ] && LABEL="-"
+		[ -z "${UUID}" ] && UUID="-"
+		[ -z "${SIZE}" ] && SIZE="-"
+		[ -z "${MODEL}" ] && MODEL="-"
+		[ -z "${SERIAL}" ] && SERIAL="-"
+
+		local display
+		display=$(printf "$format_string" "$FSTYPE" "$SIZE" "$MODEL" "$SERIAL" "$LABEL ($UUID)")
+		menu_options+=("/dev/${NAME}" "$display")
+	done
+
+	if [ ${#menu_options[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "No BTRFS filesystems were found." 0 0
+		return 1
+	fi
+
+	local device
+	device=$(whiptail --title "$title" --menu "$menu_text\n\n$menu_header" 0 0 15 "${menu_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$device" ]; then
+		whiptail --title "Cancelled" --msgbox "No filesystem selected. Operation cancelled." 0 0
+		return 1
+	fi
+
+	echo "$device"
+	return 0
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_CHANGE_UUID
+# DESCRIPTION: Provides a user interface for changing the UUID of a BTRFS
+#              filesystem. Includes options for random or repeating character
+#              UUIDs, and safety checks.
+# PARAMETERS:  None.
+# RETURNS:     None (interacts directly with the user via whiptail).
+# ==============================================================================
+function FUN_MENU_CHANGE_UUID() {
+	# 1. Choose UUID type
+	local uuid_type
+	uuid_type=$(whiptail --title "Choose UUID Type" --menu "Select the type of UUID to generate:" 0 0 2 \
+		"1" "Random UUID" \
+		"2" "Repeating Character UUID" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then return; fi
+
+	# 2. Select BTRFS device using the helper function
+	local device
+	device=$(FUN_SELECT_BTRFS_DEVICE "Select BTRFS Filesystem" "Choose a BTRFS filesystem to change its UUID")
+	if [ $? -ne 0 ]; then
+		return
+	fi
+
+	# 3. Ensure unmounted
+	if ! FUN_ENSURE_UNMOUNTED "$device"; then
+		return
+	fi
+
+	# 4. Generate new UUID
+	local new_uuid
+	if [ "$uuid_type" -eq 1 ]; then
+		new_uuid=$(uuidgen)
+	else
+		new_uuid=$(FUN_SELECT_REPEATING_HEX)
+		if [ $? -ne 0 ] || [ -z "$new_uuid" ]; then
+			whiptail --title "Cancelled" --msgbox "No repeating character selected. Operation cancelled." 0 0
+			return
+		fi
+	fi
+
+	# 5. Safety check
+	whiptail --title "Filesystem Check" --infobox "Performing a read-only check on $device..." 0 0
+	local check_output
+	check_output=$(sudo btrfs check --readonly "$device" 2>&1)
+	if [ $? -ne 0 ]; then
+		whiptail --title "Check Failed" --msgbox "The pre-change filesystem check failed for $device.\n\nOutput:\n$check_output\n\nAborting UUID change for safety." 0 0
+		return
+	fi
+
+	# 6. Final confirmation
+	if (whiptail --title "Confirm UUID Change" --yesno "Are you sure you want to change the UUID of $device to:\n\n$new_uuid\n\nThis is a potentially destructive operation." 0 0); then
+		sudo btrfs check --readonly "$device"
+		yes | sudo btrfstune -U "$new_uuid" "$device"
+
+		if [ $? -eq 0 ]; then
+			sudo btrfs check "$device"
+			whiptail --title "Success" --msgbox "UUID for $device changed successfully." 0 0
+		else
+			whiptail --title "Error" --msgbox "Failed to change UUID for $device" 0 0
+		fi
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_CHANGE_LABEL
+# DESCRIPTION: Provides a user interface for changing the label of a BTRFS
+#              filesystem. Includes safety checks.
+# PARAMETERS:  None.
+# RETURNS:     None (interacts directly with the user via whiptail).
+# ==============================================================================
+function FUN_MENU_CHANGE_LABEL() {
+	# 1. Select BTRFS device using the helper function
+	local device
+	device=$(FUN_SELECT_BTRFS_DEVICE "Select BTRFS Filesystem" "Choose a BTRFS filesystem to change its LABEL")
+	if [ $? -ne 0 ]; then
+		return
+	fi
+
+	# 2. Ensure unmounted
+	if ! FUN_ENSURE_UNMOUNTED "$device"; then
+		return
+	fi
+
+	# 3. Safety check
+	whiptail --title "Filesystem Check" --infobox "Performing a read-only check on $device..." 0 0
+	local check_output
+	check_output=$(sudo btrfs check --readonly "$device" 2>&1)
+	if [ $? -ne 0 ]; then
+		whiptail --title "Check Failed" --msgbox "The pre-change filesystem check failed for $device.\n\nOutput:\n$check_output\n\nAborting LABEL change for safety." 0 0
+		return
+	fi
+
+	# 4. Prompt for new label
+	local new_label
+	new_label=$(whiptail --inputbox "Enter new LABEL for $device (max 255 chars):" 0 0 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ] || [ -z "$new_label" ]; then
+		whiptail --title "Cancelled" --msgbox "No label entered. Operation cancelled." 0 0
+		return
+	fi
+	new_label=${new_label:0:255} # Truncate to max 255 chars
+
+	# 5. Final confirmation
+	if (whiptail --title "Confirm LABEL Change" --yesno "Are you sure you want to change the LABEL of $device to:\n\n'$new_label'\n\nThis is a potentially destructive operation." 0 0); then
+		local label_output
+		label_output=$(sudo btrfs filesystem label "$device" "$new_label" 2>&1)
+		if [ $? -eq 0 ]; then
+			whiptail --title "Success" --msgbox "LABEL for $device changed successfully to '$new_label'.\n\nOutput:\n$label_output" 0 0
+		else
+			whiptail --title "Error" --msgbox "Failed to change LABEL for $device.\n\nOutput:\n$label_output" 0 0
+		fi
+	else
+		whiptail --title "Cancelled" --msgbox "LABEL change cancelled." 0 0
+	fi
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_DEVICE_STATS
+# DESCRIPTION: Displays `btrfs device stats` for the current filesystem.
+# PARAMETERS:  None (uses global CURRENT_MOUNT_POINT).
+# ==============================================================================
+function FUN_MENU_DEVICE_STATS() {
+	local output
+	output=$(btrfs device stats "$CURRENT_MOUNT_POINT" 2>&1)
+	local _rc=$?
+
+	local temp_file
+	temp_file=$(mktemp) || {
+		whiptail --title "Error" --msgbox "Failed to create temporary file." 0 0
+		return 1
+	}
+	trap 'rm -f "$temp_file"' RETURN
+
+	{
+		echo "Device Stats for '$CURRENT_MOUNT_POINT':"
+		echo
+		echo "$output"
+		echo
+		echo "Command 'btrfs device stats $CURRENT_MOUNT_POINT' finished with exit code ${_rc}."
+	} >"$temp_file"
+
+	whiptail --title "Device Error Statistics" --textbox "$temp_file" 0 0 --scrolltext
+}
+
+# ==============================================================================
+# FUNCTION: FUN_MENU_DEVICE_MGMT
+# DESCRIPTION: Main menu for live device management.
+# ==============================================================================
+function FUN_MENU_DEVICE_MGMT() {
+	while true; do
+		if ! FUN_GET_AND_VALIDATE_MOUNT_POINT; then
+			return 1
+		fi
+
+		local CHOICE
+		CHOICE=$(whiptail --title "Live RAID Management - $CURRENT_MOUNT_POINT" --menu "Choose an operation" 0 0 0 \
+			"1" "Add Device(s) to Filesystem" \
+			"2" "Remove a Device from Filesystem" \
+			"3" "Remove MISSING Device from Filesystem" \
+			"4" "Replace a Device in Filesystem" \
+			"5" "Convert RAID Profile" \
+			"6" "Device Error Statistics" \
+			"7" "Change Mount Point" \
+			"8" "Go Back" 3>&1 1>&2 2>&3)
+
+		if [ $? -ne 0 ]; then break; fi
+
+		case $CHOICE in
+		"1")
+			FUN_MENU_DEVICE_ADD
+			;;
+		"2")
+			FUN_MENU_DEVICE_REMOVE
+			;;
+		"3")
+			FUN_DEVICE_REMOVE_MISSING
+			;;
+		"4")
+			FUN_MENU_DEVICE_REPLACE
+			;;
+		"5")
+			FUN_MENU_CONVERT_PROFILE
+			;;
+		"6")
+			FUN_MENU_DEVICE_STATS
+			;;
+		"7")
+			CURRENT_MOUNT_POINT=""
+			;;
+		"8")
+			break
+			;;
+		esac
+	done
+}
+
+#=============================================================================
+# HELP PAGE / HELP INFORMATION
+#=============================================================================
+function FUN_HELP_PAGE() {
+
+	#──────────────────────────────────────────────────────────────
+	#📘 BTRFS RAID PROFILES — DETAILED REFERENCE
+	#──────────────────────────────────────────────────────────────
+
+	# Build formatted tables dynamically using printf and column
+	build_main_table() {
+		# heredoc 'EOF' (quoted) → literal text, no expansion
+		# column -t -s '|' → format as aligned table using '|' as separator
+		# awk ... → print each line and insert blank line after every row (extra spacing)
+		# awk 'NR==1{print;print "";next} {print; print ""}'
+		#   NR==1 → for the first line (header), print it and add one blank line
+		#   next  → skip to next record after printing header
+		#   the rest → for every other line, print it followed by a blank line (for spacing)
+		cat <<-'EOF' | column -t -s '|' | awk 'NR==1{print;print "";next} {print; print ""}'
+			Profile | Min | Max | Even/Odd | Copies | Faults | Typical_Use | Notes
+			single  | 1   | Any | both     | 1           | 0      | Single/JBOD | No redundancy, just pooled space — data spread freely across drives.
+			dup     | 1   | 1   | both     | 2(same)     | 0      | Single disk safety | 2 copies on same drive for integrity; Protects from bit-rot, not disk failure.
+			raid0   | 2   | Any | both     | striped     | 0      | Performance only | Striping, 1 failure = full data loss.
+			raid1   | 2   | Any | both     | 2           | 1      | Basic mirroring | 2 copies across drives, safe and simple.
+			raid1c3 | 3   | Any | both     | 3           | 2      | High redundancy | 3 full replicas across drives — survives 2 disk failures.
+			raid1c4 | 4   | Any | both     | 4           | 3      | Max redundancy | 4 replicas; works on 4–7+ drives — survives 3 disk failures.
+			raid10  | 4   | Any | even     | 2/pair      | 1/pair | Perf+redundancy | Stripe + mirror, requires even drives. Requires even number of drives
+			raid5   | 3   | Any | both     | 1+Parity    | 1      | Parity RAID (risky) | Striped with parity, not bit-rot safe; Not recommended for critical use; still experimental
+			raid6   | 4   | Any | both     | 1+2Parity   | 2      | Dual parity RAID | Slower recovery, archival only.
+		EOF
+	}
+
+	build_drive_summary() {
+		# heredoc 'EOF' (quoted) → literal text, no expansion
+		# column -t -s '|' → format as aligned table using '|' as separator
+		# awk ... → print each line and insert blank line after every row (extra spacing)
+		# awk 'NR==1{print;print "";next} {print; print ""}'
+		#   NR==1 → for the first line (header), print it and add one blank line
+		#   next  → skip to next record after printing header
+		#   the rest → for every other line, print it followed by a blank line (for spacing)
+		cat <<-'EOF' | column -t -s '|' | awk 'NR==1{print;print "";next} {print; print ""}'
+			Drives | Supported_Profiles | Recommended | Reason
+			1 | single,dup | dup | No redundancy across drives.
+			2 | raid1,raid0 | raid1 | Classic 2-drive mirror setup.
+			3 | raid1c3,raid5 | raid1c3 | Triple replication safer than parity.
+			4(even) | raid10,raid1c4,raid6 | raid10 | Perfect speed & safety balance.
+			5(odd) | raid1c4,raid5 | raid1c4 | Full redundancy across drives.
+			6(even) | raid10,raid6 | raid10 | Strong performance & reliability.
+			7(odd) | raid1c4 | raid1c4 | Four-copy redundancy per block.
+			8+(even) | raid10,raid6 | raid10 | Scales best with even drive counts.
+			9+(odd) | raid1c4 | raid1c4 | Maintains max redundancy.
+		EOF
+	}
+
+	build_quick_summary() {
+		# heredoc 'EOF' (quoted) → literal text, no expansion
+		# column -t -s '|' → format as aligned table using '|' as separator
+		# awk ... → print each line and insert blank line after every row (extra spacing)
+		# awk 'NR==1{print;print "";next} {print; print ""}'
+		#   NR==1 → for the first line (header), print it and add one blank line
+		#   next  → skip to next record after printing header
+		#   the rest → for every other line, print it followed by a blank line (for spacing)
+
+		cat <<-'EOF' | column -t -s '|' | awk 'NR==1{print;print "";next} {print; print ""}'
+			Profile | Copies | Survives | Ideal_Drives | Even/Odd
+			single  | 1 | 0 | 1 | both
+			dup     | 2(same_disk) | 0 | 1 | both
+			raid1   | 2 | 1 | 2+ | both
+			raid1c3 | 3 | 2 | 3+ | both
+			raid1c4 | 4 | 3 | 4+ | both
+			raid10  | 2/pair | 1/pair | 4+ | even
+			raid5   | 1+parity | 1 | 3+ | both
+			raid6   | 1+2parity | 2 | 4+ | both
+		EOF
+	}
+
+	#──────────────────────────────────────────────────────────────
+	# Combine all sections into a single help text variable
+	#──────────────────────────────────────────────────────────────
+	local help_text
+	help_text=$(
+		cat <<EOF
+──────────────────────────────────────────────────────────────
+                        SCRIPT FEATURES
+──────────────────────────────────────────────────────────────
+
+This script provides a comprehensive TUI (Terminal User Interface))for managing BTRFS
+filesystems. Most operations require you to first select a
+BTRFS mount point to operate on.
+
+--- MAIN MENU OPTIONS ---
+
+1. Create BTRFS RAID Array [DESTRUCTIVE]
+   - Formats multiple devices into a new BTRFS filesystem with
+     a specified RAID profile (raid0, raid1, raid10, etc.).
+
+2. Format a Drive as BTRFS [DESTRUCTIVE]
+   - Formats a single device as a BTRFS filesystem.
+   - Can optionally create a GPT partition table first.
+
+3. Live RAID Management
+   - Add, remove, or replace devices in an existing filesystem.
+   - Convert the RAID profile of a live filesystem.
+   - View device error statistics.
+
+4. Subvolume Management
+   - List, create, delete, and snapshot subvolumes.
+   - Backup snapshots to an external location (send/receive).
+   - Restore a subvolume from a snapshot (destructive).
+   - Toggle the read-only property of a subvolume.
+
+5. Manage BTRFS Scrubbing
+   - Start, stop, and check the status of a BTRFS scrub, which
+     is a data integrity check.
+
+6. Mount / 7. Unmount BTRFS Filesystem
+   - Mount unmounted BTRFS filesystems.
+   - Unmount currently mounted filesystems.
+
+8. Balance & Defrag
+   - Start a balance to re-distribute data across devices.
+     (Advanced filters for usage percentages are available).
+   - Defragment a filesystem, with optional compression.
+
+9. Change Data/Metadata Profile
+   - A shortcut to the RAID profile conversion tool. This is a
+     special type of balance operation.
+
+10. Change BTRFS Filesystem UUID
+    - Changes the UUID of an unmounted BTRFS filesystem.
+
+11. Change BTRFS Filesystem Label
+    - Changes the label of a BTRFS filesystem.
+
+12. Show BTRFS Filesystem Details
+    - Displays detailed usage and device information.
+
+13. Device S.M.A.R.T. Health
+    - Shows the S.M.A.R.T. health report for a physical disk.
+
+──────────────────────────────────────────────────────────────
+📘 BTRFS RAID PROFILES — DETAILED REFERENCE
+──────────────────────────────────────────────────────────────
+
+Btrfs supports several RAID-like data profiles, controlling how
+data and metadata chunks are distributed across multiple devices.
+
+Unlike traditional mdadm RAID, Btrfs operates at the *chunk level*,
+allowing live profile conversion and mixing of different drive sizes.
+
+──────────────────────────────────────────────────────────────
+⚙️ RAID PROFILE OVERVIEW
+──────────────────────────────────────────────────────────────
+$(build_main_table)
+
+──────────────────────────────────────────────────────────────
+🧩 DRIVE COUNT BEHAVIOR SUMMARY
+──────────────────────────────────────────────────────────────
+$(build_drive_summary)
+
+──────────────────────────────────────────────────────────────
+🔍 FUNCTIONAL BEHAVIOR NOTES
+──────────────────────────────────────────────────────────────
+
+• raid1, raid1c3, and raid1c4 adapt dynamically to drive count.
+  If fewer drives exist than needed for full replication,
+  Btrfs stores as many copies as possible and warns the user.
+
+• Add drives anytime and run:
+    btrfs balance start -dconvert=raid1c4 -mconvert=raid1c4 /mnt/fs
+  to upgrade data & metadata redundancy automatically.
+
+• raid10 requires an even number of devices; creation fails otherwise.
+• raid1c4 works with any count ≥4 (4, 5, 6, 7...) and always keeps 4 copies.
+• Redundancy increases space usage proportionally:
+  - raid1 → 2× space
+  - raid1c3 → 3× space
+  - raid1c4 → 4× space
+
+Recommended quick logic:
+  - ≤2 drives → raid1
+  - 3 drives → raid1c3
+  - 4+ drives → raid10 or raid1c4
+  - 5+ drives → raid1c4 preferred
+  - large arrays → raid6 (only for non-critical data)
+
+──────────────────────────────────────────────────────────────
+💻 QUICK SUMMARY
+──────────────────────────────────────────────────────────────
+$(build_quick_summary)
+
+──────────────────────────────────────────────────────────────
+📎 TIP
+──────────────────────────────────────────────────────────────
+Check your current RAID profile:
+    btrfs filesystem df /mnt/yourfs
+    btrfs filesystem usage /mnt/yourfs
+
+Convert live (no reformat):
+    btrfs balance start -dconvert=<profile> -mconvert=<profile> /mnt/yourfs
+
+──────────────────────────────────────────────────────────────
+EOF
+	)
+
+	# Display help page inside whiptail message box
+	whiptail --title "BTRFS TUI Manager - HELP" --msgbox "$help_text" 0 0 --scrolltext
+}
+
+# ==============================================================================
+# FUNCTION:    FUN_MENU_SMART_HEALTH
+# DESCRIPTION: Displays S.M.A.R.T. health information for a physical device
+#              within the current BTRFS filesystem.
+# PARAMETERS:  None (uses global CURRENT_MOUNT_POINT).
+# ==============================================================================
+function FUN_MENU_SMART_HEALTH() {
+	if ! FUN_GET_AND_VALIDATE_MOUNT_POINT; then
+		return 1
+	fi
+
+	readarray -t device_lines < <(btrfs filesystem show "$CURRENT_MOUNT_POINT" | awk '/devid/ {print $NF}')
+
+	if [ ${#device_lines[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "Could not find any devices for filesystem at '$CURRENT_MOUNT_POINT'." 0 0
+		return
+	fi
+
+	local menu_options=()
+	for device_path in "${device_lines[@]}"; do
+		menu_options+=("$device_path" "")
+	done
+
+	local device_to_check
+	device_to_check=$(whiptail --title "Select Device for S.M.A.R.T. Check" --menu "Choose a device to check:" 0 0 0 \
+		"${menu_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ -z "$device_to_check" ]; then
+		whiptail --title "Cancelled" --msgbox "No device selected." 0 0
+		return
+	fi
+
+	local output
+	output=$(sudo smartctl -a "$device_to_check" 2>&1)
+	local _rc=$?
+
+	local temp_file
+	temp_file=$(mktemp) || {
+		whiptail --title "Error" --msgbox "Failed to create temporary file." 0 0
+		return 1
+	}
+	trap 'rm -f "$temp_file"' RETURN
+
+	{
+		echo "S.M.A.R.T. Health for '$device_to_check':"
+		echo "========================================"
+		echo
+		echo "$output"
+		echo
+		echo "Command 'smartctl -a $device_to_check' finished with exit code ${_rc}."
+	} >"$temp_file"
+
+	whiptail --title "S.M.A.R.T. Health Status" --textbox "$temp_file" 0 0 --scrolltext
+}
+
+# ==============================================================================
+#                           MAIN MENU & SCRIPT ENTRY
+# ==============================================================================
+
+# ==============================================================================
+# FUNCTION:    FUN_MAIN_MENU
+# DESCRIPTION: Displays the main menu of the BTRFS Management Script,
+#              allowing the user to navigate through various BTRFS operations.
+# PARAMETERS:  None.
+# RETURNS:     None (controls the main script flow).
+# ==============================================================================
+function FUN_MAIN_MENU() {
+	while true; do
+		local menu_title="BTRFS Management Script"
+		if [ -n "$CURRENT_MOUNT_POINT" ]; then
+			menu_title+=" - [$CURRENT_MOUNT_POINT]"
+		fi
+
+		local CHOICE
+		CHOICE=$(whiptail --title "$menu_title" --menu "Choose an option" 0 0 15 \
+			"1" "Create BTRFS RAID Array [DESTRUCTIVE]" \
+			"2" "Format a Drive as BTRFS [DESTRUCTIVE]" \
+			"3" "Live RAID Management" \
+			"4" "Subvolume Management" \
+			"5" "[SCRUB] Manage BTRFS Scrubbing" \
+			"6" "Mount BTRFS Filesystem" \
+			"7" "Unmount BTRFS Filesystem" \
+			"8" "Balance & Defrag" \
+			"9" "Change Data/Metadata Profile Balancing" \
+			"10" "Change BTRFS Filesystem UUID" \
+			"11" "Change BTRFS Filesystem Label" \
+			"12" "Show BTRFS Filesystem Details" \
+			"13" "Device S.M.A.R.T. Health" \
+			"14" "HELP PAGE" \
+			"15" "Exit" 3>&1 1>&2 2>&3)
+
+		if [ $? -ne 0 ]; then
+			break
+		fi
+
+		case $CHOICE in
+		"1")
+			FUN_MENU_RAID
+			;;
+		"2")
+			FUN_MENU_FORMAT_BTRFS
+			;;
+		"3")
+			FUN_MENU_DEVICE_MGMT
+			;;
+		"4")
+			FUN_MENU_SUBVOLUME
+			;;
+		"5")
+			FUN_MENU_SCRUB
+			;;
+		"6")
+			FUN_MENU_MOUNT
+			;;
+		"7")
+			FUN_MENU_UNMOUNT
+			;;
+		"8")
+			FUN_MENU_BALANCE_DEFRAG
+			;;
+		"9")
+			FUN_MENU_CONVERT_PROFILE
+			;;
+		"10")
+			FUN_MENU_CHANGE_UUID
+			;;
+		"11")
+			FUN_MENU_CHANGE_LABEL
+			;;
+		"12")
+			FUN_MENU_FS_DETAILS
+			;;
+		"13")
+			FUN_MENU_SMART_HEALTH
+			;;
+		"14")
+			FUN_HELP_PAGE
+			;;
+		"15")
+			break
+			;;
+		esac
+	done
+	whiptail --title "Goodbye" --msgbox "Exiting BTRFS Management Script." 0 0
+}
+
+# --- SCRIPT START ---
+FUN_MAIN_MENU
+
+unset NEWT_COLORS

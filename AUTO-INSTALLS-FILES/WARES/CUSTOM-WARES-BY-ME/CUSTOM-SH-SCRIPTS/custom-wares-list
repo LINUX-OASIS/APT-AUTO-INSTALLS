@@ -1,0 +1,89 @@
+#!/bin/bash
+
+# This script provides a simple way to run custom shell scripts stored in /bin/CUSTOM-SH-SCRIPTS.
+# It uses `whiptail` to create a dialog box for the user to select a script to run.
+
+# Set custom colors for `whiptail` dialog boxes.
+# The NEWT_COLORS environment variable allows customization of the look and feel of `whiptail` interfaces.
+export NEWT_COLORS='
+ root=white,red
+window=white,gray
+border=lightgray,gray
+shadow=white,black
+button=black,green
+actbutton=black,red
+compactbutton=lightgray,black
+title=yellow,gray
+roottext=red,black
+textbox=lightgray,gray
+acttextbox=gray,white
+entry=black,lightgray
+disentry=gray,black
+checkbox=black,lightgray
+actcheckbox=black,green
+emptyscale=,lightgray
+fullscale=,brown
+listbox=black,lightgray
+actlistbox=lightgray,black
+actsellistbox=black,green
+'
+# To reset the color back to default, use the command:
+# unset NEWT_COLORS
+
+# This code is kept here for documentation purposes as "legacy" code.
+: '
+echo ""
+echo -e "		Running :: \n tree /bin/CUSTOM-SH-SCRIPTS | grep custom 
+"
+echo "-------------------------------------------------------------------"
+echo ""
+tree /bin/CUSTOM-SH-SCRIPTS | grep custom
+echo "____________________________________________________________________"
+echo "--------------------------------------------------------------------"
+
+
+echo ""
+read -p "	Input [Command to run]  :: " RUN
+
+$RUN
+'
+
+#############################################################################################################################
+
+# List all files starting with "custom" in the /bin/CUSTOM-SH-SCRIPTS directory and store them in a temporary file.
+# The "-1" flag ensures that each file is listed on a new line.
+ls /bin/CUSTOM-SH-SCRIPTS/custom* -1 >/tmp/custom-CWLS-FILES-NUM.tmp
+
+# Use `sed` to remove the directory path from the file names in the temporary file, leaving only the script names.
+sed -i 's+/bin/CUSTOM-SH-SCRIPTS/++g' /tmp/custom-CWLS-FILES-NUM.tmp
+
+# Use `nl` to number the lines in the temporary file, making it easier for the user to select a script.
+# The "-s" flag sets the separator between the line number and the script name.
+nl_tmp_list=$(nl -s ".   " /tmp/custom-CWLS-FILES-NUM.tmp)
+
+# Use `whiptail` to create an input box that displays the numbered list of scripts and prompts the user for a selection.
+selection=$(whiptail --title "cwls  Custom Wares List" --inputbox "$nl_tmp_list" 0 0 3>&1 1>&2 2>&3)
+
+# If the user cancels the selection (i.e., the selection is empty), exit the script.
+if [ -z $selection ]; then
+    exit
+fi
+
+# Unset the custom colors to revert to the default terminal colors.
+unset NEWT_COLORS
+
+# Announce which script is being run.
+echo "Running   $selection"
+echo "Running   $selection"
+echo "Running   $selection"
+echo "Running   $selection"
+echo "Running   $selection"
+echo -e "
+
+
+
+
+"
+
+# Execute the selected script.
+$selection

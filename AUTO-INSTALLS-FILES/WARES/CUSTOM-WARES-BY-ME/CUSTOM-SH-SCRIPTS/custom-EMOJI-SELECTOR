@@ -1,0 +1,183 @@
+#!/bin/bash
+# 🧙‍♀️✨ Fullscreen Emoji Grimoire with Previews ✨🎀
+
+export NEWT_COLORS='
+root=black,white
+window=black,white
+dialog=black,white
+frame=brightmagenta,white
+border=black,white
+shadow=black,gray
+title=black,white
+button=white,blue
+actbutton=white,black
+focus=white,blue
+highlight=white,magenta
+checkbox=black,white
+actcheckbox=black,lightgray
+compactbutton=red,lightgray
+radiobutton=black,white
+textbox=black,white
+acttextbox=black,lightgray
+text=black,white
+infobox=black,white
+label=black,white
+roottext=black,white
+helpline=black,white
+menu=black,white
+menuitem=black,white
+listbox=black,white
+actlistbox=black,yellow
+item=black,white
+actsellistbox=white,blue
+sellistbox=white,blue
+scrollbar=black,white
+statusbar=black,white
+cursor=black,white
+entry=black,white
+disentry=black,white
+emptyscale=black,white
+fullscale=black,white
+'
+
+# Accent emojis 💫
+echo -e "🌸 Spell Focus: Bash scripting"
+echo -e "📜 Familiar: Terminal Emulator"
+echo -e "🔮 Mana: 100%"
+echo -e "💾 Equip: qemu-nbd, whiptail, kawaii flair\n"
+
+# Spellbooks~
+MOE_KAWAII=("🌸" "🎀" "💖" "✨" "🥺" "💞" "🐾" "🍥" "🍡" "🌈" "💗" "😳" "🤍" "💫" "🩵" "🌟" "😚" "😻" "💌" "💕" "❤️" "⭐" "🌙" "🍓" "🍰" "🍭" "🎁" "♡" "♥" "♪" "♫" "🎶")
+MAGES_ARCANE=("🧙‍♂️" "🧙‍♀️" "🪄" "🔮" "✨" "📜" "📖" "☄️" "🔥" "⚡" "🪄" "💠" "🌌" "⛤" "🌑" "🦉" "⚗️" "💫" "🐉" "🏰" "🗝️" "🕯️" "🗡️" "🛡️" "🧪" "⚱️" "⏳" "🏹" "💣" "💎" "❤️" "💚" "🧝" "🧚" "💀" "👻" "🗺️" "🧭" "🌲" "⛰️" "🏺" "🔺")
+TECH_SIGILS=(
+    "💻" "🖥️" "🖱️" "⌨️" "🧠" "📡" "📟" "🛠️" "⚙️" "🔌" "🔋"
+    "📀" "💾" "🗜️" "🧰" "🖧" "🌐" "🧮" "🖲️" "🛡️" "🚀" "📂"
+    "🤖" "🛰️" "💡" "🔗" "📈" "📊" "🔬" "🔭" "📱" "🔧"
+)
+FOOD_DRINK=("🍔" "🍕" "🍟" "🌭" "🍿" "🥞" "🧇" "🍳" "🧀" "🍖" "🍗" "🥩" "🥓" "🥪" "🥙")
+ANIMALS_NATURE=("🐧" "🐶" "🐱" "🐭" "🐹" "🐰" "🦊" "🐻" "🐼" "🐨" "🐯" "🦁" "🐮" "🐷" "🐸" "🐵" "🦋" "🐝" "🐞" "🐠" "🐬" "🐳" "🐢" "🐍" "🦎" "🦖" "🦕" "🌳" "🌲" "🌴" "🌱" "🌿" "☘️" "🍀" "🍁" "🍂" "🍄" "🌸" "🌼" "🌻" "🌎" "🌍" "🌏" "🌕" "🌖" "🌗" "🌘" "🌑" "🌒" "🌓" "🌔" "💫" "✨" "🌟" "🌈" "🌊" "💧" "🔥" "⚡" "🌬️" "❄️" "☀️" "🌙" "⭐")
+
+ALL_EMOJIS=("${MOE_KAWAII[@]}" "${MAGES_ARCANE[@]}" "${TECH_SIGILS[@]}" "${FOOD_DRINK[@]}" "${ANIMALS_NATURE[@]}")
+
+# Combine randomly for the combo option
+function preview_random_combo() {
+    local result=""
+    for i in {1..10}; do
+        result+="$(shuf -n1 -e "${MOE_KAWAII[@]}")$(shuf -n1 -e "${MAGES_ARCANE[@]}")  "
+    done
+    echo "$result"
+}
+
+# New functions for dynamic previews
+function get_moe_preview() {
+    shuf -n3 -e "${MOE_KAWAII[@]}" | tr '\n' ' '
+}
+
+function get_mage_preview() {
+    shuf -n3 -e "${MAGES_ARCANE[@]}" | tr '\n' ' '
+}
+
+function get_tech_preview() {
+    shuf -n3 -e "${TECH_SIGILS[@]}" | tr '\n' ' '
+}
+
+function get_food_preview() {
+    shuf -n3 -e "${FOOD_DRINK[@]}" | tr '\n' ' '
+}
+
+function get_animal_preview() {
+    shuf -n3 -e "${ANIMALS_NATURE[@]}" | tr '\n' ' '
+}
+
+# Function to display help message
+function display_help_message() {
+    whiptail --msgbox "This is the Terminal Emoji Spellbook!\n\nSelect an emoji category to display its contents. You can then copy and paste them into your scripts or documents.\n\nOptions:\n  1. Reload/Restart Menu: Redraws the current menu.\n  2-8. Emoji Categories: Display emojis from a specific theme.\n  9. Help/About: Display this help message.\n  10. Exit Spellbook: Exit the application.\n\nPress ESC or Cancel to exit at any time." 20 78
+}
+
+# Prepare previews 🧪
+
+while true; do
+    clear
+    CHOICE=$(
+        whiptail --scrolltext --title "🪄 Terminal Emoji Spellbook" --menu \
+            "✨ Select your spellbook below ✨
+────────────────────────────────────────────
+2. Moe Kawaii Sugoi UwU $(get_moe_preview)
+3. Arcane Mage & Wizardry $(get_mage_preview)
+4. Tech Glyphs & Sudo Charms $(get_tech_preview)
+5. Food & Drink $(get_food_preview)
+6. Animals & Nature $(get_animal_preview)
+7. Randomized Chaos Burst $(preview_random_combo)
+8. Sprinkles $(shuf -n3 -e "${ALL_EMOJIS[@]}" | tr '\n' ' ')
+────────────────────────────────────────────" \
+            28 78 10 \
+            "1" "🔄 Reload/Restart Menu" \
+            "2" "🌸 Moe Kawaii Sugoi " \
+            "3" "🧙‍♂️ Arcane Mage & Wizard " \
+            "4" "💻 Tech Glyphs & Debugger Runes " \
+            "5" "🍔 Food & Drink " \
+            "6" "🐶 Animals & Nature " \
+            "7" "🎲 Random Emoji Explosion " \
+            "8" "✨ Sprinkles!" \
+            "9" "❓ Help/About" \
+            "10" "🚪 Exit Spellbook" 3>&1 1>&2 2>&3
+    )
+    if [ $? -ne 0 ]; then
+        break
+    fi
+
+    echo -e "\n🔹 Your selected emoji grimoire 🔹\n"
+
+    case "$CHOICE" in
+    "1") : ;;
+    "2")
+        printf "%s\n" "${MOE_KAWAII[@]}"
+        echo -e "\n✨ Copy and paste these into your scripts to summon flair~ ✨"
+        read -n 1 -s -r -p "Press any key to continue..."
+        echo -e "\n"
+        ;;
+    "3")
+        printf "%s\n" "${MAGES_ARCANE[@]}"
+        echo -e "\n✨ Copy and paste these into your scripts to summon flair~ ✨"
+        read -n 1 -s -r -p "Press any key to continue..."
+        echo -e "\n"
+        ;;
+    "4")
+        printf "%s\n" "${TECH_SIGILS[@]}"
+        echo -e "\n✨ Copy and paste these into your scripts to summon flair~ ✨"
+        read -n 1 -s -r -p "Press any key to continue..."
+        echo -e "\n"
+        ;;
+    "5")
+        printf "%s\n" "${FOOD_DRINK[@]}"
+        echo -e "\n✨ Copy and paste these into your scripts to summon flair~ ✨"
+        read -n 1 -s -r -p "Press any key to continue..."
+        echo -e "\n"
+        ;;
+    "6")
+        printf "%s\n" "${ANIMALS_NATURE[@]}"
+        echo -e "\n✨ Copy and paste these into your scripts to summon flair~ ✨"
+        read -n 1 -s -r -p "Press any key to continue..."
+        echo -e "\n"
+        ;;
+    "7")
+        preview_random_combo
+        echo -e "\n✨ Copy and paste these into your scripts to summon flair~ ✨"
+        read -n 1 -s -r -p "Press any key to continue..."
+        echo -e "\n"
+        ;;
+    "8")
+        printf "%s " $(shuf -n5 -e "${ALL_EMOJIS[@]}")
+        echo -e "\n✨ Copy and paste these into your scripts to summon flair~ ✨"
+        read -n 1 -s -r -p "Press any key to continue..."
+        echo -e "\n"
+        ;;
+    "9") display_help_message ;;
+    "10") break ;;
+    *) echo "No selection. Spell fizzled... 💨" ;;
+    esac
+
+    # echo -e "\n✨ Copy and paste these into your scripts to summon flair~ ✨"
+    # read -n 1 -s -r -p "Press any key to continue..."
+    # echo -e "\n"
+done

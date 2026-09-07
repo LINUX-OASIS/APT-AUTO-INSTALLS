@@ -1,0 +1,96 @@
+#!/bin/bash
+# 🎀 Neko Hypervisor Toggle TUI UwU
+# Switch between VirtualBox mode and KVM PCIe passthrough mode
+# VirtualBox mode: unload kvm_intel
+# KVM passthrough mode: load all KVM + VFIO modules
+
+# Modules list
+KVM_MODULES=("kvm" "kvm_intel")
+VFIO_MODULES=("vfio" "vfio_pci" "vfio_iommu_type1")
+PCI_MODULE="pci_stub"
+
+# Show current mode
+function current_mode() {
+	if lsmod | grep -q kvm_intel; then
+		echo "🐾 Current mode: KVM + PCIe passthrough (full power)"
+	else
+		echo "🐾 Current mode: VirtualBox friendly (VT-x free)"
+	fi
+}
+
+# Switch to VirtualBox mode
+function switch_to_vbox() {
+	sudo modprobe -r kvm_intel
+}
+
+# Switch to KVM passthrough mode
+function switch_to_kvm() {
+	# Load KVM modules first
+	for mod in "${KVM_MODULES[@]}"; do
+		sudo modprobe "$mod"
+	done
+	# Load VFIO modules
+	for mod in "${VFIO_MODULES[@]}"; do
+		sudo modprobe "$mod"
+	done
+	# Load pci_stub
+	sudo modprobe "$PCI_MODULE"
+}
+
+# Show about page
+function show_about_page() {
+	whiptail --scrolltext --title "😺 About Neko Hypervisor Toggle" \
+		--msgbox "\
+🎀 Neko Hypervisor Toggle TUI UwU
+
+Purpose:
+This script provides a simple Terminal User Interface (TUI) to switch
+between VirtualBox-friendly mode and KVM PCIe passthrough mode on Linux
+systems. It achieves this by dynamically loading and unloading KVM and
+VFIO related kernel modules.
+
+Modes:
+- VirtualBox mode: Unloads 'kvm_intel' to free up VT-x for VirtualBox.
+- KVM + PCIe Passthrough mode: Loads 'kvm', 'kvm_intel', 'vfio',
+  'vfio_pci', 'vfio_iommu_type1', and 'pci_stub' modules for KVM
+  virtualization with PCIe passthrough capabilities.
+
+Usage:
+Run this script as root (sudo ./custom-KVM-VBOX-MODULES-TOGGLE).
+Use the menu to select your desired hypervisor mode.
+Version: 1.1
+" 0 0
+}
+
+# Main TUI menu
+while true; do
+	CURRENT_MODE=$(lsmod | grep -q kvm_intel && echo "KVM + PCIe passthrough" || echo "VirtualBox mode")
+	CHOICE=$(whiptail --title "😺 Neko Hypervisor Toggle" \
+		--menu "Current mode: $CURRENT_MODE\nSelect desired mode:" 0 0 5 \
+		"1" "VirtualBox mode (unload kvm_intel)" \
+		"2" "KVM + PCIe passthrough mode (load all modules)" \
+		"3" "About this Script" \
+		"4" "Quit" 3>&1 1>&2 2>&3)
+
+	case "$CHOICE" in
+	1)
+		switch_to_vbox
+		whiptail --msgbox "🐾 Switched to VirtualBox mode!\nVT-x is free for VirtualBox now~" 0 0
+		;;
+	2)
+		switch_to_kvm
+		whiptail --msgbox "🐾 Switched to KVM + PCIe passthrough mode!\nAll modules loaded for passthrough~" 0 0
+		;;
+	3)
+		show_about_page
+		;;
+	4)
+		whiptail --msgbox "Bye-bye~ Nya~ 😸" 0 0
+		exit 0
+		;;
+	*)
+		whiptail --msgbox "Invalid choice, nya~ 😿 EXITING..." 0 0
+		exit 1
+		;;
+	esac
+done

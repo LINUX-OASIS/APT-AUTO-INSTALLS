@@ -1,0 +1,620 @@
+#!/bin/bash
+
+# Checks for package/dependencies installed status and installs them if not already installed
+for PACKAGE in samba qrencode zbar-tools; do                                        # the dependencies needed
+	if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then # the precursor condition to begin checking and installing dependencies
+		echo "dependency $PACKAGE is NOT installed .. installing"
+		sudo apt update
+		sudo apt install -y $PACKAGE
+
+		if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then #exits if package is not installed even after installation code was executed...something went wrong
+			echo "Posibly didn't install dependency $PACKAGE .. exiting"
+			exit
+		fi
+	fi
+done
+
+#NOTES !!! IMPORTANT!!! use head -c when reading from /dev/random or /dev/urandom since cat will cause an out of memory error !!!!!!! .... diagnosing this issue took me an entire day to figure out
+
+# following code generates random string
+# date +%s | sha256sum | base64 | head -c 32 ; echo
+
+# NEWT_COLORS palette for Cisco theme
+
+export NEWT_COLORS='
+root=white,black
+window=white,blue
+dialog=white,black
+frame=brightyellow,black
+border=white,black
+shadow=black,brightblack
+title=brightyellow,blue
+button=white,green
+actbutton=black,brightyellow
+focus=white,magenta
+highlight=black,brightcyan
+checkbox=white,black
+actcheckbox=black,brightyellow
+compactbutton=white,brightblue
+radiobutton=white,black
+textbox=white,black
+acttextbox=black,brightcyan
+text=white,black
+infobox=white,brightblack
+label=brightyellow,black
+roottext=white,black
+helpline=brightyellow,black
+menu=white,blue
+menuitem=brightyellow,black
+listbox=white,black
+actlistbox=black,brightyellow
+item=brightyellow,black
+actsellistbox=black,brightcyan
+sellistbox=white,black
+scrollbar=brightcyan,black
+statusbar=white,blue
+cursor=brightyellow,black
+entry=white,black
+disentry=black,brightblack
+emptyscale=black,brightblack
+fullscale=brightyellow,black
+'
+
+: <<'SAMBA_CONFIG_EXAMPLE'
+# ------------------------------------------------------------------------------
+# Example of a Samba Share Definition Block in smb.conf
+#
+# This script appends similar, but simpler, blocks to /etc/samba/smb.conf.
+# Below is a breakdown of common parameters for context.
+# ------------------------------------------------------------------------------
+
+[Private-Share-Example]
+# The name of the share as it appears to network clients.
+# This script generates a unique name like [sambashare-RANDOMID-DIRNAME].
+
+comment = private share
+# A descriptive comment for the share.
+
+path = /data/private/
+# The absolute path of the directory on the server to be shared.
+
+browseable = yes
+# If 'yes', this share will be visible in the list of available shares.
+# If 'no', users must know the exact share name to connect.
+
+guest ok = no
+# If 'no', access is restricted to authenticated users only. 'yes' would allow guest access.
+# The script sets this to 'no' for secure shares.
+
+writable = yes
+# If 'yes', authenticated users with permission can create and modify files.
+# 'read only = no' is an equivalent setting.
+
+valid users = @samba
+# Specifies which users and/or groups can access the share.
+# - A username like 'myuser' grants access to that user.
+# - A group name prefixed with '@' like '@samba' grants access to all members of that group.
+# The script uses '@$USER' for standard shares or '@<custom_user>' for custom shares.
+
+create mask = 0664
+# Sets the default permissions for NEW FILES created in the share (e.g., rw-rw-r--).
+
+directory mask = 0775
+# Sets the default permissions for NEW DIRECTORIES created in the share (e.g., rwxrwxr-x).
+
+# Note: This script does not set mask parameters, relying on system file permissions instead.
+
+
+
+[Private-Share-Example]
+comment = private share
+path = /data/private/
+browseable = yes
+guest ok = no
+writable = yes
+valid users = @samba 
+create mask = 0664
+force create mode = 0664
+directory mask = 0775
+force directory mode = 0775
+public = yes
+read only = no
+
+SAMBA_CONFIG_EXAMPLE
+
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@############@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@##################@@@@@@@@@@@@@@@@@@@@@@@#######@
+
+function CREATE_SECURE_SAMBA_SHARE_INSTANCE {
+
+	### OPERATION DEFINITIONS BLOCK --- START
+	# Generate a unique identifier for the Samba share by:
+	# 1. Getting the current timestamp in nanoseconds (`date +%s%N`).
+	# 2. Creating a SHA256 hash of the timestamp.
+	# 3. Encoding the hash in Base64 to make it more compact.
+	# 4. Keeping only uppercase letters from the encoded string.
+	# 5. Trimming the result to 12 characters.
+	RANDOM_NUMBA_FINAL=$(date +%s%N | sha256sum | base64 | tr -dc '[:upper:]' | head -c 12)
+	### OPERATION DEFINITIONS BLOCK --- END
+
+	# Prompt the user to input the directory path to share via Samba.
+	# The default input value is set to the current directory ($PWD).
+	INPUT_DIR_PATH=$(whiptail --backtitle "Input Directory to Share" \
+		--title "Samba Share Configuration" \
+		--inputbox "Enter the directory path to share (default: current directory):" 0 0 "$PWD" 3>&1 1>&2 2>&3)
+
+	# Prompt the user to input a password for the Samba share.
+	INPUT_PASSWORD=$(whiptail --backtitle "Input SMB Password" \
+		--title "Samba Share Password" \
+		--inputbox "Enter the password for the Samba share:" 0 0 3>&1 1>&2 2>&3)
+
+	# Validate that the password is not empty; retry up to 4 times if it is.
+	COUNT=0
+	while [ -z "$INPUT_PASSWORD" ] && [ $COUNT -lt 4 ]; do
+		COUNT=$((COUNT + 1))
+		INPUT_PASSWORD=$(whiptail --backtitle "Password Required" \
+			--title "Empty Password Attempt $COUNT/3" \
+			--inputbox "Password cannot be empty. Please enter a valid password:" 0 0 3>&1 1>&2 2>&3)
+	done
+
+	# Exit if no password is provided after 4 attempts.
+	if [ -z "$INPUT_PASSWORD" ]; then
+		echo "Password not provided. Exiting."
+		return 1
+	fi
+
+	# Prompt the user to retype the password for confirmation.
+	RETYPE_PASSWORD=$(whiptail --backtitle "Retype SMB Password" \
+		--title "Confirm Samba Password" \
+		--inputbox "Retype the password for confirmation:" 0 0 3>&1 1>&2 2>&3)
+
+	# Ensure that the retyped password matches the original password.
+	COUNT=0
+	while [ "$INPUT_PASSWORD" != "$RETYPE_PASSWORD" ] && [ $COUNT -lt 4 ]; do
+		COUNT=$((COUNT + 1))
+		INPUT_PASSWORD=$(whiptail --backtitle "Password Mismatch" \
+			--title "Mismatch Attempt $COUNT/3" \
+			--inputbox "Passwords do not match. Re-enter password:" 0 0 3>&1 1>&2 2>&3)
+		RETYPE_PASSWORD=$(whiptail --backtitle "Retype Password" \
+			--title "Confirm Password" \
+			--inputbox "Retype the password:" 0 0 3>&1 1>&2 2>&3)
+	done
+
+	# Exit if passwords still do not match after 4 attempts.
+	if [ "$INPUT_PASSWORD" != "$RETYPE_PASSWORD" ]; then
+		echo "Passwords do not match after multiple attempts. Exiting."
+		return 1
+	fi
+
+	# Extract the base directory name from the provided path.
+	BASENAME_INPUT_DIR_PATH=$(basename "$INPUT_DIR_PATH")
+
+	# Add a new Samba share configuration to `/etc/samba/smb.conf`.
+	cat <<EOF | sudo tee -a /etc/samba/smb.conf
+
+[sambashare-$RANDOM_NUMBA_FINAL-$BASENAME_INPUT_DIR_PATH]
+comment = $INPUT_DIR_PATH
+path = $INPUT_DIR_PATH
+browseable = yes
+guest ok = no
+writable = yes
+public = yes
+read only = no
+valid users = @$USER
+EOF
+
+	# Add the user to Samba with the specified password.
+	sudo smbpasswd -a "$USER" <<EOF
+$INPUT_PASSWORD
+$INPUT_PASSWORD
+EOF
+
+	# Allow Samba traffic through the firewall.
+	sudo ufw allow samba
+
+	# Reload Samba configuration to apply changes without interrupting active sessions.
+	sudo smbcontrol all reload-config
+
+	# Generate an information file and QR code for the Samba share instance.
+	INFO_DIR="/etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL-$BASENAME_INPUT_DIR_PATH"
+	sudo mkdir -p "$INFO_DIR"
+	sudo chmod 755 "$INFO_DIR"
+
+	# Generate a QR code with share details.
+	cat <<EOF | sudo qrencode -o "$INFO_DIR/qrcode.png" -s 40
+SHARE NAME:
+sambashare-$RANDOM_NUMBA_FINAL-$BASENAME_INPUT_DIR_PATH
+
+PATH:
+$INPUT_DIR_PATH
+
+USERNAME:
+$USER
+
+PASSWORD:
+$INPUT_PASSWORD
+EOF
+
+	# Display the QR code image using `fim` (optional). [COMMENTED OUT DUE TO IT CRASHING SSH SESSIONS]
+	# fim "$INFO_DIR/qrcode.png" &
+	# disown
+
+	# Display share details as a QR code in the terminal.
+	cat <<EOF | qrencode -m 2 -t ansiutf8
+SHARE NAME:
+sambashare-$RANDOM_NUMBA_FINAL-$BASENAME_INPUT_DIR_PATH
+
+PATH:
+$INPUT_DIR_PATH
+
+USERNAME:
+$USER
+
+PASSWORD:
+$INPUT_PASSWORD
+EOF
+}
+
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+function CREATE_CUSTOM_SECURE_SAMBA_SHARE_INSTANCE {
+
+	### OPERATIONS DEFINITIONS CODE BLOCK --- START
+	# Generate a random 12-character uppercase string for use in the Samba share name.
+	# This ensures uniqueness even when multiple shares are created.
+	RANDOM_NUMBA_FINAL=$(date +%s%N | sha256sum | base64 | tr -dc '[:upper:]' | head -c 12)
+
+	# Generate a random 6-character uppercase string for the default username.
+	RAONDOMIZED_UPPER_STRING_BY_DATE_NANOSECS=$(date +%s%N | sha256sum | base64 | tr -dc '[:upper:]' | head -c 6)
+
+	# Generate a random 8-character alphanumeric string for the default password.
+	RAONDOMIZED_ALNUM_PASSWD_BY_DATE_NANOSECS=$(date +%s%N | sha256sum | base64 | tr -dc '[:alnum:]' | head -c 8)
+	### OPERATIONS DEFINITIONS CODE BLOCK --- END
+
+	# Prompt the user to specify a directory to share. Default to the current directory ($PWD).
+	INPUT_DIR_PATH=$(whiptail --backtitle "Input Directory to Share" \
+		--title "Samba Share Configuration" \
+		--inputbox "Enter the directory to share (default: current directory):" 0 0 "$PWD" 3>&1 1>&2 2>&3)
+
+	# Prompt the user for a custom username. If empty, use the randomly generated default username.
+	INPUT_USERNAME=$(whiptail --backtitle "Input Custom Username" \
+		--title "Samba Share Configuration" \
+		--inputbox "Enter a custom username (default: autogenerated):" 0 0 "$RAONDOMIZED_UPPER_STRING_BY_DATE_NANOSECS" 3>&1 1>&2 2>&3)
+
+	# Prompt the user for the Samba password. If left empty, use the randomly generated default password.
+	INPUT_PASSWORD=$(whiptail --backtitle "Input SMB Password" \
+		--title "Samba Share Configuration" \
+		--inputbox "Enter a password for the Samba share (default: autogenerated):" 0 0 "$RAONDOMIZED_ALNUM_PASSWD_BY_DATE_NANOSECS" 3>&1 1>&2 2>&3)
+
+	# Ensure that the password is not empty; prompt up to 4 times if it is.
+	COUNT=0
+	while [ -z "$INPUT_PASSWORD" ] && [ $COUNT -lt 4 ]; do
+		COUNT=$((COUNT + 1))
+		INPUT_PASSWORD=$(whiptail --backtitle "Password Required" \
+			--title "Empty Password Attempt $COUNT/3" \
+			--inputbox "Password cannot be empty. Please enter a valid password:" 0 0 3>&1 1>&2 2>&3)
+	done
+	if [ -z "$INPUT_PASSWORD" ]; then
+		echo "Password not provided. Exiting."
+		return 1
+	fi
+
+	# Ask the user to confirm the password by retyping it.
+	RETYPE_PASSWORD=$(whiptail --backtitle "Confirm SMB Password" \
+		--title "Samba Share Configuration" \
+		--inputbox "Retype the password to confirm:" 0 0 "$INPUT_PASSWORD" 3>&1 1>&2 2>&3)
+
+	# Ensure that the retyped password matches the original password; allow up to 4 attempts.
+	COUNT=0
+	while [ "$INPUT_PASSWORD" != "$RETYPE_PASSWORD" ] && [ $COUNT -lt 4 ]; do
+		COUNT=$((COUNT + 1))
+		INPUT_PASSWORD=$(whiptail --backtitle "Password Mismatch" \
+			--title "Retry Password Entry" \
+			--inputbox "Passwords do not match. Re-enter password:" 0 0 3>&1 1>&2 2>&3)
+		RETYPE_PASSWORD=$(whiptail --backtitle "Confirm Password Again" \
+			--title "Retry Password Confirmation" \
+			--inputbox "Retype the password again:" 0 0 3>&1 1>&2 2>&3)
+	done
+	if [ "$INPUT_PASSWORD" != "$RETYPE_PASSWORD" ]; then
+		echo "Passwords do not match after multiple attempts. Exiting."
+		return 1
+	fi
+
+	# Extract the base directory name from the provided path.
+	BASENAME_INPUT_DIR_PATH=$(basename "$INPUT_DIR_PATH")
+
+	# Append a new Samba share configuration to `/etc/samba/smb.conf`.
+	# This creates a share with a unique name that includes the random identifier and custom username.
+	cat <<EOF | sudo tee -a /etc/samba/smb.conf
+
+[sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH]
+comment = $INPUT_DIR_PATH
+path = $INPUT_DIR_PATH
+browseable = yes
+guest ok = no
+writable = yes
+public = yes
+read only = no
+valid users = @$INPUT_USERNAME
+
+EOF
+
+	# Add the user to the system and configure permissions.
+	sudo useradd "$INPUT_USERNAME"
+	sudo setfacl -R -m "u:$INPUT_USERNAME:rwx" "$INPUT_DIR_PATH"
+
+	# Add the user to the Samba password database.
+	sudo smbpasswd -a "$INPUT_USERNAME" <<EOF
+$INPUT_PASSWORD
+$INPUT_PASSWORD
+EOF
+
+	# Configure the firewall to allow Samba traffic and reload the Samba configuration.
+	sudo ufw allow samba
+	sudo smbcontrol all reload-config
+
+	# Store information about the new share in a dedicated directory.
+	SHARE_INFO_DIR="/etc/samba/SHARE-INSTANCES-INFO-FILES/sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH"
+	sudo mkdir -p "$SHARE_INFO_DIR"
+
+	# Generate a QR code with share details.
+	cat <<EOF | sudo qrencode -o "$SHARE_INFO_DIR/qrcode.png" -s 40
+SHARE NAME:
+sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH
+
+PATH:
+$INPUT_DIR_PATH
+
+USERNAME:
+$INPUT_USERNAME
+
+PASSWORD:
+$INPUT_PASSWORD
+EOF
+
+	# Optionally display the QR code. [COMMENTED OUT DUE TO IT CRASHING SSH SESSIONS]
+	# fim "$SHARE_INFO_DIR/qrcode.png" &
+	# disown
+
+	# Show the QR code content in the terminal for convenience.
+	cat <<EOF | qrencode -m 2 -t ansiutf8
+SHARE NAME:
+sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH
+
+PATH:
+$INPUT_DIR_PATH
+
+USERNAME:
+$INPUT_USERNAME
+
+PASSWORD:
+$INPUT_PASSWORD
+EOF
+
+	# Notify the user of the created share details via a message box.
+	whiptail --title "New Samba Share Created" \
+		--msgbox "Samba share created successfully:\n\nName: sambashare-$RANDOM_NUMBA_FINAL-CUSTOMUSERNAMEIS~~~$INPUT_USERNAME~~~~~$BASENAME_INPUT_DIR_PATH\nPath: $INPUT_DIR_PATH\nUsername: $INPUT_USERNAME\nPassword: $INPUT_PASSWORD" 0 0
+}
+
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+
+function SHOW_SAMBA_SHARE_INSTANCES {
+
+	# Count the number of Samba share instances in the Samba configuration file.
+	# `grep sambashare-*` finds all lines containing "sambashare-*".
+	# `wc -l` counts the total number of such lines.
+	SAMBA_SHARE_INSTANCES_COUNT=$(cat /etc/samba/smb.conf | grep sambashare-* | wc -l)
+
+	# Generate a numbered list of Samba share instances from the configuration file.
+	# `cat -n` prefixes each line of output with its line number for easy reference.
+	SAMBA_SHARED_INSTANCES_NUMBERED=$(cat /etc/samba/smb.conf | grep sambashare-* | cat -n)
+
+	# Check if any Samba share instances are available.
+	# If no instances are found (`grep sambashare-*` returns nothing), display a message and exit.
+	if ! cat /etc/samba/smb.conf | grep sambashare-*; then
+		tput setab 28 # Set terminal background color to light blue.
+		tput setaf 15 # Set terminal text color to white.
+		tput bold     # Enable bold text for emphasis.
+		echo -e "No Available (Custom) Samba Share Instances\nNothing To Do Here... Exiting :-)"
+		exit
+	fi
+
+	# Display a menu of available Samba share instances using `whiptail`.
+	# The menu allows the user to select a share instance from the numbered list.
+	# The variables:
+	# - `$SAMBA_SHARE_INSTANCES_COUNT` defines the number of entries to display.
+	# - `$SAMBA_SHARED_INSTANCES_NUMBERED` contains the list of share instances with line numbers.
+	SHOW_SAMBA_SHARE_INSTANCE_SELECTION=$(whiptail --title "Available SambaShare Instances" \
+		--menu "Available SambaShare Instances" 0 0 $SAMBA_SHARE_INSTANCES_COUNT $SAMBA_SHARED_INSTANCES_NUMBERED 3>&1 1>&2 2>&3)
+
+	# Check if the user exited the menu without selecting an instance.
+	# If `SHOW_SAMBA_SHARE_INSTANCE_SELECTION` is empty, exit the script.
+	if [ -z $SHOW_SAMBA_SHARE_INSTANCE_SELECTION ]; then
+		return 1
+	fi
+
+	# Extract the selected instance name based on the user's choice.
+	# Steps:
+	# 1. `grep -w $SHOW_SAMBA_SHARE_INSTANCE_SELECTION`: Find the exact matching line number.
+	# 2. `sed s/$SHOW_SAMBA_SHARE_INSTANCE_SELECTION//1`: Remove the line number from the output.
+	# 3. `tr -d '[:space:]'`: Remove any remaining whitespace from the result.
+	NO_WHITESPACES_RESULT=$(cat /etc/samba/smb.conf | grep -w sambashare-* | cat -n | grep -w $SHOW_SAMBA_SHARE_INSTANCE_SELECTION | sed s/$SHOW_SAMBA_SHARE_INSTANCE_SELECTION//1 | tr -d '[:space:]')
+
+	# Clean the extracted share name by removing unwanted special characters.
+	# Specifically, remove `[` and `]` from the share name.
+	NO_SPECIAL_CHAR_CAT=$(echo $NO_WHITESPACES_RESULT | sed 's/\[//g' | sed 's/\]//g' | head -c 256)
+
+	# Display the QR code associated with the selected Samba share instance.
+	# `fim` is used to open the QR code image in the background.
+	# fim /etc/samba/SHARE-INSTANCES-INFO-FILES/$NO_SPECIAL_CHAR_CAT/qrcode.png &
+	# disown || exit # Disown the background process. Exit if there's an error.
+
+	# Extract share details from the QR code image using `zbarimg`.
+	# `zbarimg` scans the image for QR code content and outputs the details.
+	zbarimg --quiet /etc/samba/SHARE-INSTANCES-INFO-FILES/$NO_SPECIAL_CHAR_CAT/qrcode.png
+
+	# Display the extracted information in a message box using `whiptail`.
+	whiptail --title "Samba Share Instance Information" \
+		--msgbox "$(zbarimg --quiet /etc/samba/SHARE-INSTANCES-INFO-FILES/$NO_SPECIAL_CHAR_CAT/qrcode.png)" 0 0
+
+	# Generate and display the QR code content directly in the terminal.
+	# The output of `zbarimg` is piped to `qrencode` for rendering in ANSI UTF-8 format.
+	zbarimg --quiet /etc/samba/SHARE-INSTANCES-INFO-FILES/$NO_SPECIAL_CHAR_CAT/qrcode.png | qrencode -m 2 -t ansiutf8
+}
+
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+
+# Deletes a Samba share instance, including its configuration, associated user (if custom), and info files.
+function DELETE_SAMBA_SHARE_INSTANCE {
+
+	# --- 1. Find and List Existing Samba Shares ---
+	# Get a clean list of share names from the smb.conf file.
+	# The sed commands remove the enclosing brackets.
+	SAMBA_SHARE_INSTANCES_LIST=$(grep '^\s*\[sambashare-.*\]' /etc/samba/smb.conf | sed 's/\[//g; s/\]//g' | tr -d '\r')
+
+	# Check if any share instances were found.
+	if [ -z "$SAMBA_SHARE_INSTANCES_LIST" ]; then
+		# Use tput to format a colorful "not found" message for the user.
+		tput setab 28
+		tput setaf 15
+		tput bold
+		echo -e "No Available (Custom) Samba Share Instances\nNothing To Do Here... Exiting :-)"
+		exit
+	fi
+
+	# --- 2. User Selection with Checklist ---
+	# Prepare the options for the whiptail checklist.
+	# Each option needs a tag, an item description (we'll use the tag), and an initial state (OFF).
+	CHECKLIST_OPTIONS=()
+	while IFS= read -r SHARE_NAME; do
+		# The first argument is the tag, the second is the item, the third is the status
+		CHECKLIST_OPTIONS+=("$SHARE_NAME" "" "OFF")
+	done <<<"$SAMBA_SHARE_INSTANCES_LIST"
+
+	# Display a checklist with the list of shares and prompt the user to select one or more to delete.
+	# The chosen items are returned as a space-separated, quoted string (e.g., ""share1" "share2"").
+	SHOW_SAMBA_SHARE_INSTANCE_SELECTION=$(whiptail --title "Available SambaShare Instances" \
+		--checklist "Use SPACE to select shares to delete. Press ENTER when done." 0 0 0 \
+		"${CHECKLIST_OPTIONS[@]}" 3>&1 1>&2 2>&3)
+
+	# If the user presses Cancel or Esc, the variable will be empty. Exit gracefully.
+	if [ -z "$SHOW_SAMBA_SHARE_INSTANCE_SELECTION" ]; then
+		echo "USER ABORTED"
+		return 1
+	fi
+
+	# --- 3. Deletion Confirmation and Execution ---
+	# Loop through each selected share name for deletion.
+	# The `tr -d '"'` removes the quotes from the whiptail output.
+	for NO_SPECIAL_CHAR_CAT in $(echo "$SHOW_SAMBA_SHARE_INSTANCE_SELECTION" | tr -d '"'); do
+		# Ask the user for final confirmation before deleting the current share.
+		if (whiptail --title "CONFIRMATION" --yesno "Are you sure you want to remove the share: \n [ $NO_SPECIAL_CHAR_CAT ] ?" 0 0 3>&1 1>&2 2>&3); then
+			echo "Removing $NO_SPECIAL_CHAR_CAT Samba share instance"
+
+			# Check if the share was created with a custom user (identified by "CUSTOMUSERNAMEIS" in the name).
+			if echo "$NO_SPECIAL_CHAR_CAT" | grep -q "CUSTOMUSERNAMEIS"; then
+				# Extract the custom username associated with this share block.
+				# This awk command finds the line with the share name, sets a flag, and then prints the first "valid users" line it finds.
+				CUSTOM_USERNAME_TO_DEL=$(awk "/\[${NO_SPECIAL_CHAR_CAT}\]/{f=1} f && /valid users/{print; f=0}" /etc/samba/smb.conf | cut -d@ -f2 | tr -d '[:space:]')
+
+				if [ -n "$CUSTOM_USERNAME_TO_DEL" ]; then
+					# Delete the custom user from the system.
+					echo "Deleting custom user: $CUSTOM_USERNAME_TO_DEL"
+					sudo killall -u "$CUSTOM_USERNAME_TO_DEL" &>/dev/null
+					sudo userdel -r "$CUSTOM_USERNAME_TO_DEL" &>/dev/null
+					sudo userdel "$CUSTOM_USERNAME_TO_DEL" &>/dev/null || sudo userdel -f "$CUSTOM_USERNAME_TO_DEL" &>/dev/null
+				fi
+			fi
+
+			# Remove the entire share configuration block from smb.conf.
+			# NOTES: This assumes the share block is exactly 9 lines long (the share name + 8 following lines).
+			# This is consistent with how the creation functions in this script work.
+			sudo sed -i "/\[${NO_SPECIAL_CHAR_CAT}\]/,+8d" /etc/samba/smb.conf
+
+			# --- 4. Final Cleanup ---
+			# Remove the directory containing the share's info files (QR code, etc.).
+			echo "Cleaning up info files for $NO_SPECIAL_CHAR_CAT"
+			sudo rm -rf "/etc/samba/SHARE-INSTANCES-INFO-FILES/$NO_SPECIAL_CHAR_CAT"
+
+		else
+			# If the user selects 'No' in the confirmation dialog, skip to the next share.
+			echo "Deletion cancelled for share: $NO_SPECIAL_CHAR_CAT"
+			continue
+		fi
+	done
+
+	# Reload samba config after all deletions
+	sudo smbcontrol all reload-config
+	echo "Samba configuration reloaded."
+}
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+#######========================+++++++++++++++++++++++++++++++++++++++++++++=======================================++++++++++++####################################
+
+# --- Main Menu and Script Entry Point ---
+while true; do
+	# Display the main menu to the user using whiptail.
+	# The user's selection (a number from 1 to 4) is stored in the MAIN_CHOICE variable.
+	MAIN_CHOICE=$(whiptail --backtitle "! Uses Current Directory By Default ! :: INPUT [DIRECTORY_TO_SHARE] PATH" \
+		--title "NETWORKING SAMBA SHARE FILES" --menu "NETWORKING SAMBA SHARE FILES" 0 0 6 \
+		1 "[Create] Secure Samba Share Instance [Password Protected/Default System User]" \
+		2 "[Create] Custom Secure Samba Share Instance [Password Protected/Custom System User]" \
+		3 "[Show] Samba Share Instances" \
+		4 "[! Delete Samba Share Instance !]" \
+		5 "Help / About" \
+		6 "Exit" 3>&1 1>&2 2>&3)
+
+	# --- Main Control Flow ---
+	# This block directs the script to the appropriate function based on the user's choice.
+
+	if [ -z "$MAIN_CHOICE" ]; then
+		# If the user cancels or presses Esc, MAIN_CHOICE will be empty. Exit gracefully.
+		echo "User cancelled. Exiting."
+		exit
+	elif [ "$MAIN_CHOICE" -eq 1 ]; then
+		# Option 1: Create a standard, secure Samba share using the current system user.
+		CREATE_SECURE_SAMBA_SHARE_INSTANCE
+	elif [ "$MAIN_CHOICE" -eq 2 ]; then
+		# Option 2: Create a share with a custom, newly created user for enhanced security.
+		CREATE_CUSTOM_SECURE_SAMBA_SHARE_INSTANCE
+	elif [ "$MAIN_CHOICE" -eq 3 ]; then
+		# Option 3: Display details of existing Samba shares.
+		SHOW_SAMBA_SHARE_INSTANCES
+	elif [ "$MAIN_CHOICE" -eq 4 ]; then
+		# Option 4: Delete an existing Samba share instance.
+		DELETE_SAMBA_SHARE_INSTANCE
+	elif [ "$MAIN_CHOICE" -eq 5 ]; then
+		# Option 5: Display Help / About information.
+		whiptail --title "Help / About" --msgbox "This script provides a TUI to manage Samba shares.\n\nOptions:\n1. Create Secure Share (Default User):\n   - Shares a directory using your current system user account.\n\n2. Create Custom Secure Share (Custom User):\n   - Creates a new, dedicated system user for the share for better isolation.\n\n3. Show Instances:\n   - Lists all shares created by this script and displays a QR code with connection details.\n\n4. Delete Instances:\n   - Allows you to select and delete one or more shares created by this script.\n\nDependencies:\n- samba\n- qrencode\n- zbar-tools" 0 0
+	elif [ "$MAIN_CHOICE" -eq 6 ]; then
+		# Option 6: Exit the script.
+		echo "User selected Exit. Exiting."
+		break
+	else
+		# Handle any unexpected or invalid input.
+		echo "ERROR: Invalid choice. Exiting."
+		break
+	fi
+done
+unset NEWT_COLORS
