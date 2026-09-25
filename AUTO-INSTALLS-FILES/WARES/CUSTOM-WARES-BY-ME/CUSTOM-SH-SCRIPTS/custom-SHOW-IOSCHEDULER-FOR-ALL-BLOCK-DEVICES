@@ -1,0 +1,18 @@
+#!/bin/bash
+echo ""
+echo "::SHOWING ACTIVE & AVAILABLE IO-SCHEDULER FOR ALL /dev BLOCK DEVICES::"
+echo ""
+
+#grep "" /sys/block/*/queue/scheduler | lolcat
+#grep "" /sys/block/*/queue/scheduler | /usr/games/lolcat
+
+tput setab 130
+tput setaf 15
+grep "" /sys/block/*/queue/scheduler
+
+echo ""
+tput sgr0
+echo "::END OF SHOWING ACTIVE & AVAILABLE IO-SCHEDULER FOR ALL /dev BLOCK DEVICES::"
+echo ""
+
+read -r -s -p "press ENTER to continue:"

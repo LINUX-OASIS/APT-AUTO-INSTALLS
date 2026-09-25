@@ -1,0 +1,405 @@
+#!/bin/bash
+
+# Interactive CLI for mounting/unmounting .vdi/.qcow2 images using NBD and whiptail.
+
+# Check for dependencies and load NBD module
+
+for PACKAGE in qemu-utils; do
+	if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+		echo "dependency $PACKAGE is NOT installed .. installing"
+		sudo apt update
+		sudo apt install -y $PACKAGE
+
+		if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+			echo "Posibly didn't install dependency $PACKAGE .. exiting"
+			exit 1
+		fi
+	fi
+done
+
+###=================================================
+# decorative shenanigans
+# ASCII art for the script header
+echo -e "\e[1;35m"
+cat <<"EOF"
+              /^\
+             /   \
+            /     \
+           /.-"""-.\        🧙‍♂️
+           | |   | |   Mounting Diskmage...
+          _|_|___|_|_
+         (  o     o  )
+         |    (_)    |
+         |  ._____.  |
+          \_________/
+EOF
+echo -e "\e[0m"
+
+echo -e "\n ⚡ 🧙‍♂️ 🧙‍♂️ 🧙‍♂️  ✨ Summoning the NBD Spirits... Standby, Discomancer 🧙 ♀️  💾.. ✨🧙‍♀️"
+
+echo -e "\n ⚡ 🧙‍♂️ ⚙️  WIZARD'S NBD MOUNTING SUITE  ⚙️ 🧙‍♀️ ⚡"
+echo -e "Conjuring devices from the void...\n"
+
+###=================================================
+
+#  Load the nbd kernel module with support for up to 64 partitions
+# 🪄 Prepare thy incantation: summon the nbd kernel module
+sudo modprobe nbd max_part=64
+
+function FUN_MOUNT_NBD_DEVICE() {
+
+	#  Load the nbd kernel module with support for up to 64 partitions
+	# 🪄 Prepare thy incantation: summon the nbd kernel module
+	sudo modprobe nbd max_part=64
+
+	# pre-flight for creating the whiptail menu selection of AVAILABLE NBD device SLOT to use
+	# Generate dynamic menu options for NBD devices
+
+	# 1. Data Collection: Gather the status of all NBD devices
+	readarray -t lines < <(lsblk -f -n /dev/nbd* | awk '{print "/dev/"$0}')
+
+	# 2. Data Formatting: Prepare arrays for whiptail.
+	i=1
+	options=()
+	declare -A id_map # Associative array for reliable mapping
+
+	idx=0
+	while [[ $idx -lt ${#lines[@]} ]]; do
+		line="${lines[$idx]}"
+		if [[ -n "$line" ]]; then
+
+			# here we perfon a check to see if the device SLOT is available or not
+			if [[ $(cat /sys/class/block/nbd$((i - 1))/size) -eq 0 ]]; then
+				status="Available :-)"
+			else
+				status="[IN USE]  "
+			fi
+
+			# this is going to be used for the whiptail menu: /dev/nbd0, /dev/nbd1, etc.  line="/dev/nbd$((i-1))"
+			options+=("$line" "$status")
+			id_map[$i]="$line"
+			echo "Processing: $line"
+			((i++))
+		fi
+		((idx++))
+	done
+
+	# 3. Display the whiptail menu: Dynamically set height and show the menu
+
+	local menuheight="${#id_map[@]}"
+	local CHOICE_DEV_NBDX
+
+	# CHOICE_DEV_NBDX should output: /dev/nbd0, /dev/nbd1, etc.  based on the available SLOT devices
+	CHOICE_DEV_NBDX=$(whiptail --title "🧙‍♂️⚙️ NBD Device Selection 🧙‍♂️⚙️" --menu "🔮✨ Select an NBD device to mount ✨🔮: " 0 0 "$menuheight" "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then
+		echo "No device selected or operation cancelled."
+		return 1
+	fi
+
+	# A sanity check to ensure the selected device is valid (Available or In Use)
+	# if in use, we will exit out of the function ( return 1 )
+
+	# CHOICE_DEV_NBDX outputs : /dev/nbd0, /dev/nbd1, etc.  we want only the number, so we extract it
+	# for the  available / not available check
+	CHOICE_NBDX_ONLY=$(echo "$CHOICE_DEV_NBDX" | sed 's+/dev/++g' | tr -d '[:space:]')
+
+	# DEBUG ECHO
+	# echo "DEBUG ECHO: CHOICE_NBDX_ONLY: $CHOICE_NBDX_ONLY"
+
+	# SANITY CHECK !!
+	# Check if the selected device SLOT exists and is available
+	if [[ $(cat "/sys/class/block/${CHOICE_NBDX_ONLY}/size") -ne 0 ]] || [[ ! -f "/sys/class/block/${CHOICE_NBDX_ONLY}/size" ]]; then
+		echo "Selected device is not available or does not exist."
+		return 1
+
+	else
+		echo "Selected device SLOT is valid: $CHOICE_DEV_NBDX"
+		# Proceed with the next steps, such as mounting the disk image
+		# You can call another function here to handle the mounting process
+		# For example, you might have a function called mount_nbd_device
+	fi
+
+	# DEBUG ECHOS
+	echo -e "\n\n\n\n"
+	echo "DEBUG ECHO: CHOICE_DEV_NBDX: $CHOICE_DEV_NBDX"
+
+	# Now here we do the mounting of the disk image to the selected NBD device SLOT
+	# check if theres .VDI or .QCOW2 disk image file in $PWD & make whiptail menu to select one of those, if not, prompt user for the disk image file to mount by path or absolute path
+
+	# find .vdi or .qcow2 disk image files in the current directory
+
+	local disk_images_in_pwd
+	disk_images_in_pwd=$(find . -maxdepth 1 \( -name "*.vdi" -o -name "*.qcow2" \))
+
+	if [ -n "$disk_images_in_pwd" ]; then
+		# If disk images are found, create a DYNAMIC whiptail menu (Using the dynamic for loop pattern & associative arrays (for practice ) this time) to select one
+
+		# Read the disk images into a proper array
+		readarray -t disk_images_array <<<"$disk_images_in_pwd"
+
+		local i=1         # counter, used for the associative array id_map
+		options=()        # Array to hold menu options, the whiptail menu will be created dynamically [tag] [superfluous text]
+		declare -A id_map # Associative array for reliable mapping, will map the index to the filename
+
+		for line in "${disk_images_array[@]}"; do
+			# Extract the filename from the path
+			filename=$(basename "$line")
+			options+=("$filename" "   Mount??: [ $filename ]")
+			echo "Added to options: $filename" # Debug output, remove later if not needed
+			# Map the index to the filename for later retrieval [WHEN WHIPTAIL TAG IS A NUMBER !!! otherwise we  just use to get the exact menu height]
+			id_map[$i]="$line"
+			((i++))
+		done
+
+		local menuheight="${#id_map[@]}"
+
+		disk_image=$(whiptail --title "Select Disk Image" --menu "Select a disk image to mount:" 0 0 "$menuheight" "${options[@]}" 3>&1 1>&2 2>&3)
+
+		if [ $? -ne 0 ]; then
+			echo "No disk image selected or operation cancelled."
+			return 1
+		fi
+
+		# DEBUG ECHO
+		echo "DEBUG ECHO: disk_image: $disk_image"
+
+		# assign absolute path to the disk_image variable
+		disk_image=$(realpath "$disk_image")
+
+		# DEBUG ECHO
+		echo "DEBUG ECHO: disk_image: $disk_image"
+
+		echo "Selected disk image: $disk_image"
+
+	else
+		# If no disk images are found, prompt the user for the path to the disk image
+		disk_image=$(whiptail --inputbox "No .vdi or .qcow2 files found in the current directory. Please enter the path to the disk image:" 0 0 3>&1 1>&2 2>&3)
+
+		if [ $? -ne 0 ]; then
+			echo "No disk image selected or operation cancelled."
+			return 1
+		fi
+
+		# Check if the provided disk image exists
+		if [[ ! -f "$disk_image" ]]; then
+			echo "The specified disk image does not exist: $disk_image"
+			return 1
+		fi
+
+		# check that the disk image is either .vdi or .qcow2
+		#  =~: This is the regular expression matching operator in bash, used within [[ ]].
+		# It checks if the string on the left ($disk_image) matches the regular expression on the right.
+		if [[ ! "$disk_image" =~ \.(vdi|qcow2)$ ]]; then
+			echo "The specified disk image is not a valid .vdi or .qcow2 file: $disk_image"
+			return 1
+		fi
+
+		# DEBUG ECHO
+		echo "DEBUG ECHO: disk_image: $disk_image"
+
+	fi
+
+	# Now we have the disk image and the NBD device SLOT selected, we can proceed to mount the disk image to the NBD device
+	# Mount the selected disk image to the chosen NBD device
+
+	# 🚨 Safe Check for Mounted Device
+	# Before attempting qemu-nbd --connect, Re-check if it's already in use:
+	if [[ $(cat "/sys/class/block/${CHOICE_NBDX_ONLY}/size") -ne 0 ]]; then
+		echo "Device /dev/${CHOICE_NBDX_ONLY} already in use!"
+		return 1
+	fi
+
+	# MOUNTING THE DISK IMAGE TO THE NBD DEVICE
+	sudo qemu-nbd --connect="/dev/${CHOICE_NBDX_ONLY}" "$disk_image"
+
+	if [ $? -eq 0 ]; then
+		echo "Disk image $disk_image mounted successfully to /dev/${CHOICE_NBDX_ONLY}."
+		echo "✨ The arcane binding is complete! $disk_image is now fused to /dev/${CHOICE_NBDX_ONLY} ✨"
+
+	else
+		echo "Failed to mount disk image $disk_image."
+		return 1
+	fi
+
+}
+
+function FUN_UNMOUNT_NBD_DEVICE() {
+	# Generate a dynamic menu of NBD devices that are currently in use.
+
+	# 1. Data Collection: Find all "in-use" NBD devices.
+	local options=()
+	local nbd_devices_in_use=()
+
+	for nbd_sys_path in /sys/class/block/nbd*; do
+		if [[ -e "$nbd_sys_path/size" ]] && [[ $(cat "$nbd_sys_path/size") -ne 0 ]]; then
+			local nbd_name
+			nbd_name=$(basename "$nbd_sys_path") # e.g., nbd0
+			local device_path="/dev/$nbd_name"
+			local disk_image_info="Unknown Image"
+
+			# Try to find the associated disk image path from the process
+			if [[ -e "$nbd_sys_path/pid" ]]; then
+				local pid
+				pid=$(cat "$nbd_sys_path/pid")
+				if [[ -n "$pid" ]]; then
+					# Extract the full command line and then the last argument, which should be the file path
+					local cmd_line
+					cmd_line=$(ps -o cmd= -p "$pid")
+					disk_image_info=$(echo "$cmd_line" | awk '{print $NF}')
+				fi
+			fi
+
+			options+=("$device_path" "Image: $disk_image_info")
+			nbd_devices_in_use+=("$device_path")
+		fi
+	done
+
+	# 2. Check if any devices need unmounting.
+	if [ ${#nbd_devices_in_use[@]} -eq 0 ]; then
+		whiptail --title "✨ Unmount Wizard ✨" --msgbox "✅ No NBD devices are currently mounted. Nothing to do!" 0 0
+		return 0
+	fi
+
+	# 3. Display the whiptail menu.
+	local menuheight="${#nbd_devices_in_use[@]}"
+	local CHOICE_DEV_NBDX
+	CHOICE_DEV_NBDX=$(whiptail --title "🧙‍♂️⚙️ NBD Device Unmounting 🧙‍♂️⚙️" --menu "🔮✨ Select an NBD device to unmount ✨🔮: " 0 0 "$menuheight" "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then
+		echo "No device selected or operation cancelled."
+		return 1
+	fi
+
+	echo "Preparing to unmount and disconnect $CHOICE_DEV_NBDX..."
+
+	# 4. Unmount any filesystems on the device's partitions.
+	# We use lsblk to find mountpoints and sort them in reverse order (-r)
+	# to unmount nested mounts correctly (e.g., /mnt/data/boot before /mnt/data).
+	local mount_points
+	mount_points=$(lsblk -n -o MOUNTPOINT "$CHOICE_DEV_NBDX" | grep -v '^' | sort -r)
+
+	if [ -n "$mount_points" ]; then
+		echo "Found mounted partitions. Attempting to unmount..."
+		for mp in $mount_points; do
+			echo "Unmounting filesystem at $mp..."
+			sudo umount "$mp"
+			if [ $? -ne 0 ]; then
+				echo "❌ ERROR: Failed to unmount $mp."
+				echo "Please unmount it manually and try again."
+				return 1
+			fi
+			echo "✅ Successfully unmounted $mp."
+		done
+	else
+		echo "No mounted filesystems found for $CHOICE_DEV_NBDX. Proceeding to disconnect."
+	fi
+
+	# 5. Disconnect the NBD device.
+	echo "Disconnecting NBD device $CHOICE_DEV_NBDX..."
+	sudo qemu-nbd --disconnect "$CHOICE_DEV_NBDX"
+
+	if [ $? -eq 0 ]; then
+		echo "✨ Arcane binding severed! $CHOICE_DEV_NBDX has been successfully disconnected. ✨"
+	else
+		echo "❌ ERROR: Failed to disconnect NBD device $CHOICE_DEV_NBDX."
+		return 1
+	fi
+
+	return 0
+}
+
+function FUN_ABOUT_PAGE() {
+	whiptail --scrolltext --title "About NBD Mounting Suite" --msgbox "\
+⚡🧙‍♂️⚙️ WIZARD'S NBD MOUNTING SUITE ⚙️🧙‍♀️⚡
+
+Purpose:
+This script provides an interactive TUI to mount and unmount virtual disk
+images (.vdi, .qcow2) as Network Block Devices (NBD) on your system.
+This allows you to access the contents of a virtual machine's disk
+as if it were a physical block device.
+
+How it Works:
+1. It loads the 'nbd' kernel module.
+2. It uses 'qemu-nbd' to connect a disk image to an available /dev/nbdX device.
+3. The script helps you find an available NBD slot and a disk image to mount.
+4. It also provides a menu to safely unmount filesystems from the NBD device
+   and disconnect it.
+
+Usage:
+- Mount: Select an available NBD device and a disk image. The script
+  attaches the image. You can then mount the partitions (e.g., /dev/nbd0p1)
+  using standard Linux commands.
+- Unmount: Select a mounted NBD device. The script will attempt to unmount
+  any filesystems on it before disconnecting the NBD device.
+
+This script requires 'qemu-utils' and will try to install it if missing.
+" 0 0
+}
+
+function FUN_MAIN_MENU() {
+	while true; do
+		CHOICE=$(whiptail --title "⚡🧙‍♂️⚙️ WIZARD'S NBD MOUNTING SUITE ⚙️🧙‍♀️⚡" --menu "What spell would you like to cast?" 0 0 4 \
+			"1" "Mount a Disk Image" \
+			"2" "Unmount a Disk Image" \
+			"3" "About this Script" \
+			"4" "Exit" 3>&1 1>&2 2>&3)
+
+		case $CHOICE in
+		1)
+			FUN_MOUNT_NBD_DEVICE
+			;;
+		2)
+			FUN_UNMOUNT_NBD_DEVICE
+			;;
+		3)
+			FUN_ABOUT_PAGE
+			;;
+		4)
+			echo "Farewell, Discomancer! ✨ 🧙‍♀️ 💾"
+			exit 0
+			;;
+		*)
+			echo "Farewell, Discomancer! ✨ 🧙‍♀️ 💾"
+			exit 0
+			;;
+		esac
+		# Pause to allow user to read output before showing menu again
+		read -n 1 -s -r -p "Press any key to return to the main menu..."
+	done
+}
+
+FUN_MAIN_MENU
+
+#TODO -  Add a confirmation prompt (sanity check) before mounting/unmounting - especially for unmounting to prevent data loss
+#TODO -  Add a cleanup function to ensure NBD devices are properly disconnected
+
+#=================================================================================================================
+#=================================================================================================================
+#=================================================================================================================
+#=================================================================================================================
+#=================================================================================================================
+
+# # 🧹 Cleanup Function prototype
+# # 🔒 Protects you from orphaned NBD devices if the script is interrupted!
+
+# function cleanup_nbd_devices() {
+#     echo "Disconnecting all qemu-nbd devices gracefully..."
+#     for nbd in /dev/nbd*; do
+#         if [[ -e "$nbd" ]] && [[ $(cat "/sys/class/block/$(basename $nbd)/size") -ne 0 ]]; then
+#             echo "Disconnecting $nbd"
+#             sudo qemu-nbd --disconnect "$nbd"
+#         fi
+#     done
+# }
+# trap cleanup_nbd_devices EXIT
+
+# # 💔 Add --disconnect Option
+# # Make it a full tool! Add a CLI flag:
+
+# if [[ "$1" == "--disconnect" ]]; then
+#     cleanup_nbd_devices
+#     exit 0
+# fi
+
+#==============

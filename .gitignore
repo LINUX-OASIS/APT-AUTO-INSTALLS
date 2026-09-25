@@ -1,0 +1,37 @@
+# =============================================================
+# AUTO-INSTALLS-FILES – Keep these folders but ignore all contents
+# =============================================================
+
+# 1. GAMING – keep the folder + subfolders, ignore everything else
+AUTO-INSTALLS-FILES/GAMING/*
+
+# Keep the folder itself alive with a placeholder
+!AUTO-INSTALLS-FILES/GAMING/.gitkeep
+
+# Keep the RETROARCH-CORES subfolder (empty in repo)
+!AUTO-INSTALLS-FILES/GAMING/RETROARCH-CORES/
+AUTO-INSTALLS-FILES/GAMING/RETROARCH-CORES/*
+!AUTO-INSTALLS-FILES/GAMING/RETROARCH-CORES/.gitkeep
+
+
+# 2. HEADLESS-WIFI-IMPORT – keep the folder, ignore everything inside
+AUTO-INSTALLS-FILES/HEADLESS-WIFI-IMPORT/*
+!AUTO-INSTALLS-FILES/HEADLESS-WIFI-IMPORT/.gitkeep
+
+# 3. ANDOID ADB AUTH KEYS – keep the folder, ignore everything inside
+AUTO-INSTALLS-FILES/ANDROID-ADB-AUTH-KEYS/*
+!AUTO-INSTALLS-FILES/ANDROID-ADB-AUTH-KEYS/.gitkeep
+
+# 4. CUSTOM-WAKE-ON-LAN-TARGETS – keep the folder, ignore everything inside
+AUTO-INSTALLS-FILES/CUSTOM-WAKE-ON-LAN-TARGETS/*
+!AUTO-INSTALLS-FILES/CUSTOM-WAKE-ON-LAN-TARGETS/.gitkeep
+
+# 5. ignore (exclude) the .vscode directory - in case if it gets created or added by accident by some vscode extension or keybinding
+# The .vscode directory is typically used by (VSCode) to store workspace-specific settings and configurations.
+# This directory helps customize your development environment on a per-project basis
+.vscode/
+
+# (Add as many as you need – just copy-paste the same 2–3 lines)
+# Example for future folders:
+# AUTO-INSTALLS-FILES/ANOTHER-EMPTY-FOLDER/*
+# !AUTO-INSTALLS-FILES/ANOTHER-EMPTY-FOLDER/.gitkeep

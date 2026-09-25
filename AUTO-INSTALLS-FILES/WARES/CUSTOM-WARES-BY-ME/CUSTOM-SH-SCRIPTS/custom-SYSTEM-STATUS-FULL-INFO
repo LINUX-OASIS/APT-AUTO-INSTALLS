@@ -1,0 +1,81 @@
+#!/bin/bash
+
+# ANSI color codes
+_RESET="\e[0m"
+_BOLD="\e[1m"
+_RED="\e[31m"
+_GREEN="\e[32m"
+_YELLOW="\e[33m"
+_BLUE="\e[34m"
+_MAGENTA="\e[35m"
+_CYAN="\e[36m"
+_WHITE="\e[37m"
+_BG_BLUE="\e[44m"
+_BG_GREEN="\e[42m"
+_BG_RED="\e[41m"
+
+echo -e "\n\n"
+echo -e "${_BG_BLUE}${_BOLD}${_WHITE}\t\tSYSTEM STATUS FULL INFO ${_RESET}"
+
+DOTTED_SEPERATOR() {
+	echo -e "${_MAGENTA}\n .............................................................................${_RESET}"
+}
+
+echo -e "${_BLUE}\n ===============================================================================${_RESET}"
+DOTTED_SEPERATOR #################################################################################
+
+echo -e "${_BOLD}${_CYAN} IO-SCHEDULER INFO ::${_RESET}"
+
+echo -e "${_BOLD}${_YELLOW} Running ::${_RESET} ${_BLUE}grep \"\" /sys/block/*/queue/scheduler${_RESET}"
+echo ""
+echo -e "${_GREEN}"
+grep "" /sys/block/*/queue/scheduler
+echo -e "${_RESET}"
+
+DOTTED_SEPERATOR #################################################################################
+
+echo -e "${_BOLD}${_CYAN} powerprofilesctl get INFO ::${_RESET}" # Added INFO for consistency
+echo -e "${_BOLD}${_YELLOW} RUNNING ::${_RESET} ${_BLUE}powerprofilesctl get${_RESET} \n"
+
+echo -e "${_GREEN}"
+powerprofilesctl get
+echo -e "${_RESET}"
+
+DOTTED_SEPERATOR #################################################################################
+
+echo -e "${_BOLD}${_CYAN} CPU SCALING GOVERNOR INFO ::${_RESET}"
+echo -e "${_BOLD}${_YELLOW} Running ::${_RESET} ${_BLUE}cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor${_RESET} \n"
+echo -e "${_GREEN}"
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+echo -e "${_RESET}"
+
+DOTTED_SEPERATOR #################################################################################
+
+echo -e "${_BOLD}${_CYAN} CSTATE INFO ::${_RESET}"
+echo -e "${_BOLD}${_YELLOW} Running ::${_RESET} ${_BLUE}cat /sys/module/intel_idle/parameters/max_cstate${_RESET}"
+echo -e "${_GREEN}"
+cat /sys/module/intel_idle/parameters/max_cstate
+echo -e "${_RESET}"
+
+echo -e "${_BOLD}${_YELLOW} MAX CSTATE ::${_RESET} ${_GREEN}$(cat /sys/module/intel_idle/parameters/max_cstate)${_RESET}"
+
+DOTTED_SEPERATOR #################################################################################
+
+echo -e "${_BOLD}${_CYAN} KERNEL PARAMETERS INFO - VIA /proc/cmdline ::${_RESET}"
+echo -e "${_BOLD}${_YELLOW} Running ::${_RESET} ${_BLUE}cat /proc/cmdline${_RESET}"
+echo -e "${_GREEN}"
+cat /proc/cmdline
+echo -e "${_RESET}"
+
+DOTTED_SEPERATOR #################################################################################
+
+echo -e "${_BOLD}${_CYAN} THERMALD SERVICE INFO - VIA systemctl is-active thermald.service ::${_RESET}"
+echo -e "${_BOLD}${_YELLOW} Running ::${_RESET} ${_BLUE}systemctl is-active thermald.service${_RESET}"
+echo -e "${_GREEN}"
+systemctl is-active thermald.service
+echo -e "${_RESET}"
+
+echo -e "${_BLUE}\n ===============================================================================${_RESET}"
+
+read -r -s -p "Press ENTER to continue..."
+clear

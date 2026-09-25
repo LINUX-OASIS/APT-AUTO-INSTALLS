@@ -1,0 +1,69 @@
+#!/bin/bash
+
+printf "%s\n" "HELP-/-ABOUT" >/tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp
+find /dev -name "*nvme[0-9][a-z][0-9]" >>/tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp
+find /dev -name "*sd[a-z]" >>/tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp
+find /dev -name "*mmcblk[0-9]" >>/tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp
+
+NL_PARTITION_LIST_MAJOR_NUM=$(cat -n /tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp)
+PART_ITEMS_COUNT=$(cat /tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp | wc -l)
+
+# Check if any devices were found
+if [ "$PART_ITEMS_COUNT" -eq 1 ]; then
+	whiptail --title "Error" --msgbox "No suitable storage devices found (nvme, sd, mmcblk)." 0 0
+	exit 1
+fi
+
+SELECTION=$(whiptail --title "SELECT STORAGE DEVICE [TO FIX PARTITION ORDER - FDISK]" --menu "Select STORAGE DEVICE" 0 0 $PART_ITEMS_COUNT $NL_PARTITION_LIST_MAJOR_NUM 3>&1 1>&2 2>&3)
+
+if [ -z $SELECTION ]; then
+	exit
+fi
+
+CHOICE_DEVICE=$(cat -n /tmp/custom-FIX-PARTITION-ORDER-PARTITIONS.tmp | grep -w "$SELECTION" | head -1 | sed "s/$SELECTION//1" | tr -d '[:space:]')
+
+if [ "$CHOICE_DEVICE" == "HELP-/-ABOUT" ]; then
+	show_help() {
+		cat <<'EOF'
+fdisk-fix-partition-order: A script to fix the partition table order on a disk.
+
+DESCRIPTION:
+  This script uses the 'fdisk' utility to correct the order of partitions in a disk's partition table. This is useful in situations where partitions were not created sequentially (e.g., sda1, sda3, sda2). The 'fix' command in fdisk reorders the entries to be sequential (e.g., sda1, sda2, sda3).
+
+USAGE:
+  sudo ./custom-FDISK-FIX-PARTITION-ORDER
+
+WARNING:
+  - This operation directly modifies the partition table of a storage device.
+  - While generally safe, there is always a risk of data loss when modifying partition tables.
+  - IT IS STRONGLY RECOMMENDED TO BACK UP ALL IMPORTANT DATA before proceeding.
+  - The script must be run with root privileges (sudo).
+
+EXECUTION FLOW:
+  1. The script detects available storage devices (NVMe, SATA, MMC).
+  2. It presents a menu for you to select the target device.
+  3. It asks for a final confirmation before running the fdisk command.
+  4. If confirmed, it automatically sends the "fix partition order" command sequence to fdisk.
+EOF
+	}
+	show_help
+	echo -e "\n"
+	read -r -s -p "Press ENTER to exit..."
+	exit 0
+fi
+
+if whiptail --title ":: Sanity Check ::" --yesno " [fdisk] fix partition order Will run on DEVICE :: [ $CHOICE_DEVICE ] :: Proceed ?" 0 0 3>&1 1>&2 2>&3; then
+
+	sudo fdisk $CHOICE_DEVICE <<EOF
+x
+f
+r
+w
+q
+EOF
+
+else
+	echo "USER ABORTED"
+	exit
+
+fi

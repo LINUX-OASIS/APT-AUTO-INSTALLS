@@ -1,0 +1,224 @@
+#!/bin/bash
+
+# ----------------------------
+# Config
+# ----------------------------
+LOG_FILE="$HOME/latest_versions.log"
+DOWNLOAD_DIR="$HOME/LATEST_GITHUB_FETCHES_DOWNLOADS"
+
+if [ ! -d "$DOWNLOAD_DIR" ]; then
+	mkdir -p "$DOWNLOAD_DIR"
+fi
+
+# ----------------------------
+# Helper Functions
+# ----------------------------
+
+# Fetch latest GitHub release tag via HTML scraping
+get_latest_github_tag_html() {
+	local repo="$1"
+	curl -sL "https://github.com/${repo}/releases" |
+		grep -m1 -oE "/${repo}/releases/tag/[^\"]+" |
+		sed "s|/${repo}/releases/tag/||" |
+		tr -d '[:space:]'
+}
+
+# Fetch latest GitHub release tag via API
+get_latest_github_tag_api() {
+	local repo="$1"
+	curl -sL "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.tag_name'
+}
+
+# Fetch latest GNOME Extension version & ZIP URL
+get_latest_gnome_extension() {
+	local ext_uuid="$1"
+	local gnome_ver="$2"
+
+	local ext_info
+	ext_info=$(curl -s "https://extensions.gnome.org/extension-info/?uuid=${ext_uuid}&shell_version=${gnome_ver}")
+	local latest_version
+	latest_version=$(echo "$ext_info" | jq -r '.version')
+
+	if [ -z "$latest_version" ] || [ "$latest_version" == "null" ]; then
+		echo "Could not fetch latest version for $ext_uuid and GNOME $gnome_ver" >&2
+		return 1
+	fi
+
+	local download_url="https://extensions.gnome.org/api/v1/extensions/${ext_uuid}/versions/${latest_version}/?format=zip"
+
+	echo "Latest GNOME Extension version: $latest_version"
+	echo "Direct Download URL: $download_url"
+}
+
+# Download GNOME Extension ZIP
+download_gnome_extension() {
+	local ext_uuid="$1"
+	local gnome_ver="$2"
+
+	local info
+	info=$(get_latest_gnome_extension "$ext_uuid" "$gnome_ver")
+	local latest_version
+	latest_version=$(echo "$info" | grep "Latest GNOME Extension version:" | awk '{print $5}')
+	local download_url
+	download_url=$(echo "$info" | grep "Direct Download URL:" | awk '{print $4}')
+
+	local filename="${DOWNLOAD_DIR}/${ext_uuid}.v${latest_version}.zip"
+	curl -L -o "$filename" "$download_url"
+	echo "Downloaded $filename"
+	echo "$info" # also output info
+}
+
+FUN_SHOW_HELP() {
+	local help_text="
+📘 Dynamic Latest Version Fetcher — Help / About
+────────────────────────────────────────────────────────────
+
+🔹 PURPOSE
+This script is a *reference and testing tool* designed to:
+  - Demonstrate how to dynamically fetch the **latest GitHub release tags**
+    using both HTML scraping and the GitHub API.
+  - Demonstrate how to dynamically fetch the **latest GNOME Extension versions**
+    and construct direct download URLs from extensions.gnome.org.
+  - Confirm that the logic works correctly before reusing it in other scripts.
+
+You can safely copy any function (like get_latest_github_tag_html, 
+get_latest_github_tag_api, or get_latest_gnome_extension) into your own 
+Bash projects that need to auto-detect or fetch the newest releases.
+
+────────────────────────────────────────────────────────────
+🔹 MAIN FEATURES
+
+1️⃣ *Latest GitHub release tag (HTML scrape method)*  
+   - Uses curl + grep to extract the latest tag directly from the
+     GitHub Releases page HTML.  
+   - Example use: when you don’t want to depend on the GitHub API.
+
+2️⃣ *Latest GitHub release tag (API method)*  
+   - Uses GitHub’s JSON API via curl + jq to retrieve the tag_name.
+   - Example output: v3.3.3
+   - Useful when you need structured JSON data.
+
+3️⃣ *GNOME Extension fetcher*  
+   - Retrieves the latest GNOME Shell Extension version for a given UUID
+     and GNOME Shell major version.
+   - Also shows the direct ZIP download URL.
+
+4️⃣ *Logging and Download modes*  
+   - Demonstrate how to log version fetch results to a file.
+   - Demonstrate how to automatically download the latest GNOME extension ZIP.
+
+────────────────────────────────────────────────────────────
+🔹 FILE LOCATIONS
+
+📂 Logs saved to:      $LOG_FILE  
+📂 Downloads saved to: $DOWNLOAD_DIR
+
+────────────────────────────────────────────────────────────
+🔹 EXAMPLES
+
+• Fetch latest GitHub release tag for scrcpy:
+  → https://github.com/Genymobile/scrcpy/releases
+  Expected result: v3.3.3 (or newer)
+
+• Fetch GNOME extension info:
+  UUID: blur-my-shell@aunetx  
+  GNOME version: 46
+
+────────────────────────────────────────────────────────────
+🔹 TIP
+
+You can copy functions like:
+  get_latest_github_tag_html  
+  get_latest_github_tag_api  
+  get_latest_gnome_extension  
+
+...into your own automation scripts to dynamically detect the newest versions 
+of software, packages, or GNOME extensions before installation or packaging.
+
+────────────────────────────────────────────────────────────
+👨‍💻 Author: Linux Oasis  
+🧭 Purpose: Dynamic version-fetching reference and verification tool  
+💾 License: Free to use, modify, and embed in your scripts
+────────────────────────────────────────────────────────────
+"
+	whiptail --scrolltext --title "Help / About this Script" --msgbox "$help_text" 0 0
+}
+
+# ----------------------------
+# Main Loop
+# ----------------------------
+while true; do
+	CHOICE=$(whiptail --title "Dynamic Latest Version Fetcher" \
+		--menu "Choose what you want to fetch:" 0 0 7 \
+		1 "Latest GitHub release tag (vN..N)" \
+		2 "Latest [extensions.gnome.org] GNOME Extension version & ZIP" \
+		3 "Latest GitHub release tag (vN..N) [with logging]" \
+		4 "Latest [extensions.gnome.org] GNOME Extension version & ZIP [with logging]" \
+		5 "Latest [extensions.gnome.org] GNOME Extension version & ZIP [with download]" \
+		6 "Help / About this script" \
+		7 "Exit" \
+		3>&1 1>&2 2>&3)
+
+	exitstatus=$?
+	[ $exitstatus != 0 ] && break
+
+	case "$CHOICE" in
+	1)
+		REPO=$(whiptail --inputbox "Enter GitHub repo (owner/repo): \n E.G. charmbracelet/gum" 10 60 "" 3>&1 1>&2 2>&3)
+		[ $? != 0 ] && continue
+		TAG_HTML=$(get_latest_github_tag_html "$REPO")
+		TAG_API=$(get_latest_github_tag_api "$REPO")
+		OUTPUT="DYNAMIC LATEST VERSION TAG - [HTML]  scrape method: $TAG_HTML
+DYNAMIC LATEST VERSION TAG - [API] scrape method: $TAG_API"
+		echo -e "$OUTPUT"
+		whiptail --title "GitHub Release Tags" --msgbox "$OUTPUT" 12 70
+		;;
+	2)
+		EXT_UUID=$(whiptail --inputbox "Enter GNOME Extension UUID: \n E.G. my-extension@example.com" 10 60 "" 3>&1 1>&2 2>&3)
+		[ $? != 0 ] && continue
+		GNOME_VER=$(whiptail --inputbox "Enter GNOME major version:" 10 60 "" 3>&1 1>&2 2>&3)
+		[ $? != 0 ] && continue
+		OUTPUT=$(get_latest_gnome_extension "$EXT_UUID" "$GNOME_VER")
+		echo -e "$OUTPUT"
+		whiptail --title "GNOME Extension Info" --msgbox "$OUTPUT" 12 70
+		;;
+	3)
+		REPO=$(whiptail --inputbox "Enter GitHub repo (owner/repo): \n E.G. charmbracelet/gum" 10 60 "" 3>&1 1>&2 2>&3)
+		[ $? != 0 ] && continue
+		TAG_HTML=$(get_latest_github_tag_html "$REPO")
+		TAG_API=$(get_latest_github_tag_api "$REPO")
+		OUTPUT="DYNAMIC LATEST VERSION TAG - [$REPO] - [HTML]  scrape method: $TAG_HTML
+DYNAMIC LATEST VERSION TAG - [$REPO] - [API] scrape method: $TAG_API"
+		echo -e "$OUTPUT" | tee -a "$LOG_FILE"
+		whiptail --title "GitHub Release Tags [Logged]" --msgbox "$OUTPUT" 12 70
+		;;
+	4)
+		EXT_UUID=$(whiptail --inputbox "Enter GNOME Extension UUID: \n E.G. my-extension@example.com" 10 60 "" 3>&1 1>&2 2>&3)
+		[ $? != 0 ] && continue
+		GNOME_VER=$(whiptail --inputbox "Enter GNOME major version:" 10 60 "" 3>&1 1>&2 2>&3)
+		[ $? != 0 ] && continue
+		OUTPUT=$(get_latest_gnome_extension "$EXT_UUID" "$GNOME_VER")
+		echo -e "$OUTPUT" | tee -a "$LOG_FILE"
+		whiptail --title "GNOME Extension Info [Logged]" --msgbox "$OUTPUT" 12 70
+		;;
+	5)
+		EXT_UUID=$(whiptail --inputbox "Enter GNOME Extension UUID: \n E.G. my-extension@example.com" 10 60 "" 3>&1 1>&2 2>&3)
+		[ $? != 0 ] && continue
+		GNOME_VER=$(whiptail --inputbox "Enter GNOME major version:" 10 60 "" 3>&1 1>&2 2>&3)
+		[ $? != 0 ] && continue
+		OUTPUT=$(download_gnome_extension "$EXT_UUID" "$GNOME_VER")
+		echo -e "$OUTPUT" | tee -a "$LOG_FILE"
+		whiptail --title "GNOME Extension Info [Downloaded]" --msgbox "$OUTPUT" 12 70
+		;;
+	6)
+		FUN_SHOW_HELP
+		;;
+	7)
+		echo "Exiting program. Goodbye!"
+		break
+		;;
+	*)
+		echo "Invalid choice."
+		;;
+	esac
+done

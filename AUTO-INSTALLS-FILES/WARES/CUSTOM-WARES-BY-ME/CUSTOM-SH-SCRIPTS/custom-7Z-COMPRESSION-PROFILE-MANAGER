@@ -1,0 +1,1113 @@
+#!/usr/bin/env bash
+###############################################################################
+# custom-7Z-COMPRESSION-PROFILE-MANAGER – Whiptail menu-driven 7z compression profile manager
+#
+# Profiles are saved as simple key=value files under:
+#   ~/.config/7z-profiler/profiles/<profile-name>.conf
+#
+# Each profile stores:
+#   SOURCE         – absolute path to the source file/directory
+#   DESTINATION    – absolute path to the destination .7z file
+#   COMPRESS_LEVEL – 1‑9, default 9 (ultra)
+#   METHOD         – lzma2 | lzma | ppmd | bzip2 | deflate
+#   FAST_BYTES     – 5‑273, default 273
+#   DICT_SIZE      – e.g. 768M, 512M, 256M, 128M, 64M
+#   THREADS        – e.g. 2, 4, 8, or empty for all available threads (-mmt)
+#   SOLID          – on | off
+#   EXTRA_ARGS     – any extra 7z flags the user wants
+#
+# Dedicated Encryption Option:
+#   Supports AES-256 password encryption (-pPASSWORD) and
+#   header encryption (-mhe=on) to hide filenames.
+#
+# Dialog sizing: Uses whiptail auto dynamic sizing (0 0) across all dialogs.
+# Dependencies: bash ≥4, whiptail, 7z (p7zip-full)
+###############################################################################
+
+set -u # catch unset variables; do NOT use -e (whiptail returns 1 on Cancel)
+
+# ── Whiptail colour theme ────────────────────────────────────────────────────
+export NEWT_COLORS='
+  root=white,black
+  border=cyan,black
+  window=white,black
+  shadow=black,gray
+  title=cyan,black
+  button=black,cyan
+  actbutton=black,white
+  checkbox=white,black
+  actcheckbox=black,cyan
+  entry=black,yellow
+  label=white,black
+  listbox=white,black
+  actlistbox=black,cyan
+  textbox=white,black
+  acttextbox=black,cyan
+  helpline=cyan,black
+  roottext=cyan,black
+  emptyscale=black,black
+  fullscale=black,cyan
+  disentry=gray,black
+  compactbutton=white,black
+  actsellistbox=white,blue
+  sellistbox=cyan,black
+'
+
+CONF_DIR="${HOME}/.config/7z-profiler"
+PROFILE_DIR="${CONF_DIR}/profiles"
+LOG_DIR="${CONF_DIR}/logs"
+mkdir -p "$PROFILE_DIR" "$LOG_DIR"
+
+# ── Defaults for a new profile ──────────────────────────────────────────────
+DEF_LEVEL=9
+DEF_METHOD="lzma2"
+DEF_FB=273
+DEF_DICT="256M"
+DEF_THREADS="" # Empty = all available threads
+DEF_SOLID="on"
+DEF_EXTRA=""
+
+# ── Runtime encryption state (never saved to plaintext config files) ────────
+PASSWORD=""
+HEADER_ENCRYPT=""
+
+###############################################################################
+# Utility functions (using dynamic 0 0 resizing)
+###############################################################################
+
+msg_box() {
+	whiptail --title "$1" --msgbox "$2" 0 0
+}
+
+yesno_box() {
+	whiptail --title "$1" --yesno "$2" 0 0
+}
+
+input_box() {
+	# $1=title  $2=prompt  $3=default
+	whiptail --title "$1" --inputbox "$2" 0 50 "$3" 3>&1 1>&2 2>&3
+}
+
+password_box() {
+	# $1=title  $2=prompt
+	whiptail --title "$1" --passwordbox "$2" 0 0 3>&1 1>&2 2>&3
+}
+
+# Prompt for password with option to show or mask characters
+prompt_password() {
+	local mode
+	mode=$(whiptail --title "Password Entry Mode" --menu \
+		"Choose how to enter your encryption password:\n(Visible mode is recommended in the dark to spot typos)" \
+		0 0 0 \
+		"1" "👁️   Visible (show characters as you type – easy to spot typos)" \
+		"2" "🔒  Masked (hidden with asterisks)" \
+		3>&1 1>&2 2>&3) || return 1
+
+	local p1 p2
+	while true; do
+		case "$mode" in
+		1)
+			p1=$(input_box "Encryption Password" "Enter password (visible as you type):" "") || return 1
+			if [[ -z "$p1" ]]; then
+				msg_box "Error" "Password cannot be empty."
+				continue
+			fi
+			if yesno_box "Verify Password" "The password you entered is:\n\n    [ ${p1} ]\n\nIs this correct?"; then
+				PASSWORD="$p1"
+				return 0
+			fi
+			;;
+		2)
+			p1=$(password_box "Encryption Password" "Enter password (masked):") || return 1
+			if [[ -z "$p1" ]]; then
+				msg_box "Error" "Password cannot be empty."
+				continue
+			fi
+			p2=$(password_box "Confirm Password" "Re-enter password to confirm:") || return 1
+			if [[ "$p1" != "$p2" ]]; then
+				msg_box "Mismatch" "Passwords do not match. Please try again."
+				continue
+			fi
+			if whiptail --defaultno --title "Reveal Password?" --yesno "Passwords match!\n\nWould you like to reveal the password to double-check before proceeding?" 0 0; then
+				if ! yesno_box "Verify Password" "Revealed password:\n\n    [ ${p1} ]\n\nIs this correct?"; then
+					continue
+				fi
+			fi
+			PASSWORD="$p1"
+			return 0
+			;;
+		esac
+	done
+}
+
+# List profile names (without .conf extension)
+list_profiles() {
+	local f
+	for f in "$PROFILE_DIR"/*.conf; do
+		[[ -f "$f" ]] || continue
+		basename "$f" .conf
+	done
+}
+
+# Load a profile into current shell vars
+load_profile() {
+	local pfile="$PROFILE_DIR/$1.conf"
+	[[ -f "$pfile" ]] || return 1
+	# shellcheck source=/dev/null
+	source "$pfile"
+}
+
+# Save current vars as a profile
+save_profile() {
+	local pfile="$PROFILE_DIR/$1.conf"
+	cat >"$pfile" <<EOF
+# 7z-profiler profile: $1
+# Created/updated: $(date '+%Y-%m-%d %H:%M:%S')
+SOURCE="${SOURCE}"
+DESTINATION="${DESTINATION}"
+COMPRESS_LEVEL="${COMPRESS_LEVEL}"
+METHOD="${METHOD}"
+FAST_BYTES="${FAST_BYTES}"
+DICT_SIZE="${DICT_SIZE}"
+THREADS="${THREADS}"
+SOLID="${SOLID}"
+EXTRA_ARGS="${EXTRA_ARGS}"
+EOF
+}
+
+# Delete a profile
+delete_profile() {
+	local pfile="$PROFILE_DIR/$1.conf"
+	rm -f "$pfile"
+}
+
+###############################################################################
+# Profile editor – walks the user through each field
+###############################################################################
+
+edit_profile_fields() {
+	# Expects profile vars already loaded into env
+
+	# ── Source path ───────────────────────────────────────────────────────
+	local val
+	val=$(input_box "Source File / Directory" \
+		"Full path to the file or directory to compress:" \
+		"$SOURCE") || return 1
+	SOURCE="$val"
+
+	# ── Destination path ─────────────────────────────────────────────────
+	val=$(input_box "Destination Archive" \
+		"Full path for the output .7z file:" \
+		"$DESTINATION") || return 1
+	DESTINATION="$val"
+
+	# ── Compression level ────────────────────────────────────────────────
+	val=$(whiptail --title "Compression Level [-mx=N]" --menu \
+		"Select compression level (currently: ${COMPRESS_LEVEL}):" \
+		0 0 0 \
+		"1" "Fastest" \
+		"3" "Fast" \
+		"5" "Normal" \
+		"7" "Maximum" \
+		"9" "Ultra" \
+		3>&1 1>&2 2>&3) || return 1
+	COMPRESS_LEVEL="$val"
+
+	# ── Method ───────────────────────────────────────────────────────────
+	val=$(whiptail --title "Compression Method [-m0=METHOD]" --menu \
+		"Select method (currently: ${METHOD}):" \
+		0 0 0 \
+		"lzma2" "LZMA2 (best ratio, multi-thread)" \
+		"lzma" "LZMA  (classic, single-thread)" \
+		"ppmd" "PPMd  (good for text)" \
+		"bzip2" "BZip2" \
+		"deflate" "Deflate (zip-compatible)" \
+		3>&1 1>&2 2>&3) || return 1
+	METHOD="$val"
+
+	# ── Fast bytes ───────────────────────────────────────────────────────
+	val=$(input_box "Fast Bytes [-mfb=N]" \
+		"Number of fast bytes (5–273). Higher = better ratio, slower.\nCurrently: ${FAST_BYTES}" \
+		"$FAST_BYTES") || return 1
+	# basic validation
+	if [[ "$val" =~ ^[0-9]+$ ]] && ((val >= 5 && val <= 273)); then
+		FAST_BYTES="$val"
+	else
+		msg_box "Warning" "Invalid value '$val'. Keeping ${FAST_BYTES}."
+	fi
+
+	# ── Dictionary size ──────────────────────────────────────────────────
+	val=$(whiptail --title "Dictionary Size [-md=SIZE]" --menu \
+		"Select dictionary size (currently: ${DICT_SIZE}):\n\n⚠️  Compression uses ~12× dict size in RAM!\nCheck 'free -h' before picking a large value." \
+		0 0 0 \
+		"64M" "64 MB   (~768 MB RAM)  – safe for 4GB+" \
+		"128M" "128 MB  (~1.5 GB RAM)  – safe for 4GB+" \
+		"256M" "256 MB  (~3 GB RAM)    – safe for 8GB" \
+		"512M" "512 MB  (~6 GB RAM)    – tight on 8GB" \
+		"768M" "768 MB  (~9 GB RAM)    – needs 16GB+" \
+		"1024M" "1 GB    (~12 GB RAM)   – needs 16GB+" \
+		"1536M" "1.5 GB  (~18 GB RAM)   – needs 32GB+" \
+		3>&1 1>&2 2>&3) || return 1
+	DICT_SIZE="$val"
+
+	# ── CPU Threads (-mmt) ───────────────────────────────────────────────
+	local nproc_info=""
+	if command -v nproc &>/dev/null; then
+		nproc_info=" (system detected $(nproc) CPU threads)"
+	fi
+	val=$(input_box "CPU Threads [-mmt=N]" \
+		"Number of threads to use (e.g. 2, 4, 8)${nproc_info}.\nLeave EMPTY to use all available threads (default):\nCurrently: ${THREADS:-all}" \
+		"$THREADS") || return 1
+	# Sanitize any leading -mmt= or spaces
+	val="${val#-mmt=}"
+	val="${val#-mmt}"
+	val="${val#=}"
+	val="${val// /}"
+	THREADS="$val"
+
+	# ── Solid archive ────────────────────────────────────────────────────
+	if yesno_box "Solid Archive [-ms=MODE]" "Enable solid archive mode? (Currently: ${SOLID})\n\nSolid mode improves compression but requires decompressing all preceding data to extract a single file."; then
+		SOLID="on"
+	else
+		SOLID="off"
+	fi
+
+	# ── Extra args ───────────────────────────────────────────────────────
+	val=$(input_box "Extra 7z Arguments" \
+		"Any additional 7z flags (leave empty for none):\nCurrently: ${EXTRA_ARGS}" \
+		"$EXTRA_ARGS") || return 1
+	EXTRA_ARGS="$val"
+}
+
+###############################################################################
+# Build display command (with password masked for security)
+###############################################################################
+
+build_display_cmd() {
+	local mask_pass="${1:-yes}"
+	local cmd="7z a -t7z"
+	cmd+=" -mx=${COMPRESS_LEVEL}"
+	cmd+=" -m0=${METHOD}"
+	cmd+=" -mfb=${FAST_BYTES}"
+	cmd+=" -md=${DICT_SIZE}"
+	[[ -n "$THREADS" ]] && cmd+=" -mmt=${THREADS}"
+	cmd+=" -ms=${SOLID}"
+	[[ -n "$HEADER_ENCRYPT" ]] && cmd+=" -mhe=${HEADER_ENCRYPT}"
+	if [[ -n "$PASSWORD" ]]; then
+		if [[ "$mask_pass" == "yes" ]]; then
+			cmd+=" -p\"********\""
+		else
+			cmd+=" -p\"${PASSWORD}\""
+		fi
+	fi
+	[[ -n "$EXTRA_ARGS" ]] && cmd+=" ${EXTRA_ARGS}"
+	cmd+=" \"${DESTINATION}\""
+	cmd+=" \"${SOURCE}\""
+	echo "$cmd"
+}
+
+###############################################################################
+# Run compression
+###############################################################################
+
+run_compression() {
+	local profile_label="$1"
+	local display_cmd
+	display_cmd=$(build_display_cmd "yes")
+
+	# Validate source exists
+	if [[ ! -e "$SOURCE" ]]; then
+		msg_box "Error" "Source does not exist:\n${SOURCE}"
+		return 1
+	fi
+
+	# Warn if destination already exists
+	if [[ -e "$DESTINATION" ]]; then
+		if ! yesno_box "Overwrite?" "Destination file already exists:\n${DESTINATION}\n\nOverwrite?"; then
+			return 1
+		fi
+		rm -f "$DESTINATION"
+	fi
+
+	# Confirm
+	local summary
+	summary="Profile     : ${profile_label}\n"
+	summary+="Source      : ${SOURCE}\n"
+	summary+="Dest        : ${DESTINATION}\n"
+	summary+="Threads     : ${THREADS:-all (default)}\n"
+	if [[ -n "$PASSWORD" ]]; then
+		summary+="Encryption  : AES-256 + Header Encryption (-mhe=on)\n"
+	fi
+	summary+="Command     :\n${display_cmd}\n\n"
+	summary+="Proceed?"
+
+	if ! yesno_box "Confirm Compression" "$summary"; then
+		return 1
+	fi
+
+	# Prepare log file
+	local logfile="${LOG_DIR}/${profile_label}_$(date '+%Y%m%d_%H%M%S').log"
+
+	# Show a message that compression is starting
+	clear
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo " 7z Compression In Progress"
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo ""
+	echo " Profile     : ${profile_label}"
+	echo " Source      : ${SOURCE}"
+	echo " Dest        : ${DESTINATION}"
+	echo " Threads     : ${THREADS:-all (default)}"
+	if [[ -n "$PASSWORD" ]]; then
+		echo " Encryption  : AES-256 + Header Encryption (-mhe=on)"
+	fi
+	echo " Log         : ${logfile}"
+	echo ""
+	echo " Command:"
+	echo "   ${display_cmd}"
+	echo ""
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo ""
+
+	local start_time end_time elapsed
+	start_time=$(date +%s)
+
+	# Build argument array for 100% safe execution without eval injection
+	local -a cmd_args=("a" "-t7z")
+	cmd_args+=("-mx=${COMPRESS_LEVEL}")
+	cmd_args+=("-m0=${METHOD}")
+	cmd_args+=("-mfb=${FAST_BYTES}")
+	cmd_args+=("-md=${DICT_SIZE}")
+	[[ -n "$THREADS" ]] && cmd_args+=("-mmt=${THREADS}")
+	cmd_args+=("-ms=${SOLID}")
+	[[ -n "$HEADER_ENCRYPT" ]] && cmd_args+=("-mhe=${HEADER_ENCRYPT}")
+	[[ -n "$PASSWORD" ]] && cmd_args+=("-p${PASSWORD}")
+	if [[ -n "$EXTRA_ARGS" ]]; then
+		local -a extra_arr
+		read -r -a extra_arr <<<"$EXTRA_ARGS"
+		cmd_args+=("${extra_arr[@]}")
+	fi
+	cmd_args+=("${DESTINATION}" "${SOURCE}")
+
+	# Run 7z – output goes to both terminal and log
+	if 7z "${cmd_args[@]}" 2>&1 | tee "$logfile"; then
+		end_time=$(date +%s)
+		elapsed=$((end_time - start_time))
+		echo ""
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+		echo " ✅  Compression completed successfully!"
+		printf " ⏱   Elapsed: %d h %d m %d s\n" \
+			$((elapsed / 3600)) $(((elapsed % 3600) / 60)) $((elapsed % 60))
+		if [[ -f "$DESTINATION" ]]; then
+			local size
+			size=$(du -sh "$DESTINATION" | cut -f1)
+			echo " 📦  Archive size: ${size}"
+		fi
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	else
+		end_time=$(date +%s)
+		elapsed=$((end_time - start_time))
+		echo ""
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+		echo " ❌  Compression FAILED after ${elapsed}s"
+		echo " 📄  Check log: ${logfile}"
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	fi
+
+	echo ""
+	read -rp "Press Enter to return to menu..."
+}
+
+###############################################################################
+# Menu: Encrypted Archive (dedicated menu option)
+###############################################################################
+
+menu_encrypted_archive() {
+	local p_list=()
+	local p
+	while IFS= read -r p; do
+		[[ -z "$p" ]] && continue
+		local src="" dst=""
+		src=$(grep '^SOURCE=' "$PROFILE_DIR/$p.conf" 2>/dev/null | head -1 | cut -d'"' -f2)
+		dst=$(grep '^DESTINATION=' "$PROFILE_DIR/$p.conf" 2>/dev/null | head -1 | cut -d'"' -f2)
+		p_list+=("$p" "$(basename "$src" 2>/dev/null) → $(basename "$dst" 2>/dev/null)")
+	done < <(list_profiles)
+
+	local mode="2"
+	if [[ ${#p_list[@]} -gt 0 ]]; then
+		mode=$(whiptail --title "Create Encrypted Archive" --menu \
+			"Choose encryption workflow:" \
+			0 0 0 \
+			"1" "📁  Encrypt using settings from a saved profile" \
+			"2" "⚡  Custom one-off encrypted compression" \
+			3>&1 1>&2 2>&3) || return
+	fi
+
+	case "$mode" in
+	1)
+		local choice
+		choice=$(whiptail --title "Select Profile to Encrypt" --menu \
+			"Select profile to load settings from:" \
+			0 0 0 \
+			"${p_list[@]}" \
+			3>&1 1>&2 2>&3) || return
+
+		load_profile "$choice"
+
+		# Confirm / adjust destination file path
+		local new_dst
+		new_dst=$(input_box "Destination Archive" \
+			"Output .7z file path:" \
+			"$DESTINATION") || return
+		DESTINATION="$new_dst"
+
+		# Prompt for password with confirmation
+		prompt_password || return
+
+		# Header encryption is always enabled
+		HEADER_ENCRYPT="on"
+
+		run_compression "${choice}-encrypted"
+		PASSWORD=""
+		HEADER_ENCRYPT=""
+		;;
+	2)
+		SOURCE="" DESTINATION=""
+		COMPRESS_LEVEL="$DEF_LEVEL" METHOD="$DEF_METHOD"
+		FAST_BYTES="$DEF_FB" DICT_SIZE="$DEF_DICT"
+		THREADS="$DEF_THREADS"
+		SOLID="$DEF_SOLID" EXTRA_ARGS="$DEF_EXTRA"
+		PASSWORD=""
+		HEADER_ENCRYPT="on"
+
+		local val
+		val=$(input_box "Source File / Directory" \
+			"Full path to the file or directory to compress:" \
+			"") || return
+		SOURCE="$val"
+
+		val=$(input_box "Destination Archive" \
+			"Full path for the output .7z file:" \
+			"${SOURCE}.7z") || return
+		DESTINATION="$val"
+
+		prompt_password || return
+
+		local preset
+		preset=$(whiptail --title "Compression Settings" --menu \
+			"Select compression settings:" \
+			0 0 0 \
+			"1" "🚀  Ultra preset (Level 9, LZMA2, fb 273, dict ${DEF_DICT})" \
+			"2" "⚙️   Customize all compression settings" \
+			3>&1 1>&2 2>&3) || return
+
+		if [[ "$preset" == "2" ]]; then
+			edit_profile_fields || return
+		fi
+
+		run_compression "encrypted-job"
+		PASSWORD=""
+		HEADER_ENCRYPT=""
+		;;
+	esac
+}
+
+###############################################################################
+# Menu: Create new profile
+###############################################################################
+
+menu_create_profile() {
+	local name
+	name=$(input_box "New Profile" "Enter a name for this profile (no spaces):" "") || return
+
+	# sanitise name
+	name="${name// /_}"
+	name="${name//[^a-zA-Z0-9_-]/}"
+
+	if [[ -z "$name" ]]; then
+		msg_box "Error" "Profile name cannot be empty."
+		return
+	fi
+
+	if [[ -f "$PROFILE_DIR/$name.conf" ]]; then
+		if ! yesno_box "Exists" "Profile '$name' already exists. Overwrite?"; then
+			return
+		fi
+	fi
+
+	# Load defaults
+	SOURCE="" DESTINATION=""
+	COMPRESS_LEVEL="$DEF_LEVEL" METHOD="$DEF_METHOD"
+	FAST_BYTES="$DEF_FB" DICT_SIZE="$DEF_DICT"
+	THREADS="$DEF_THREADS"
+	SOLID="$DEF_SOLID" EXTRA_ARGS="$DEF_EXTRA"
+	PASSWORD="" HEADER_ENCRYPT=""
+
+	if edit_profile_fields; then
+		save_profile "$name"
+		msg_box "Saved" "Profile '$name' has been saved."
+	fi
+}
+
+###############################################################################
+# Menu: Select & run a profile
+###############################################################################
+
+menu_run_profile() {
+	local profiles=()
+	local p
+	while IFS= read -r p; do
+		[[ -z "$p" ]] && continue
+		# load it briefly to get source/dest for description
+		local src="" dst=""
+		src=$(grep '^SOURCE=' "$PROFILE_DIR/$p.conf" | head -1 | cut -d'"' -f2)
+		dst=$(grep '^DESTINATION=' "$PROFILE_DIR/$p.conf" | head -1 | cut -d'"' -f2)
+		profiles+=("$p" "$(basename "$src" 2>/dev/null) → $(basename "$dst" 2>/dev/null)")
+	done < <(list_profiles)
+
+	if [[ ${#profiles[@]} -eq 0 ]]; then
+		msg_box "No Profiles" "No profiles found.\nCreate one first from the main menu."
+		return
+	fi
+
+	local choice
+	choice=$(whiptail --title "Run Profile" --menu \
+		"Select a profile to run:" \
+		0 0 0 \
+		"${profiles[@]}" \
+		3>&1 1>&2 2>&3) || return
+
+	PASSWORD=""
+	HEADER_ENCRYPT=""
+	load_profile "$choice"
+	run_compression "$choice"
+}
+
+###############################################################################
+# Menu: Edit existing profile
+###############################################################################
+
+menu_edit_profile() {
+	local profiles=()
+	local p
+	while IFS= read -r p; do
+		[[ -z "$p" ]] && continue
+		profiles+=("$p" "edit")
+	done < <(list_profiles)
+
+	if [[ ${#profiles[@]} -eq 0 ]]; then
+		msg_box "No Profiles" "No profiles found."
+		return
+	fi
+
+	local choice
+	choice=$(whiptail --title "Edit Profile" --menu \
+		"Select a profile to edit:" \
+		0 0 0 \
+		"${profiles[@]}" \
+		3>&1 1>&2 2>&3) || return
+
+	PASSWORD=""
+	HEADER_ENCRYPT=""
+	load_profile "$choice"
+	if edit_profile_fields; then
+		save_profile "$choice"
+		msg_box "Updated" "Profile '$choice' has been updated."
+	fi
+}
+
+###############################################################################
+# Menu: Delete profile
+###############################################################################
+
+menu_delete_profile() {
+	local profiles=()
+	local p
+	while IFS= read -r p; do
+		[[ -z "$p" ]] && continue
+		profiles+=("$p" "delete")
+	done < <(list_profiles)
+
+	if [[ ${#profiles[@]} -eq 0 ]]; then
+		msg_box "No Profiles" "No profiles found."
+		return
+	fi
+
+	local choice
+	choice=$(whiptail --title "Delete Profile" --menu \
+		"Select a profile to DELETE:" \
+		0 0 0 \
+		"${profiles[@]}" \
+		3>&1 1>&2 2>&3) || return
+
+	if yesno_box "Confirm Delete" "Are you sure you want to delete profile '$choice'?"; then
+		delete_profile "$choice"
+		msg_box "Deleted" "Profile '$choice' has been deleted."
+	fi
+}
+
+###############################################################################
+# Menu: View profile details
+###############################################################################
+
+menu_view_profile() {
+	local profiles=()
+	local p
+	while IFS= read -r p; do
+		[[ -z "$p" ]] && continue
+		profiles+=("$p" "view")
+	done < <(list_profiles)
+
+	if [[ ${#profiles[@]} -eq 0 ]]; then
+		msg_box "No Profiles" "No profiles found."
+		return
+	fi
+
+	local choice
+	choice=$(whiptail --title "View Profile" --menu \
+		"Select a profile to view:" \
+		0 0 0 \
+		"${profiles[@]}" \
+		3>&1 1>&2 2>&3) || return
+
+	PASSWORD=""
+	HEADER_ENCRYPT=""
+	load_profile "$choice"
+	local cmd
+	cmd=$(build_display_cmd "no")
+
+	local info
+	info="Profile  : ${choice}\n"
+	info+="Source   : ${SOURCE}\n"
+	info+="Dest     : ${DESTINATION}\n"
+	info+="Level    : ${COMPRESS_LEVEL}\n"
+	info+="Method   : ${METHOD}\n"
+	info+="FastBytes: ${FAST_BYTES}\n"
+	info+="DictSize : ${DICT_SIZE}\n"
+	info+="Threads  : ${THREADS:-all (default)}\n"
+	info+="Solid    : ${SOLID}\n"
+	info+="Extra    : ${EXTRA_ARGS:-<none>}\n\n"
+	info+="Full command:\n${cmd}"
+
+	msg_box "Profile: ${choice}" "$info"
+}
+
+###############################################################################
+# Menu: Quick run (one-off, no profile saved)
+###############################################################################
+
+menu_quick_run() {
+	SOURCE="" DESTINATION=""
+	COMPRESS_LEVEL="$DEF_LEVEL" METHOD="$DEF_METHOD"
+	FAST_BYTES="$DEF_FB" DICT_SIZE="$DEF_DICT"
+	THREADS="$DEF_THREADS"
+	SOLID="$DEF_SOLID" EXTRA_ARGS="$DEF_EXTRA"
+	PASSWORD="" HEADER_ENCRYPT=""
+
+	if edit_profile_fields; then
+		# Offer to save as profile
+		if yesno_box "Save Profile?" "Do you want to save this as a reusable profile before running?"; then
+			local name
+			name=$(input_box "Profile Name" "Enter a name for this profile:" "") || true
+			name="${name// /_}"
+			name="${name//[^a-zA-Z0-9_-]/}"
+			if [[ -n "$name" ]]; then
+				save_profile "$name"
+				run_compression "$name"
+				return
+			fi
+		fi
+		run_compression "quick-run"
+	fi
+}
+
+###############################################################################
+# Menu: View logs
+###############################################################################
+
+menu_view_logs() {
+	local logs=()
+	local f
+	for f in "$LOG_DIR"/*.log; do
+		[[ -f "$f" ]] || continue
+		local bname size
+		bname=$(basename "$f")
+		size=$(du -sh "$f" | cut -f1)
+		logs+=("$bname" "${size}")
+	done
+
+	if [[ ${#logs[@]} -eq 0 ]]; then
+		msg_box "No Logs" "No log files found yet."
+		return
+	fi
+
+	local choice
+	choice=$(whiptail --title "View Logs" --menu \
+		"Select a log to view:" \
+		0 0 0 \
+		"${logs[@]}" \
+		3>&1 1>&2 2>&3) || return
+
+	# Show textbox with auto-sizing
+	whiptail --title "Log: ${choice}" --scrolltext \
+		--textbox "$LOG_DIR/$choice" 0 0 2>/dev/null ||
+		tail -80 "$LOG_DIR/$choice" | whiptail --title "Log: ${choice}" --scrolltext --msgbox "$(cat)" 0 0
+}
+
+###############################################################################
+# Menu: Duplicate a profile
+###############################################################################
+
+menu_duplicate_profile() {
+	local profiles=()
+	local p
+	while IFS= read -r p; do
+		[[ -z "$p" ]] && continue
+		profiles+=("$p" "duplicate")
+	done < <(list_profiles)
+
+	if [[ ${#profiles[@]} -eq 0 ]]; then
+		msg_box "No Profiles" "No profiles found."
+		return
+	fi
+
+	local choice
+	choice=$(whiptail --title "Duplicate Profile" --menu \
+		"Select a profile to duplicate:" \
+		0 0 0 \
+		"${profiles[@]}" \
+		3>&1 1>&2 2>&3) || return
+
+	local newname
+	newname=$(input_box "New Name" "Enter a name for the duplicate profile:" "${choice}-copy") || return
+	newname="${newname// /_}"
+	newname="${newname//[^a-zA-Z0-9_-]/}"
+
+	if [[ -z "$newname" ]]; then
+		msg_box "Error" "Name cannot be empty."
+		return
+	fi
+
+	cp "$PROFILE_DIR/$choice.conf" "$PROFILE_DIR/$newname.conf"
+	msg_box "Duplicated" "Profile '$choice' duplicated as '$newname'.\nYou can now edit the copy."
+}
+
+###############################################################################
+# Help / About
+###############################################################################
+
+menu_help() {
+	local page
+	page=$(whiptail --title "Help & Info" --menu \
+		"Select a help topic:" \
+		0 0 0 \
+		"1" "📖  About this tool" \
+		"2" "💾  Dictionary Size (-md) & RAM usage" \
+		"3" "⚙️   Compression settings explained" \
+		"4" "💡  Tips & best practices" \
+		3>&1 1>&2 2>&3) || return
+
+	case "$page" in
+	1)
+		whiptail --title "About – 7z Compression Profile Manager" \
+			--scrolltext --msgbox "\
+7z Compression Profile Manager
+═══════════════════════════════════════════════════
+
+A whiptail menu-driven tool for managing reusable
+7z ultra-compression profiles.
+
+VERSION:  1.2
+PROFILES: ~/.config/7z-profiler/profiles/
+LOGS:     ~/.config/7z-profiler/logs/
+
+WHAT IT DOES
+────────────
+• Create, edit, duplicate, and delete compression
+  profiles so you never have to retype long 7z
+  commands.
+• Each profile stores source path, destination
+  path, and all compression parameters (including
+  dictionary size and CPU thread count).
+• Dedicated Encrypted Archive mode with AES-256
+  and Header Encryption (-mhe=on) to protect files
+  and hide filenames.
+• Run any saved profile with a single menu pick –
+  then walk away and let it finish.
+• Quick-run mode for one-off jobs (with option to
+  save as a profile afterward).
+• Logs every run with timestamps and elapsed time.
+
+DEPENDENCIES
+────────────
+• bash ≥ 4
+• whiptail  (sudo apt install whiptail)
+• 7z        (sudo apt install p7zip-full)
+
+Profiles are plain text .conf files – you can also
+edit them by hand in a text editor if you prefer." \
+			0 0
+		;;
+	2)
+		whiptail --title "Dictionary Size (-md) & RAM Usage" \
+			--scrolltext --msgbox "\
+Dictionary Size (-md) Explained
+═══════════════════════════════════════════════════
+
+The -md flag sets the LZMA/LZMA2 dictionary size.
+Think of it as how much previously-seen data the
+compressor keeps \"in memory\" while looking for
+repeated patterns.
+
+⚠️  RAM WARNING
+────────────────
+The compressor needs roughly:
+  Compression  :  ~12× the dictionary size
+  Decompression:  ~1× the dictionary size
+
+So -md=768M needs about 9 GB RAM to COMPRESS.
+On an 8 GB machine this WILL cause swapping or
+an out-of-memory kill!
+
+DICTIONARY SIZE REFERENCE TABLE
+───────────────────────────────
+-md     Speed       RAM (compress)  Ratio
+────────────────────────────────────────────
+ 64M    Faster      ~768 MB         Baseline
+128M    Faster      ~1.5 GB         Better
+256M    Fast        ~3 GB           Better
+512M    Moderate    ~6 GB           Good
+768M    Moderate    ~9 GB           Very good
+  1G    Slower      ~12 GB          Slightly better
+1.5G    Slower      ~18 GB          Slightly better
+  2G+   Much slower ~24 GB+         Diminishing
+────────────────────────────────────────────
+
+KEY TAKEAWAYS
+─────────────
+• Larger dictionary ≠ automatically much smaller
+  file. The gain depends on how far apart repeated
+  patterns are in your data.
+
+• For an 8 GB RAM machine:
+  ✅  64M–256M   safe, comfortable
+  ⚠️  512M       tight, close to limit
+  ❌  768M+      will likely OOM or swap heavily
+
+• For 16 GB RAM:  512M–768M is comfortable.
+• For 32 GB+ RAM: 1G–1.5G is reasonable.
+
+• If your machine starts swapping (disk thrashing),
+  the compression will be MUCH slower than just
+  using a smaller dictionary in the first place.
+
+RECOMMENDATION
+──────────────
+Pick the largest dictionary that fits comfortably
+in ~60-70% of your FREE RAM. Check with:
+  free -h
+before starting a big compression job." \
+			0 0
+		;;
+	3)
+		whiptail --title "Compression Settings Explained" \
+			--scrolltext --msgbox "\
+Compression Settings Reference
+═══════════════════════════════════════════════════
+
+-mx (Compression Level)
+───────────────────────
+ 1  = Fastest, largest output
+ 5  = Normal balance
+ 7  = Maximum
+ 9  = Ultra – slowest but smallest output
+
+-m0 (Method)
+────────────
+ lzma2   Best ratio, multi-threaded (recommended)
+ lzma    Classic, single-threaded
+ ppmd    Good for plain text / source code
+ bzip2   Moderate ratio, moderate speed
+ deflate Zip-compatible, fastest
+
+-mfb (Fast Bytes)
+─────────────────
+Range: 5 – 273
+Higher = the compressor tries harder to find
+optimal matches. 273 is the maximum and gives
+the best ratio but is slower.
+For most use cases, 64–128 is a good balance.
+273 is for when you want absolute best ratio
+and don't mind waiting.
+
+-md (Dictionary Size)
+─────────────────────
+Sets the sliding dictionary size (e.g. 256M, 512M).
+Remember: Compression RAM is ~12× the dict size!
+
+-mmt (CPU Threads)
+──────────────────
+Sets multi-threading:
+ • Empty / default : uses all available CPU threads.
+ • -mmt=N (e.g. 2, 4): limits 7z to N threads so
+   the rest of your system stays responsive.
+ • -mmt=off        : single-threaded mode.
+
+-p (Password Encryption)
+────────────────────────
+ Encrypts archive contents using AES-256.
+ Example: -p\"MyPassword\"
+
+-mhe (Header Encryption)
+────────────────────────
+ Encrypts archive headers / file names (7z format only):
+ • -mhe=on  : Hides file names, sizes, and folder
+              structure. The password is required even
+              to list files inside the archive.
+ • -mhe=off : Only file contents are encrypted; file
+              names remain visible.
+
+-ms (Solid Mode)
+────────────────
+ on  = Files are compressed as one continuous
+       stream. Better ratio, but extracting a
+       single file requires processing all
+       preceding data.
+ off = Each file is independent. Worse ratio,
+       but random access is faster.
+
+Use 'on' for archival / backup.
+Use 'off' if you need to extract individual
+files frequently." \
+			0 0
+		;;
+	4)
+		whiptail --title "Tips & Best Practices" \
+			--scrolltext --msgbox "\
+Tips & Best Practices
+═══════════════════════════════════════════════════
+
+BEFORE COMPRESSING
+──────────────────
+1. Check available RAM:
+     free -h
+   Pick a dictionary size that fits in ~60-70%
+   of your free memory.
+
+2. Limit CPU threads (-mmt):
+   If you need to use your computer while it
+   compresses, set -mmt to 2 or 4 (or total cores - 2)
+   to keep the desktop responsive and avoid high heat.
+
+3. Encryption & Privacy:
+   Always use header encryption (-mhe=on) so that
+   file names and directory structures cannot be
+   inspected without knowing the password.
+   When typing in the dark, select 'Visible' mode to
+   see keystrokes in real time and avoid mistyping.
+
+4. Check available disk space:
+     df -h /path/to/destination
+   You need space for the archive AND the
+   original (7z doesn't delete the source).
+
+5. For very large files (10+ GB), consider
+   running in a 'screen' or 'tmux' session so
+   you can disconnect and reconnect:
+     screen -S compress
+     ./7z-profiler.sh
+     # (Ctrl+A, D to detach)
+     # screen -r compress  (to re-attach)
+
+PROFILE TIPS
+────────────
+• Duplicate a profile to create variations
+  (e.g. same source, different dict sizes to
+  compare results).
+
+• Profile names can use letters, numbers,
+  hyphens, and underscores.
+
+• Profiles are plain text files in:
+    ~/.config/7z-profiler/profiles/
+  You can back them up, copy to another
+  machine, or edit with any text editor.
+
+PERFORMANCE
+───────────
+• LZMA2 can use multiple CPU cores –
+  it's almost always the best choice.
+
+• If a job is too slow, try reducing:
+  - Dictionary size (-md)  first
+  - Fast bytes (-mfb)      second
+  - Compression level (-mx) last
+
+LOGS
+────
+Every compression run is logged to:
+  ~/.config/7z-profiler/logs/
+with timestamps. Use 'View logs' from the
+main menu to review past runs. Passwords are
+automatically masked in log files." \
+			0 0
+		;;
+	esac
+}
+
+###############################################################################
+# Main menu loop
+###############################################################################
+
+main_menu() {
+	while true; do
+		local choice
+		choice=$(whiptail --title "7z Compression Profile Manager" \
+			--menu "Choose an action:" \
+			0 0 0 \
+			"1" "🚀  Run a saved profile" \
+			"2" "⚡  Quick run (one-off compression)" \
+			"3" "🔒  Create encrypted archive (-mhe=on -p)" \
+			"4" "➕  Create new profile" \
+			"5" "✏️   Edit existing profile" \
+			"6" "📋  View profile details" \
+			"7" "📑  Duplicate a profile" \
+			"8" "🗑️   Delete a profile" \
+			"9" "📄  View compression logs" \
+			"10" "❓  Help / About" \
+			"0" "❌  Exit" \
+			3>&1 1>&2 2>&3) || break
+
+		case "$choice" in
+		1) menu_run_profile ;;
+		2) menu_quick_run ;;
+		3) menu_encrypted_archive ;;
+		4) menu_create_profile ;;
+		5) menu_edit_profile ;;
+		6) menu_view_profile ;;
+		7) menu_duplicate_profile ;;
+		8) menu_delete_profile ;;
+		9) menu_view_logs ;;
+		10) menu_help ;;
+		0) break ;;
+		esac
+	done
+}
+
+###############################################################################
+# Entry point
+###############################################################################
+
+# Pre-flight checks
+for dep in whiptail 7z; do
+	if ! command -v "$dep" &>/dev/null; then
+		echo "ERROR: '$dep' is required but not found in PATH." >&2
+		echo "Install it with:  sudo apt install ${dep/7z/p7zip-full}" >&2
+		exit 1
+	fi
+done
+
+main_menu
+clear
+unset NEWT_COLORS
+echo "Goodbye!"

@@ -1,0 +1,1838 @@
+#!/usr/bin/env bash
+#
+# WiFi MIGRATOR
+# A script to manage / import / export WiFi connections using nmcli and whiptail.
+# Provides CRUD operations and import/export functionality.
+
+# --- CONFIGURATION ---
+SCRIPT_VERSION="1.1"
+if [ ! -d /bin/CUSTOM-WIFI-MIGRATOR ]; then
+	sudo mkdir -p /bin/CUSTOM-WIFI-MIGRATOR
+	sudo chmod -R 777 /bin/CUSTOM-WIFI-MIGRATOR
+fi
+
+# Check if /bin/CUSTOM-WIFI-MIGRATOR is NOT already 777, then set it
+if [ "$(stat -c %a "/bin/CUSTOM-WIFI-MIGRATOR" 2>/dev/null || echo 0)" != "777" ]; then
+	sudo chmod -R 777 "/bin/CUSTOM-WIFI-MIGRATOR"
+	echo "Permissions set to 777 on /bin/CUSTOM-WIFI-MIGRATOR"
+fi
+
+# File to store exported WiFi networks
+EXPORT_FILE="/bin/CUSTOM-WIFI-MIGRATOR/wifi_networks.txt"
+# Log file for recording actions and errors
+LOG_FILE="/var/log/custom-wifi-migrator.log"
+# Delimiter for the export file
+DELIMITER="|"
+
+# --- DEPENDENCY CHECK ---
+check_dependencies() {
+	local missing_deps=0
+	for cmd in whiptail nmcli qrencode zbarimg; do
+		if ! command -v "$cmd" &>/dev/null; then
+			echo "Error: Required command '$cmd' is not installed." >&2
+			missing_deps=1
+		fi
+	done
+	if [ "$missing_deps" -eq 1 ]; then
+		exit 1
+	fi
+}
+
+# --- UI FUNCTIONS ---
+show_message() {
+	whiptail --title "$1" --msgbox "$2" 0 0
+}
+
+ensure_permissions() {
+	sudo chmod 777 "$EXPORT_FILE" 2>/dev/null || true
+}
+
+show_help_page() {
+	local help_text
+	# Using a HEREDOC for the help text for readability
+	read -r -d '' help_text <<'EOF'
+WiFi MIGRATOR - Help
+
+This script helps you manage, export, and import WiFi network profiles.
+
+--- MAIN MENU OPTIONS ---
+
+1. Add a new WiFi network [TO EXPORT FILE]
+   - Adds a new network profile (SSID, Password, etc.) to your text-based export file.
+   - This does NOT add the network to your system's active connections. It only prepares it for future use.
+
+2. List saved WiFi networks [FROM SYSTEM]
+   - Displays all WiFi connections currently saved in your system's NetworkManager.
+
+3. List saved WiFi networks [FROM EXPORT FILE]
+   - Displays all network profiles found in the specified export file.
+
+4. Delete a WiFi network [FROM SYSTEM]
+   - Permanently deletes a saved WiFi connection from your system's NetworkManager.
+
+5. Delete a WiFi network [FROM EXPORT FILE]
+   - Deletes one or more selected network profiles from the export file. A backup is created automatically.
+
+6. Export WiFi networks to file
+   - Scans your system for all saved WiFi connections and writes them to the export file, including their passwords.
+   - This is the main way to "back up" your system's networks to a file.
+
+7. Import WiFi networks from file
+   - Reads network profiles from the export file and adds them to your system's NetworkManager.
+   - This allows you to restore backed-up networks or migrate them to a new machine.
+   - It intelligently handles systems with 0, 1, or multiple WiFi cards.
+
+8. Setup Auto-Import Service (Headless)
+   - For 'headless' systems that will get a WiFi card after initial setup.
+   - Installs a systemd service that runs on each boot.
+   - When a WiFi interface is finally detected, it automatically imports all networks from your specified file, then disables itself so it only runs once.
+
+--- MAINTENANCE ---
+
+10. Edit a network in Export File
+    - Allows you to modify the details (SSID, password, BSSID, interface) of a specific network profile within the export file.
+
+11. Delete ALL from Export File
+    - Wipes all entries from the export file. A backup is created automatically.
+
+12. Restore from Backup
+    - If you've made a mistake, you can restore the export file from a list of automatically created, timestamped backups.
+
+--- QR CODE TOOLS ---
+
+14. Generate QR Code
+    - Select a network from your export file to generate a standard WiFi QR code.
+    - The QR code can be displayed in the terminal or saved to a PNG file.
+
+15. Import from QR
+    - Reads a WiFi QR code from a provided image file and adds the network profile to your export file.
+
+16. Read QR Data From Image
+    - Scans any QR code (or other barcode) from a provided image file and displays the raw data found.
+    - Useful for debugging or inspecting the contents of a QR code.
+
+--- GENERAL NOTES ---
+
+- Priority: When adding, editing, or importing networks, you can set a connection priority (a number, e.g. -2 , 0, 10, 100). When multiple known networks are available, NetworkManager will try to connect to the one with the highest priority number first.
+- Export File: Most functions operate on a text file. You will be prompted for its location. The default is /bin/CUSTOM-WIFI-MIGRATOR/wifi_networks.txt.
+- Root Privileges: This script requires root access to manage system network connections and read saved passwords.
+- WARNING: WiFi passwords will be stored in PLAINTEXT in the export file. Ensure the file is secured.
+- Dependencies: Requires whiptail, nmcli, qrencode, and zbarimg.
+EOF
+
+	# Use a temporary file to display the text in a scrollable box
+	local temp_file
+	temp_file=$(mktemp)
+	trap 'rm -f "$temp_file"' RETURN
+	echo "$help_text" >"$temp_file"
+	whiptail --title "Help / About" --textbox "$temp_file" 0 0 --scrolltext
+}
+
+# --- CORE FUNCTIONS ---
+
+# this function is now meant to to append to the export file in the new 6-field format
+add_network_simple() {
+	local SSID PASSWORD SECURITY default_iface exit_status is_hidden PRIORITY
+
+	SSID=$(whiptail --inputbox "Enter the WiFi SSID (network name):" --title "Add Network (Simple)" 0 0 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	if [ -z "$SSID" ]; then
+		show_message "Error" "SSID cannot be empty."
+		return 0
+	fi
+
+	SECURITY=$(whiptail --title "Security Type" --menu "Choose the network security type" 0 0 3 \
+		"WPA" "WPA/WPA2 Personal" \
+		"WEP" "WEP" \
+		"OPEN" "Open (No Password)" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	PASSWORD=""
+	if [[ "$SECURITY" != "OPEN" ]]; then
+		PASSWORD=$(whiptail --inputbox "Enter the WiFi password:" --title "Add Network (Simple)" 0 0 3>&1 1>&2 2>&3)
+		exit_status=$?
+		[[ $exit_status -ne 0 ]] && return 0
+	fi
+
+	if (whiptail --title "Hidden Network" --yes-button "No" --no-button "Yes" --yesno "Is this a hidden network?" 0 0); then
+		is_hidden="no"
+	else
+		is_hidden="yes"
+	fi
+
+	PRIORITY=$(whiptail --inputbox "Enter the connection priority (e.g., 0). Higher numbers are preferred." --title "Add Network (Simple)" 0 0 "0" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	default_iface=$(nmcli -t -f DEVICE,TYPE dev | grep ':wifi$' | cut -d: -f1 | head -n1 || echo "wlan0")
+
+	# Format: SSID|PASSWORD|SECURITY|BSSID|INTERFACE|HIDDEN|PRIORITY
+	echo "$SSID${DELIMITER}$PASSWORD${DELIMITER}$SECURITY${DELIMITER}${DELIMITER}$default_iface${DELIMITER}$is_hidden${DELIMITER}$PRIORITY" >>"$EXPORT_FILE"
+	ensure_permissions
+	show_message "Success" "Successfully added network '$SSID' to export file."
+
+	return 0
+}
+
+add_network_bssid() {
+	local SSID BSSID PASSWORD SECURITY default_iface exit_status is_hidden PRIORITY
+
+	SSID=$(whiptail --inputbox "Enter the WiFi SSID (network name):" 0 0 "" --title "Add Network (Specific)" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	BSSID=$(whiptail --inputbox "Enter the BSSID (MAC Address) of the access point:" 0 0 "" --title "Add Network (Specific)" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	if [ -z "$SSID" ]; then
+		show_message "Error" "SSID cannot be empty."
+		return 0
+	fi
+
+	SECURITY=$(whiptail --title "Security Type" --menu "Choose the network security type" 0 0 3 \
+		"WPA" "WPA/WPA2 Personal" \
+		"WEP" "WEP" \
+		"OPEN" "Open (No Password)" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	PASSWORD=""
+	if [[ "$SECURITY" != "OPEN" ]]; then
+		PASSWORD=$(whiptail --inputbox "Enter the WiFi password:" --title "Add Network (Specific)" 0 0 3>&1 1>&2 2>&3)
+		exit_status=$?
+		[[ $exit_status -ne 0 ]] && return 0
+	fi
+
+	if (whiptail --title "Hidden Network" --yes-button "No" --no-button "Yes" --yesno "Is this a hidden network?" 0 0); then
+		is_hidden="no"
+	else
+		is_hidden="yes"
+	fi
+
+	PRIORITY=$(whiptail --inputbox "Enter the connection priority (e.g., 0). Higher numbers are preferred." --title "Add Network (Specific)" 0 0 "0" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	default_iface=$(nmcli -t -f DEVICE,TYPE dev | grep ':wifi$' | cut -d: -f1 | head -n1 || echo "wlan0")
+
+	# Format: SSID|PASSWORD|SECURITY|BSSID|INTERFACE|HIDDEN|PRIORITY
+	echo "$SSID${DELIMITER}$PASSWORD${DELIMITER}$SECURITY${DELIMITER}$BSSID${DELIMITER}$default_iface${DELIMITER}$is_hidden${DELIMITER}$PRIORITY" >>"$EXPORT_FILE"
+	ensure_permissions
+	show_message "Success" "Successfully added network '$SSID' to export file."
+
+	return 0
+}
+
+add_network() {
+	local CHOICE exit_status
+
+	EXPORT_FILE=$(whiptail --inputbox "Enter export filename to add Network INFO:" 0 0 "$EXPORT_FILE" --title "Export Networks" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	CHOICE=$(whiptail --title "Add Network" --menu "Choose an addition method" 0 0 2 \
+		"1" "Simple (SSID, Security and Password)" \
+		"2" "Specific (SSID, BSSID, Security and Password)" 3>&1 1>&2 2>&3)
+
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	case "$CHOICE" in
+	1) add_network_simple ;;
+	2) add_network_bssid ;;
+	esac
+}
+
+list_networks() {
+	local connections_output
+	connections_output=$(nmcli connection show)
+
+	if [ -z "$connections_output" ]; then
+		show_message "List Networks" "No saved networks found."
+		return 0 # Return to menu
+	fi
+
+	# Use a temporary file to pass content to whiptail --textbox
+	local temp_file
+	temp_file=$(mktemp)
+	# Ensure temp file is removed on exit from the function
+	trap 'rm -f "$temp_file"' RETURN
+
+	echo "$connections_output" >"$temp_file"
+
+	# Display the content of the temp file in a textbox
+	whiptail --title "Saved Networks" --textbox "$temp_file" 0 0
+	# The trap will clean up the temp file when the function returns.
+	return 0
+}
+
+list_networks_from_export_file() {
+	EXPORT_FILE=$(whiptail --inputbox "Enter filename to list networks from:" 0 0 "$EXPORT_FILE" --title "List from File" 3>&1 1>&2 2>&3)
+	local exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	if [[ ! -f "$EXPORT_FILE" ]] || [[ ! -s "$EXPORT_FILE" ]]; then
+		show_message "List from File" "Export file is empty or does not exist."
+		return 0
+	fi
+
+	# Use a temporary file to pass content to whiptail --textbox
+	local temp_file
+	temp_file=$(mktemp)
+	trap 'rm -f "$temp_file"' RETURN
+
+	# Add a header to the temp file
+	echo "Networks stored in $EXPORT_FILE:" >"$temp_file"
+	echo "----------------------------------------------------------------------------------------------------" >>"$temp_file"
+
+	local line_num=0
+	while IFS= read -r line; do
+		((line_num++))
+		if [[ -z "$line" ]]; then
+			echo "$line_num: [EMPTY LINE]" >>"$temp_file"
+			continue
+		fi
+
+		IFS='|' read -r -a F <<<"$line"
+		local num_fields=${#F[@]}
+
+		local SSID="" SECURITY="WPA" BSSID="" INTERFACE="" HIDDEN="no" PRIORITY="0"
+
+		# Handle legacy and new formats
+		case $num_fields in
+		2) SSID="${F[0]}" ;;
+		3)
+			SSID="${F[0]}"
+			INTERFACE="${F[2]}"
+			;;
+		4)
+			SSID="${F[0]}"
+			BSSID="${F[2]}"
+			INTERFACE="${F[3]}"
+			;;
+		5)
+			SSID="${F[0]}"
+			SECURITY="${F[2]}"
+			BSSID="${F[3]}"
+			INTERFACE="${F[4]}"
+			;;
+		6)
+			SSID="${F[0]}"
+			SECURITY="${F[2]}"
+			BSSID="${F[3]}"
+			INTERFACE="${F[4]}"
+			HIDDEN="${F[5]}"
+			;;
+		7)
+			SSID="${F[0]}"
+			SECURITY="${F[2]}"
+			BSSID="${F[3]}"
+			INTERFACE="${F[4]}"
+			HIDDEN="${F[5]}"
+			PRIORITY="${F[6]}"
+			;;
+		*)
+			echo "$line_num: [MALFORMED] $line" >>"$temp_file"
+			continue
+			;;
+		esac
+
+		if [[ -z "$SSID" ]]; then
+			echo "$line_num: [MALFORMED - NO SSID] $line" >>"$temp_file"
+			continue
+		fi
+
+		# Sanitize for display
+		[[ -z "$BSSID" ]] && BSSID="N/A"
+		[[ -z "$INTERFACE" ]] && INTERFACE="N/A"
+		[[ -z "$SECURITY" ]] && SECURITY="N/A"
+		[[ -z "$PRIORITY" ]] && PRIORITY="0"
+		local hidden_display="No"
+		if [[ "$HIDDEN" == "yes" ]]; then hidden_display="Yes"; fi
+
+		printf "%-3d | Prio: %-3s | SSID: %-25s | SEC: %-4s | Hidden: %-3s | BSSID: %-18s | Iface: %s\n" "$line_num" "$PRIORITY" "$SSID" "$SECURITY" "$hidden_display" "$BSSID" "$INTERFACE" >>"$temp_file"
+
+	done <"$EXPORT_FILE"
+
+	local TEMP_FILE_HEIGHT
+	TEMP_FILE_HEIGHT=$(($(wc -l <"$temp_file" 2>/dev/null || echo 0) + 7))
+
+	whiptail --scrolltext --title "Networks in Export File" --textbox "$temp_file" "$TEMP_FILE_HEIGHT" 0
+}
+
+create_backup() {
+	if [[ -f "$EXPORT_FILE" ]]; then
+		local backup_file
+		backup_file="${EXPORT_FILE}.bak.$(date +%s)"
+
+		cp "$EXPORT_FILE" "$backup_file"
+		sudo chown "$(logname):$(logname)" "$backup_file" 2>/dev/null || true
+		sudo chmod 777 "$backup_file" 2>/dev/null || true
+	fi
+}
+
+delete_all_from_export_file() {
+	EXPORT_FILE=$(whiptail --inputbox "Enter filename to delete all networks from:" 0 0 "$EXPORT_FILE" --title "Delete All from File" 3>&1 1>&2 2>&3)
+	local exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	if [[ ! -f "$EXPORT_FILE" ]] || [[ ! -s "$EXPORT_FILE" ]]; then
+		show_message "Delete All" "Export file is already empty or does not exist."
+		return 0
+	fi
+
+	if (whiptail --title "Confirm Delete All" --yesno "This will delete ALL networks from the export file. A backup will be created.\n\nAre you absolutely sure?" 0 0); then
+		create_backup
+		# : is just a command that exits 0 and produces no output.
+		# so this effectively truncates the file. : > is safer than using > alone.
+		: >"$EXPORT_FILE"
+		ensure_permissions
+		show_message "Success" "All networks have been deleted from the export file."
+	fi
+}
+
+edit_network_in_export_file() {
+	EXPORT_FILE=$(whiptail --inputbox "Enter filename to edit a network in:" 0 0 "$EXPORT_FILE" --title "Edit Network in File" 3>&1 1>&2 2>&3)
+	local exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	if [[ ! -f "$EXPORT_FILE" ]] || [[ ! -s "$EXPORT_FILE" ]]; then
+		show_message "Error" "Export file is empty or does not exist."
+		return 0
+	fi
+
+	mapfile -t raw_lines <"$EXPORT_FILE"
+
+	declare -a options=()
+	declare -A id_map=()
+	local i=1
+	for idx in "${!raw_lines[@]}"; do
+		local raw_line="${raw_lines[idx]}"
+		[[ -z "$raw_line" ]] && continue
+
+		local tag="$i"
+		options+=("$tag" "$raw_line")
+		id_map["$tag"]="$idx"
+		((i++))
+	done
+
+	if [ ${#id_map[@]} -eq 0 ]; then
+		show_message "Error" "No networks found in the export file to edit."
+		return 0
+	fi
+
+	local CHOICE_TAG
+	CHOICE_TAG=$(whiptail --title "Edit Network" --menu "Select a network to edit:" 0 0 "${#id_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	local CHOICE_IDX="${id_map[$CHOICE_TAG]}"
+
+	# --- Parse the selected line ---
+	local old_line="${raw_lines[$CHOICE_IDX]}"
+	IFS='|' read -r -a F <<<"$old_line"
+	local num_fields=${#F[@]}
+	local old_ssid="" old_pass="" old_sec="WPA" old_bssid="" old_iface="" old_hidden="no" old_priority="0"
+
+	case $num_fields in
+	2)
+		old_ssid="${F[0]}"
+		old_pass="${F[1]}"
+		;;
+	3)
+		old_ssid="${F[0]}"
+		old_pass="${F[1]}"
+		old_iface="${F[2]}"
+		;;
+	4)
+		old_ssid="${F[0]}"
+		old_pass="${F[1]}"
+		old_bssid="${F[2]}"
+		old_iface="${F[3]}"
+		;;
+	5)
+		old_ssid="${F[0]}"
+		old_pass="${F[1]}"
+		old_sec="${F[2]}"
+		old_bssid="${F[3]}"
+		old_iface="${F[4]}"
+		;;
+	6)
+		old_ssid="${F[0]}"
+		old_pass="${F[1]}"
+		old_sec="${F[2]}"
+		old_bssid="${F[3]}"
+		old_iface="${F[4]}"
+		old_hidden="${F[5]}"
+		;;
+	7)
+		old_ssid="${F[0]}"
+		old_pass="${F[1]}"
+		old_sec="${F[2]}"
+		old_bssid="${F[3]}"
+		old_iface="${F[4]}"
+		old_hidden="${F[5]}"
+		old_priority="${F[6]}"
+		;;
+	*)
+		show_message "Error" "Cannot edit malformed line."
+		return 1
+		;;
+	esac
+
+	# --- Sanitize parsed values before use ---
+	if [[ "$old_sec" != "WPA" && "$old_sec" != "WEP" && "$old_sec" != "OPEN" ]]; then
+		old_sec="WPA"
+	fi
+	[[ -z "$old_priority" ]] && old_priority="0"
+
+	# --- Get new values from user ---
+	local new_ssid new_pass new_sec new_bssid new_iface new_hidden new_priority
+	new_ssid=$(whiptail --inputbox "SSID:" 0 0 "$old_ssid" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	new_sec=$(whiptail --title "Security Type" --menu "Choose the network security type" 0 0 3 --default-item "$old_sec" \
+		"WPA" "WPA/WPA2 Personal" \
+		"WEP" "WEP" \
+		"OPEN" "Open (No Password)" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	new_pass="$old_pass"
+	if [[ "$new_sec" != "OPEN" ]]; then
+		new_pass=$(whiptail --inputbox "Password:" 0 0 "$old_pass" 3>&1 1>&2 2>&3)
+		exit_status=$?
+		[[ $exit_status -ne 0 ]] && return 0
+	else
+		new_pass=""
+	fi
+
+	new_bssid=$(whiptail --inputbox "BSSID (optional):" 0 0 "$old_bssid" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	new_iface=$(whiptail --inputbox "Interface (optional):" 0 0 "$old_iface" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	local hidden_default="--defaultno"
+	if [[ "$old_hidden" == "yes" ]]; then hidden_default=""; fi
+	if (whiptail --title "Hidden Network" $hidden_default --yesno "Is this a hidden network?" 0 0); then
+		new_hidden="yes"
+	else
+		new_hidden="no"
+	fi
+
+	new_priority=$(whiptail --inputbox "Enter the connection priority (e.g., 0). Higher numbers are preferred." 0 0 "$old_priority" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	if [[ -z "$new_ssid" ]]; then
+		show_message "Error" "SSID cannot be empty."
+		return 1
+	fi
+
+	# --- Construct new line in the standardized 7-field format ---
+	local new_line="${new_ssid}${DELIMITER}${new_pass}${DELIMITER}${new_sec}${DELIMITER}${new_bssid}${DELIMITER}${new_iface}${DELIMITER}${new_hidden}${DELIMITER}${new_priority}"
+
+	# --- Perform atomic write ---
+	create_backup
+	local tmpfile
+	tmpfile="$(mktemp --tmpdir custom-wifi-edit.XXXXXX)"
+
+	for idx in "${!raw_lines[@]}"; do
+		if [[ "$idx" -eq "$CHOICE_IDX" ]]; then
+			echo "$new_line" >>"$tmpfile"
+		else
+			echo "${raw_lines[$idx]}" >>"$tmpfile"
+		fi
+	done
+
+	mv "$tmpfile" "$EXPORT_FILE"
+	ensure_permissions
+	show_message "Success" "Network entry has been updated."
+}
+
+recover_from_backup() {
+	EXPORT_FILE=$(whiptail --inputbox "Enter filename to recover backups for:" 0 0 "$EXPORT_FILE" --title "Recover Backup" 3>&1 1>&2 2>&3)
+	local exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	local backup_dir
+	backup_dir=$(dirname "$EXPORT_FILE")
+	mapfile -t backups < <(find "$backup_dir" -maxdepth 1 -type f -name "$(basename "$EXPORT_FILE").bak.*" | sort -r)
+
+	if [ ${#backups[@]} -eq 0 ]; then
+		show_message "Recovery" "No backup files found."
+		return 0
+	fi
+
+	declare -a options=()
+	declare -A id_map=()
+	local i=1
+	for backup_file in "${backups[@]}"; do
+		local tag="$i"
+		local timestamp
+		timestamp=$(echo "$backup_file" | grep -oE '[0-9]+$')
+		local date_str
+		date_str=$(date -d "@$timestamp" "+%Y-%m-%d %H:%M:%S")
+		local display_text="Backup from $date_str"
+
+		options+=("$tag" "$display_text")
+		id_map["$tag"]="$backup_file"
+		((i++))
+	done
+
+	local CHOICE_TAG
+	CHOICE_TAG=$(whiptail --title "Restore Backup" --menu "Select a backup to restore:" 0 0 "${#id_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3)
+	exit_status=$?
+
+	if [[ $exit_status -eq 0 ]]; then
+		local selected_backup="${id_map[$CHOICE_TAG]}"
+		if (whiptail --title "Confirm Restore" --yesno "This will overwrite the current export file with the selected backup.\n\nAre you sure?" 0 0); then
+			cp "$selected_backup" "$EXPORT_FILE"
+			ensure_permissions
+			show_message "Success" "Successfully restored networks from backup."
+		fi
+	fi
+}
+
+generate_qr_code_menu() {
+	local CHOICE exit_status
+	CHOICE=$(whiptail --title "Generate QR Code" --menu "Choose an output method" 0 0 2 \
+		"1" "Display in Terminal" \
+		"2" "Save to Image File (.png)" 3>&1 1>&2 2>&3)
+
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	case "$CHOICE" in
+	1) generate_qr_code_to_terminal ;;
+	2) generate_qr_code_to_file ;;
+	esac
+}
+
+generate_qr_code_to_terminal() {
+	EXPORT_FILE=$(whiptail --inputbox "Enter filename to generate QR code from:" 0 0 "$EXPORT_FILE" --title "Generate QR Code" 3>&1 1>&2 2>&3)
+	local exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	if [[ ! -f "$EXPORT_FILE" ]] || [[ ! -s "$EXPORT_FILE" ]]; then
+		show_message "Error" "Export file is empty or does not exist."
+		return 0
+	fi
+
+	mapfile -t raw_lines <"$EXPORT_FILE"
+
+	declare -a options=()
+	declare -A id_map=()
+	local i=1
+	for idx in "${!raw_lines[@]}"; do
+		local raw_line="${raw_lines[idx]}"
+		[[ -z "$raw_line" ]] && continue
+
+		local tag="$i"
+		options+=("$tag" "$raw_line")
+		id_map["$tag"]="$idx"
+		((i++))
+	done
+
+	if [ ${#id_map[@]} -eq 0 ]; then
+		show_message "Error" "No networks found in the export file."
+		return 0
+	fi
+
+	local CHOICE_TAG
+	CHOICE_TAG=$(whiptail --title "Generate QR Code" --menu "Select a network to generate a QR code for:" 0 0 "${#id_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	local CHOICE_IDX="${id_map[$CHOICE_TAG]}"
+	local selected_line="${raw_lines[$CHOICE_IDX]}"
+	IFS='|' read -r -a F <<<"$selected_line"
+	local num_fields=${#F[@]}
+
+	local ssid="" pass="" security="WPA" hidden="no"
+
+	# Parse based on number of fields for backward compatibility
+	case $num_fields in
+	2)
+		ssid="${F[0]}"
+		pass="${F[1]}"
+		;;
+	3)
+		ssid="${F[0]}"
+		pass="${F[1]}"
+		;;
+	4)
+		ssid="${F[0]}"
+		pass="${F[1]}"
+		;;
+	5)
+		ssid="${F[0]}"
+		pass="${F[1]}"
+		security="${F[2]}"
+		;;
+	6)
+		ssid="${F[0]}"
+		pass="${F[1]}"
+		security="${F[2]}"
+		hidden="${F[5]}"
+		;;
+	*)
+		show_message "Error" "Cannot generate QR code from malformed line."
+		return 1
+		;;
+	esac
+
+	if [[ -z "$ssid" ]]; then
+		show_message "Error" "Cannot generate QR code from malformed line (empty SSID)."
+		return 1
+	fi
+	if [[ "$security" != "OPEN" && -z "$pass" ]]; then
+		if ! (whiptail --title "Confirm Empty Password" --yesno "The password for this '$security' network is empty. Continue generating QR code?" 0 0); then
+			return 0
+		fi
+	fi
+
+	# --- Generate QR string ---
+	local qr_ssid qr_pass qr_string qr_hidden
+	qr_ssid=$(sed 's/\([;,"\\]\)/\\\1/g' <<<"$ssid")
+	qr_pass=$(sed 's/\([;,"\\]\)/\\\1/g' <<<"$pass")
+	if [[ "$hidden" == "yes" ]]; then qr_hidden=";H:true"; fi
+
+	case "$security" in
+	"WPA") qr_string="WIFI:T:WPA;S:${qr_ssid};P:${qr_pass}${qr_hidden};;" ;;
+	"WEP") qr_string="WIFI:T:WEP;S:${qr_ssid};P:${qr_pass}${qr_hidden};;" ;;
+	"OPEN") qr_string="WIFI:T:nopass;S:${qr_ssid}${qr_hidden};;" ;;
+	*)
+		show_message "Error" "Unknown security type: '$security'."
+		return 1
+		;;
+	esac
+
+	clear
+	echo "Scan the QR code below. It will be cleared when you press OK."
+	echo ""
+	qrencode -t ANSIUTF8 "$qr_string"
+	echo ""
+	echo "SSID: $ssid"
+	[[ "$security" != "OPEN" ]] && echo "Password: $pass"
+	echo "Security: $security"
+	echo "Hidden: $hidden"
+	echo ""
+
+	read -r -s -p "PRESS ENTER TO CONTINUE"
+	show_message "QR Code" "QR code was displayed in the terminal. Press OK to clear and return to the menu."
+	clear
+}
+
+generate_qr_code_to_file() {
+	EXPORT_FILE=$(whiptail --inputbox "Enter filename to generate QR code from:" 0 0 "$EXPORT_FILE" --title "Generate QR Code" 3>&1 1>&2 2>&3)
+	local exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	if [[ ! -f "$EXPORT_FILE" ]] || [[ ! -s "$EXPORT_FILE" ]]; then
+		show_message "Error" "Export file is empty or does not exist."
+		return 0
+	fi
+
+	mapfile -t raw_lines <"$EXPORT_FILE"
+
+	declare -a options=()
+	declare -A id_map=()
+	local i=1
+	for idx in "${!raw_lines[@]}"; do
+		local raw_line="${raw_lines[idx]}"
+		[[ -z "$raw_line" ]] && continue
+
+		local tag="$i"
+		options+=("$tag" "$raw_line")
+		id_map["$tag"]="$idx"
+		((i++))
+	done
+
+	if [ ${#id_map[@]} -eq 0 ]; then
+		show_message "Error" "No networks found in the export file."
+		return 0
+	fi
+
+	local CHOICE_TAG
+	CHOICE_TAG=$(whiptail --title "Save QR Code to File" --menu "Select a network to generate a QR code for:" 0 0 "${#id_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	local CHOICE_IDX="${id_map[$CHOICE_TAG]}"
+	local selected_line="${raw_lines[$CHOICE_IDX]}"
+	IFS='|' read -r -a F <<<"$selected_line"
+	local num_fields=${#F[@]}
+
+	local ssid="" pass="" security="WPA" hidden="no"
+
+	# Parse based on number of fields for backward compatibility
+	case $num_fields in
+	2)
+		ssid="${F[0]}"
+		pass="${F[1]}"
+		;;
+	3)
+		ssid="${F[0]}"
+		pass="${F[1]}"
+		;;
+	4)
+		ssid="${F[0]}"
+		pass="${F[1]}"
+		;;
+	5)
+		ssid="${F[0]}"
+		pass="${F[1]}"
+		security="${F[2]}"
+		;;
+	6)
+		ssid="${F[0]}"
+		pass="${F[1]}"
+		security="${F[2]}"
+		hidden="${F[5]}"
+		;;
+	*)
+		show_message "Error" "Cannot generate QR code from malformed line."
+		return 1
+		;;
+	esac
+
+	if [[ -z "$ssid" ]]; then
+		show_message "Error" "Cannot generate QR code from malformed line (empty SSID)."
+		return 1
+	fi
+	if [[ "$security" != "OPEN" && -z "$pass" ]]; then
+		if ! (whiptail --title "Confirm Empty Password" --yesno "The password for this '$security' network is empty. Continue generating QR code?" 0 0); then
+			return 0
+		fi
+	fi
+
+	# --- Get output path from user ---
+	local default_dir="$HOME/wifi-qrcodes"
+	mkdir -p "$default_dir"
+	local safe_ssid
+	safe_ssid=$(echo "$ssid" | sed 's/[^a-zA-Z0-9_-]/_/g')
+	local default_path="${default_dir}/${safe_ssid}.png"
+
+	local output_path
+	output_path=$(whiptail --inputbox "Enter path to save QR code image:" 0 0 "$default_path" --title "Save QR Code" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 || -z "$output_path" ]] && return 0
+
+	# --- Generate QR string ---
+	local qr_ssid qr_pass qr_string qr_hidden
+	qr_ssid=$(sed 's/\([;,"\\]\)/\\\1/g' <<<"$ssid")
+	qr_pass=$(sed 's/\([;,"\\]\)/\\\1/g' <<<"$pass")
+	if [[ "$hidden" == "yes" ]]; then qr_hidden=";H:true"; fi
+
+	case "$security" in
+	"WPA") qr_string="WIFI:T:WPA;S:${qr_ssid};P:${qr_pass}${qr_hidden};;" ;;
+	"WEP") qr_string="WIFI:T:WEP;S:${qr_ssid};P:${qr_pass}${qr_hidden};;" ;;
+	"OPEN") qr_string="WIFI:T:nopass;S:${qr_ssid}${qr_hidden};;" ;;
+	*)
+		show_message "Error" "Unknown security type: '$security'."
+		return 1
+		;;
+	esac
+
+	# --- Save QR code to file ---
+	if qrencode -m 2 -s 20 -l H -o "$output_path" "$qr_string"; then
+		show_message "Success" "QR code for '$ssid' saved to:\n$output_path"
+	else
+		show_message "Error" "Failed to save QR code to '$output_path'.\nCheck permissions and if the path is valid."
+	fi
+}
+
+export_from_qr_code() {
+	EXPORT_FILE=$(whiptail --inputbox "Enter filename to add the new network to:" 0 0 "$EXPORT_FILE" --title "Export from QR" 3>&1 1>&2 2>&3)
+	local exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	local qr_image_path
+	qr_image_path=$(whiptail --inputbox "Enter the full path to the QR code image:" 0 0 "" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 || -z "$qr_image_path" ]] && return 0
+
+	if [[ ! -f "$qr_image_path" ]]; then
+		show_message "Error" "Image file not found at: $qr_image_path"
+		return 1
+	fi
+
+	local qr_data
+	qr_data=$(zbarimg --quiet --raw "$qr_image_path" 2>/dev/null)
+
+	if [[ -z "$qr_data" || ! "$qr_data" == WIFI:* ]]; then
+		show_message "Error" "No valid WiFi QR code found in the image."
+		return 1
+	fi
+
+	# Extract SSID, Password, Security, and Hidden status
+	local ssid pass security hidden
+	ssid=$(echo "$qr_data" | sed -n 's/.*S:\([^;]*\);.*/\1/p')
+	pass=$(echo "$qr_data" | sed -n 's/.*P:\([^;]*\);.*/\1/p')
+
+	case "$qr_data" in
+	*T:WPA*) security="WPA" ;;
+	*T:WEP*) security="WEP" ;;
+	*T:nopass*) security="OPEN" ;;
+	*) security="WPA" ;; # Default to WPA
+	esac
+
+	hidden="no"
+	if [[ "$qr_data" == *";H:true;"* ]]; then
+		hidden="yes"
+	fi
+
+	# Un-escape characters: \, ;, ,, "
+	ssid=$(sed 's/\\\([;,"\\]\)/\1/g' <<<"$ssid")
+	pass=$(sed 's/\\\([;,"\\]\)/\1/g' <<<"$pass")
+
+	if [[ -z "$ssid" ]]; then
+		show_message "Error" "Could not parse SSID from QR code data."
+		return 1
+	fi
+
+	local default_iface
+	default_iface=$(nmcli -t -f DEVICE,TYPE dev | grep ':wifi$' | cut -d: -f1 | head -n1 || echo "wlan0")
+
+	# Write in the new 7-field format: SSID|PASSWORD|SECURITY|BSSID|INTERFACE|HIDDEN|PRIORITY
+	echo "$ssid${DELIMITER}$pass${DELIMITER}$security${DELIMITER}${DELIMITER}$default_iface${DELIMITER}$hidden${DELIMITER}0" >>"$EXPORT_FILE"
+	ensure_permissions
+	show_message "Success" "Successfully imported network '$ssid' ($security, Hidden: $hidden) from QR code."
+}
+
+display_qr_data_from_image() {
+	local qr_image_path exit_status
+
+	qr_image_path=$(whiptail --inputbox "Enter the full path to the QR code image to display:" 0 0 "" --title "Display QR Data from Image" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 || -z "$qr_image_path" ]] && return 0
+
+	if [[ ! -f "$qr_image_path" ]]; then
+		show_message "Error" "Image file not found at: $qr_image_path"
+		return 1
+	fi
+
+	# Using zbarimg to read the data from the QR code
+	local qr_data
+	qr_data=$(zbarimg --quiet --raw "$qr_image_path" 2>/dev/null)
+
+	if [[ -z "$qr_data" ]]; then
+		show_message "Error" "No QR code or barcode found in the image."
+		return 1
+	fi
+
+	# Display the data in a scrollable textbox
+	local temp_file
+	temp_file=$(mktemp)
+	trap 'rm -f "$temp_file"' RETURN
+	{
+		echo "QR Code Data from: $qr_image_path"
+		echo "------------------------------------------------"
+		echo "$qr_data"
+	} >"$temp_file"
+
+	whiptail --title "QR Code Data" --textbox "$temp_file" 0 0 --scrolltext
+}
+
+delete_network() {
+	mapfile -t lines < <(nmcli -t -f NAME,TYPE connection show | grep '802-11-wireless' | cut -d: -f1)
+
+	if [ ${#lines[@]} -eq 0 ]; then
+		show_message "Delete Network" "No saved WiFi networks to delete."
+		return 0
+	fi
+
+	declare -a options=()
+	declare -A tag_map=()
+	local i=1
+	for line in "${lines[@]}"; do
+		[[ -z "$line" ]] && continue
+		local tag="$i"
+		local display_name="$line"
+
+		options+=("$tag" "$display_name")
+		tag_map["$tag"]="$line"
+		((i++))
+	done
+
+	CHOICE_TAG=$(whiptail --title "Delete WiFi Network" --menu "Select a network to delete:" 0 0 "$((${#options[@]} / 2))" "${options[@]}" 3>&1 1>&2 2>&3)
+	local exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	local selected_network="${tag_map[$CHOICE_TAG]}"
+
+	if (whiptail --title "Confirm Deletion" --yesno "Are you sure you want to delete the network '$selected_network'?" 0 0); then
+		if sudo nmcli connection delete "$selected_network"; then
+			show_message "Success" "Network '$selected_network' has been deleted."
+		else
+			show_message "Error" "Failed to delete network '$selected_network'."
+		fi
+	fi
+}
+
+delete_network_from_export_file() {
+	EXPORT_FILE=$(whiptail --inputbox "Enter filename to delete a network from:" 0 0 "$EXPORT_FILE" --title "Delete from File" 3>&1 1>&2 2>&3)
+	local exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	# ---------------------------------------------------------------------
+	# Locals
+	# ---------------------------------------------------------------------
+	local raw_lines
+	local -A checksum_map remove_checksums
+	local -a options=()
+
+	# ---------------------------------------------------------------------
+	# Ensure log file exists (best effort)
+	# ---------------------------------------------------------------------
+	if [[ ! -w "$LOG_FILE" ]]; then
+		mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+		touch "$LOG_FILE" 2>/dev/null || true
+	fi
+
+	# ---------------------------------------------------------------------
+	# If file missing — nothing to delete
+	# ---------------------------------------------------------------------
+	if [[ ! -f "$EXPORT_FILE" ]] || [[ ! -s "$EXPORT_FILE" ]]; then
+		show_message "Delete Network" "Export file is empty or does not exist: $EXPORT_FILE"
+		return 0
+	fi
+
+	# ---------------------------------------------------------------------
+	# Load raw file lines
+	# ---------------------------------------------------------------------
+	mapfile -t raw_lines <"$EXPORT_FILE"
+
+	# ---------------------------------------------------------------------
+	# Build whiptail menu entries using the superior pattern
+	# ---------------------------------------------------------------------
+	local i=1
+	for raw in "${raw_lines[@]}"; do
+		[[ -z "$raw" ]] && continue
+
+		IFS='|' read -r -a F <<<"$raw"
+		local num_fields=${#F[@]}
+
+		local ssid="" security="WPA" bssid="" iface="" hidden="no"
+
+		# Handle different import formats
+		case $num_fields in
+		2) ssid="${F[0]}" ;;
+		3)
+			ssid="${F[0]}"
+			iface="${F[2]}"
+			;;
+		4)
+			ssid="${F[0]}"
+			bssid="${F[2]}"
+			iface="${F[3]}"
+			;;
+		5)
+			ssid="${F[0]}"
+			security="${F[2]}"
+			bssid="${F[3]}"
+			iface="${F[4]}"
+			;;
+		6)
+			ssid="${F[0]}"
+			security="${F[2]}"
+			bssid="${F[3]}"
+			iface="${F[4]}"
+			hidden="${F[5]}"
+			;;
+		7)
+			ssid="${F[0]}"
+			security="${F[2]}"
+			bssid="${F[3]}"
+			iface="${F[4]}"
+			hidden="${F[5]}"
+			;;
+		*) continue ;;
+		esac
+
+		if [[ -z "$ssid" ]]; then
+			continue
+		fi
+
+		# Pretty display for checklist
+		local display_bssid="$bssid"
+		[[ -z "$display_bssid" ]] && display_bssid="N/A"
+		local display_iface="$iface"
+		[[ -z "$display_iface" ]] && display_iface="N/A"
+		local hidden_display="No"
+		if [[ "$hidden" == "yes" ]]; then hidden_display="Yes"; fi
+
+		local display="SSID: $ssid | Sec: $security | Hidden: $hidden_display | BSSID: $display_bssid"
+		local tag="$i"
+
+		# Map the numeric tag to the line's checksum for safe deletion
+		local checksum
+		checksum=$(printf '%s' "$raw" | sha256sum | awk '{print $1}')
+		checksum_map["$tag"]="$checksum"
+
+		options+=("$tag" "$display" "off")
+		((i++))
+	done
+
+	# Nothing valid to show
+	if [[ ${#options[@]} -eq 0 ]]; then
+		show_message "Delete Network" "No valid WiFi networks to delete."
+		return 0
+	fi
+
+	# ---------------------------------------------------------------------
+	# User selection
+	# ---------------------------------------------------------------------
+	local SELECTED_TAGS_STR
+	SELECTED_TAGS_STR=$(
+		whiptail --scrolltext --checklist \
+			"Select network(s) to remove from the export file:" \
+			0 0 "$((${#options[@]} / 3))" \
+			"${options[@]}" \
+			3>&1 1>&2 2>&3
+	)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	read -ra SELECTED_TAGS <<<"$SELECTED_TAGS_STR"
+
+	# Confirm deletion
+	if ! whiptail --title "Confirm Deletion" \
+		--yesno "Delete ${#SELECTED_TAGS[@]} selected entry(ies)?" 0 0; then
+		return 0
+	fi
+
+	create_backup
+
+	# ---------------------------------------------------------------------
+	# Prepare set of checksums to remove
+	# ---------------------------------------------------------------------
+	for tag in "${SELECTED_TAGS[@]}"; do
+		tag="${tag//\"/}" # whiptail quote quirk
+		# Use the tag to look up the checksum from our map
+		[[ -n "${checksum_map[$tag]}" ]] && remove_checksums["${checksum_map[$tag]}"]=1
+	done
+
+	# ---------------------------------------------------------------------
+	# Atomic rewrite: write kept lines → temp file, then swap
+	# ---------------------------------------------------------------------
+	local tmpfile
+	tmpfile="$(mktemp --tmpdir custom-wifi-del.XXXXXX)"
+
+	while IFS= read -r line; do
+		local line_checksum
+		line_checksum=$(printf '%s' "$line" | sha256sum | awk '{print $1}')
+		if [[ -n "${remove_checksums[$line_checksum]}" ]]; then
+			printf '%s REMOVED (checksum=%s) %s\n' \
+				"$(date -Iseconds)" "$line_checksum" "$line" >>"$LOG_FILE" 2>/dev/null
+			continue
+		fi
+		printf '%s\n' "$line" >>"$tmpfile"
+	done <"$EXPORT_FILE"
+
+	mv "$tmpfile" "$EXPORT_FILE"
+	ensure_permissions
+
+	# Compact last 200 log entries
+	tail -n 200 "$LOG_FILE" >"${LOG_FILE}.tmp" 2>/dev/null || true
+	mv "${LOG_FILE}.tmp" "$LOG_FILE" 2>/dev/null || true
+
+	show_message "Success" "Selected entries removed from export file."
+	return 0
+}
+
+export_networks() {
+	local names count total pct SSID PASSWORD BSSID INTERFACE KEY_MGMT SECURITY_TYPE HIDDEN PRIORITY
+	EXPORT_FILE=$(whiptail --inputbox "Enter filename to export networks to:" 0 0 "$EXPORT_FILE" --title "Export Networks" 3>&1 1>&2 2>&3)
+	local exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	if [ -f "$EXPORT_FILE" ]; then
+		if ! (whiptail --title "Confirm Overwrite" --yesno "File '$EXPORT_FILE' already exists. Overwrite?" 0 0); then
+			return 0
+		fi
+		create_backup
+	fi
+
+	mapfile -t names < <(nmcli -t -f NAME,TYPE connection show | grep '802-11-wireless' | cut -d: -f1)
+
+	if [ ${#names[@]} -eq 0 ]; then
+		show_message "Export" "No WiFi networks found to export."
+		return 0
+	fi
+
+	# Clear the file
+	: >"$EXPORT_FILE"
+
+	count=0
+	total=${#names[@]}
+	(
+		for name in "${names[@]}"; do
+			# Suppress errors if a field doesn't exist
+			SSID=$(nmcli -s -g 802-11-wireless.ssid connection show "$name" 2>/dev/null || echo "")
+			BSSID=$(nmcli -s -g 802-11-wireless.bssid connection show "$name" | tr -d '\' 2>/dev/null || echo "")
+			INTERFACE=$(nmcli -s -g connection.interface-name connection show "$name" 2>/dev/null || echo "")
+			KEY_MGMT=$(nmcli -s -g 802-11-wireless-security.key-mgmt connection show "$name" 2>/dev/null || echo "none")
+			HIDDEN=$(nmcli -s -g 802-11-wireless.hidden connection show "$name" 2>/dev/null || echo "no")
+			PRIORITY=$(sudo nmcli -s -g connection.autoconnect-priority connection show "$name" 2>/dev/null || echo "0")
+
+			SECURITY_TYPE="WPA" # Default
+			PASSWORD=""
+
+			case "$KEY_MGMT" in
+			"wpa-psk" | "sae")
+				SECURITY_TYPE="WPA"
+				PASSWORD=$(sudo nmcli -s -g 802-11-wireless-security.psk connection show "$name" 2>/dev/null || echo "")
+				;;
+			"wep-psk" | "wep-tx-key-index")
+				SECURITY_TYPE="WEP"
+				# Attempt to get WEP key. This is less straightforward and might require multiple checks.
+				PASSWORD=$(sudo nmcli -s -g 802-11-wireless-security.wep-key0 connection show "$name" 2>/dev/null)
+				if [[ -z "$PASSWORD" ]]; then
+					PASSWORD=$(sudo nmcli -s -g 802-11-wireless-security.psk connection show "$name" 2>/dev/null || echo "")
+				fi
+				;;
+			"none")
+				SECURITY_TYPE="OPEN"
+				PASSWORD=""
+				;;
+			esac
+
+			# Only export if we have an SSID
+			if [ -n "$SSID" ]; then
+				# New format: SSID|PASSWORD|SECURITY_TYPE|BSSID|INTERFACE|HIDDEN|PRIORITY
+				echo "${SSID}${DELIMITER}${PASSWORD}${DELIMITER}${SECURITY_TYPE}${DELIMITER}${BSSID}${DELIMITER}${INTERFACE}${DELIMITER}${HIDDEN}${DELIMITER}${PRIORITY}" >>"$EXPORT_FILE"
+			fi
+
+			((count++))
+			pct=$(((count * 100) / total))
+			echo "$pct"
+		done
+	) | whiptail --gauge "Exporting networks..." 0 0 0
+
+	ensure_permissions
+
+	exported_count=$(wc -l <"$EXPORT_FILE")
+	show_message "Export Complete" "Exported $exported_count network(s) to '$EXPORT_FILE'."
+}
+
+import_networks() {
+	local user_iface="" exit_status
+	local use_iface_from_file=0 # 0=false, 1=true
+	local IFS='|'               # delimiter
+
+	# -------------------------------
+	# Ask for import file
+	# -------------------------------
+	EXPORT_FILE=$(whiptail --inputbox "Enter filename to import from:" 0 0 "$EXPORT_FILE" \
+		--title "Import Networks" 3>&1 1>&2 2>&3)
+	exit_status=$?
+	[[ $exit_status -ne 0 ]] && return 0
+
+	[[ ! -f "$EXPORT_FILE" ]] && {
+		show_message "Error" "Import file '$EXPORT_FILE' not found."
+		return 0
+	}
+
+	# -------------------------------
+	# Detect and select interface
+	# -------------------------------
+	mapfile -t wifi_interfaces < <(nmcli -t -f DEVICE,TYPE dev | grep ':wifi$' | cut -d: -f1)
+	local num_ifaces=${#wifi_interfaces[@]}
+
+	case $num_ifaces in
+	0)
+		local CHOICE
+		CHOICE=$(whiptail --title "No WiFi Interface Found" --menu \
+			"No active WiFi interfaces detected. What would you like to do?" 0 0 3 \
+			"1" "Pre-load profiles by entering an interface name manually" \
+			"2" "Use interface name from the import file (if specified in file)" \
+			"3" "Return to Main Menu" 3>&1 1>&2 2>&3)
+		exit_status=$?
+
+		if [[ $exit_status -ne 0 || "$CHOICE" == "3" ]]; then
+			return 0
+		fi
+
+		if [[ "$CHOICE" == "1" ]]; then
+			user_iface=$(whiptail --inputbox \
+				"Enter the expected interface name to pre-load profiles (e.g., wlan0):" \
+				0 0 "" --title "Import Networks - Pre-load" \
+				3>&1 1>&2 2>&3)
+			exit_status=$?
+		elif [[ "$CHOICE" == "2" ]]; then
+			use_iface_from_file=1
+		fi
+		;;
+	1)
+		user_iface=$(whiptail --inputbox \
+			"Enter interface to use for imported networks (1 found):" \
+			0 0 "${wifi_interfaces[0]}" --title "Import Networks" \
+			3>&1 1>&2 2>&3)
+		exit_status=$?
+		;;
+	*)
+		declare -a options=()
+		declare -A id_map=()
+		local i=1
+		for iface in "${wifi_interfaces[@]}"; do
+			local tag="$i"
+			options+=("$tag" "$iface")
+			id_map["$tag"]="$iface"
+			((i++))
+		done
+		options+=("MANUAL" "Enter an interface name manually")
+
+		local CHOICE_TAG
+		CHOICE_TAG=$(whiptail --title "Select WiFi Interface" \
+			--menu "Multiple WiFi interfaces detected. Please choose one:" \
+			0 0 "$((${#options[@]} / 2))" "${options[@]}" 3>&1 1>&2 2>&3)
+		exit_status=$?
+
+		if [[ $exit_status -eq 0 ]]; then
+			if [[ "$CHOICE_TAG" == "MANUAL" ]]; then
+				user_iface=$(whiptail --inputbox "Enter interface name:" \
+					0 0 "" --title "Import Networks - Manual Entry" \
+					3>&1 1>&2 2>&3)
+				exit_status=$?
+			else
+				user_iface="${id_map[$CHOICE_TAG]}"
+			fi
+		fi
+		;;
+	esac
+
+	# Centralized check for cancellation or empty input
+	if [[ $exit_status -ne 0 ]]; then return 0; fi # User pressed ESC
+	if [[ $use_iface_from_file -eq 0 && -z "$user_iface" ]]; then
+		show_message "Error" "Interface name cannot be empty."
+		return 0
+	fi
+
+	# -------------------------------
+	# Load file into RAW_LINES
+	# -------------------------------
+	readarray -t RAW_LINES <"$EXPORT_FILE"
+
+	# Maps (associative arrays) for storing parsed data
+	declare -A SSID_map PASS_map SEC_map BSSID_map IFACE_map HIDDEN_map PRIORITY_map
+	local idx=0
+
+	# -------------------------------
+	# Parse each line safely
+	# -------------------------------
+	for line in "${RAW_LINES[@]}"; do
+		[[ -z "$line" ]] && continue
+
+		IFS='|' read -r -a F <<<"$line"
+		local num_fields=${#F[@]}
+
+		local SSID="" PASSWORD="" SECURITY="WPA" BSSID="" INTERFACE="" HIDDEN="no" PRIORITY="0"
+
+		# Handle different import formats for backward compatibility
+		case $num_fields in
+		2) # Legacy: SSID|PASSWORD
+			SSID="${F[0]}"
+			PASSWORD="${F[1]}"
+			;;
+		3) # Legacy: SSID|PASSWORD|INTERFACE
+			SSID="${F[0]}"
+			PASSWORD="${F[1]}"
+			INTERFACE="${F[2]}"
+			;;
+		4) # Legacy: SSID|PASSWORD|BSSID|INTERFACE
+			SSID="${F[0]}"
+			PASSWORD="${F[1]}"
+			BSSID="${F[2]}"
+			INTERFACE="${F[3]}"
+			;;
+		5) # Legacy: SSID|PASSWORD|SECURITY|BSSID|INTERFACE
+			SSID="${F[0]}"
+			PASSWORD="${F[1]}"
+			SECURITY="${F[2]}"
+			BSSID="${F[3]}"
+			INTERFACE="${F[4]}"
+			;;
+		6) # New: SSID|PASSWORD|SECURITY|BSSID|INTERFACE|HIDDEN
+			SSID="${F[0]}"
+			PASSWORD="${F[1]}"
+			SECURITY="${F[2]}"
+			BSSID="${F[3]}"
+			INTERFACE="${F[4]}"
+			HIDDEN="${F[5]}"
+			;;
+		7) # New: SSID|PASSWORD|SECURITY|BSSID|INTERFACE|HIDDEN|PRIORITY
+			SSID="${F[0]}"
+			PASSWORD="${F[1]}"
+			SECURITY="${F[2]}"
+			BSSID="${F[3]}"
+			INTERFACE="${F[4]}"
+			HIDDEN="${F[5]}"
+			PRIORITY="${F[6]}"
+			;;
+		*) # Skip malformed lines
+			continue ;;
+		esac
+
+		# A valid entry must have at least an SSID.
+		if [[ -z "$SSID" ]]; then continue; fi
+		# For Open networks, password can be empty.
+		if [[ "$SECURITY" != "OPEN" && -z "$PASSWORD" ]]; then continue; fi
+
+		# --- Determine the final interface to use for this line ---
+		local final_iface=""
+		if [[ $use_iface_from_file -eq 1 ]]; then
+			final_iface="$INTERFACE" # Use what was in the file
+		else
+			# Manual mode: use file's value as an override, otherwise use the global value
+			if [[ -n "$INTERFACE" ]]; then
+				final_iface="$INTERFACE"
+			else
+				final_iface="$user_iface"
+			fi
+		fi
+
+		# If, after all logic, we have no interface, this line is invalid. Skip it.
+		if [[ -z "$final_iface" ]]; then
+			continue
+		fi
+
+		SSID_map[$idx]="$SSID"
+		PASS_map[$idx]="$PASSWORD"
+		SEC_map[$idx]="$SECURITY"
+		BSSID_map[$idx]="$BSSID"
+		IFACE_map[$idx]="$final_iface" # Use the determined final_iface
+		HIDDEN_map[$idx]="$HIDDEN"
+		PRIORITY_map[$idx]="$PRIORITY"
+
+		((idx++))
+	done
+
+	local parsed=$idx
+	((parsed == 0)) && {
+		show_message "Import Error" "No valid network entries found in '$EXPORT_FILE' that could be processed with the chosen interface option."
+		return 0
+	}
+
+	# -------------------------------
+	# GAUGE (no subshell)
+	# -------------------------------
+	{
+		for i in "${!SSID_map[@]}"; do
+			SSID="${SSID_map[$i]}"
+			PASSWORD="${PASS_map[$i]}"
+			SECURITY="${SEC_map[$i]}"
+			BSSID="${BSSID_map[$i]}"
+			IFACE="${IFACE_map[$i]}"
+			HIDDEN="${HIDDEN_map[$i]}"
+			PRIORITY="${PRIORITY_map[$i]}"
+
+			# Check if a connection with the same name already exists
+			if nmcli -t -f NAME connection show | grep -q "^${SSID}$"; then
+				# If it exists, delete it first to achieve overwrite behavior
+				sudo nmcli connection delete "$SSID" >/dev/null 2>&1 || true
+			fi
+
+			local cmd_base="sudo nmcli connection add type wifi con-name \"$SSID\" ifname \"$IFACE\" ssid \"$SSID\""
+			local cmd_sec=""
+			local cmd_hidden="802-11-wireless.hidden no"
+
+			case "$SECURITY" in
+			"WPA")
+				cmd_sec="wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"$PASSWORD\""
+				;;
+			"WEP")
+				cmd_sec="wifi-sec.key-mgmt wep wifi-sec.wep-key-type passphrase wifi-sec.wep-key0 \"$PASSWORD\""
+				;;
+			"OPEN")
+				cmd_sec="wifi-sec.key-mgmt none"
+				;;
+			*)
+				cmd_sec="wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"$PASSWORD\""
+				;;
+			esac
+
+			if [[ "$HIDDEN" == "yes" ]]; then
+				cmd_hidden="802-11-wireless.hidden yes"
+			fi
+
+			# Assemble and execute the command
+			eval "$cmd_base $cmd_sec $cmd_hidden"
+
+			# If a BSSID was specified, modify the connection to lock it.
+			if [[ -n "$BSSID" ]]; then
+				sudo nmcli connection modify "$SSID" 802-11-wireless.bssid "$BSSID"
+			fi
+
+			# If a PRIORITY was specified, modify the connection to set it.
+			if [[ -n "$PRIORITY" ]]; then
+				sudo nmcli connection modify "$SSID" connection.autoconnect-priority "$PRIORITY"
+			fi
+
+			pct=$((((i + 1) * 100) / parsed))
+			echo "$pct"
+		done
+	} | whiptail --gauge "Importing networks..." 10 60 0
+
+	# -------------------------------
+	# DONE (no counters)
+	# -------------------------------
+	show_message "Import Complete" "All valid entries from '$EXPORT_FILE' processed."
+}
+
+# Installs and enables a one-shot systemd service for headless WiFi configuration.
+# This is designed for systems that may boot without a WiFi adapter present.
+# The service will run on each boot, import networks from a specified file as soon
+# as a WiFi device is detected, and then disable itself to prevent re-running.
+setup_headless_import_service() {
+	# --- Variable Declarations ---
+	local exit_status
+	# Name of the systemd service to be created.
+	local service_name="wifi-import-once.service"
+	# Absolute path where the helper script will be installed.
+	local script_path="/usr/local/bin/wifi-import-once.sh"
+	# Absolute path where the systemd service unit file will be installed.
+	local service_path="/etc/systemd/system/$service_name"
+
+	# Check if the service already exists to inform the user about the replacement.
+	local overwrite_message=""
+	if [[ -f "$service_path" ]]; then
+		overwrite_message="NOTE: An existing service was found and will be replaced.\n\n"
+	fi
+
+	# --- 1. Get Configuration from User ---
+	# Prompts the user for the absolute path to the network export file.
+	# This file contains the WiFi profiles that the service will import.
+	local import_file
+	import_file=$(whiptail --inputbox \
+		"This will install a systemd service that runs on boot to import WiFi networks.\n\nPlease enter the FULL, ABSOLUTE path to the network export file to be used:" \
+		0 0 "$EXPORT_FILE" --title "Headless Service Setup" \
+		3>&1 1>&2 2>&3)
+	exit_status=$?
+	# Exit if the user cancels the input dialog.
+	[[ $exit_status -ne 0 ]] && return 0
+
+	# --- 2. Validate User Configuration ---
+	# Ensure the file path is not empty.
+	if [[ -z "$import_file" ]]; then
+		show_message "Error" "The import file path cannot be empty."
+		return 1
+	fi
+	# Ensure the path is absolute (starts with '/'). This is crucial for systemd services.
+	if [[ "$import_file" != /* ]]; then
+		show_message "Error" "The path must be absolute (start with '/')."
+		return 1
+	fi
+	# Ensure the specified file exists and is not empty.
+	if [[ ! -f "$import_file" ]] || [[ ! -s "$import_file" ]]; then
+		show_message "Error" "The specified import file does not exist or is empty:\n$import_file"
+		return 1
+	fi
+
+	# --- 3. Final Confirmation ---
+	# Display a summary of actions and ask the user for final confirmation before proceeding.
+	if ! (whiptail --title "Confirm Installation" --yesno \
+		"${overwrite_message}The following will be done:\n\n1. Create script: $script_path\n2. Create service: $service_path\n3. Enable the service to run on boot.\n\nThe service will run on each boot until a WiFi card is found, import networks from '$import_file', and then disable itself automatically.\n\nProceed with installation?" \
+		0 0); then
+		return 0
+	fi
+
+	# --- 4. Define Helper Script Content (via HEREDOC) ---
+	# A HEREDOC is used to define the content of the helper script.
+	# The 'EOF' is quoted, which prevents the shell from expanding variables (like $SSID)
+	# within the HEREDOC. Instead, we use placeholders like __IMPORT_FILE__ which are
+	# safely replaced later.
+	local helper_script_content
+	helper_script_content=$(
+		cat <<'EOF'
+#!/bin/bash
+# This script is generated by WiFi MIGRATOR for one-time network import.
+# It will run on boot, and disable itself after successful execution.
+
+# NOTE: 'set -e' is intentionally left out to ensure the script attempts
+# to import all networks, even if one fails.
+# Do NOT use 'set -e' in the production script; we want to attempt all networks.
+# set -e
+
+IMPORT_FILE="__IMPORT_FILE__"
+SERVICE_NAME="__SERVICE_NAME__"
+
+logger "$SERVICE_NAME: Checking for available WiFi interfaces..."
+INTERFACE_TO_USE=$(nmcli -t -f DEVICE,TYPE dev | grep ':wifi$' | cut -d: -f1 | head -n1)
+
+if [[ -z "$INTERFACE_TO_USE" ]]; then
+    logger "$SERVICE_NAME: No WiFi interface found. Will check again on next boot."
+    exit 0
+fi
+
+logger "$SERVICE_NAME: Found WiFi interface '$INTERFACE_TO_USE'. Proceeding with import."
+
+if [[ ! -f "$IMPORT_FILE" ]]; then
+    logger "$SERVICE_NAME: ERROR - Import file '$IMPORT_FILE' not found! Disabling service."
+    systemctl disable "$SERVICE_NAME"
+    exit 1
+fi
+
+import_count=0
+error_count=0
+
+# Use process substitution with 'tr' to strip any carriage returns (\r) from the import file.
+# This prevents issues with files created on Windows (CRLF endings).
+while IFS='|' read -r -a F; do
+    # Skip empty or malformed lines
+    [[ ${#F[@]} -lt 2 ]] && continue
+
+    SSID="${F[0]}"
+    PASSWORD="${F[1]}"
+    # Set defaults
+    SECURITY="WPA"
+    BSSID=""
+    HIDDEN="no"
+    PRIORITY="0"
+
+    # Override defaults based on the number of fields in the line
+    case ${#F[@]} in
+        5) SECURITY="${F[2]}"; BSSID="${F[3]}";;
+        6) SECURITY="${F[2]}"; BSSID="${F[3]}"; HIDDEN="${F[5]}";;
+        7) SECURITY="${F[2]}"; BSSID="${F[3]}"; HIDDEN="${F[5]}"; PRIORITY="${F[6]}";;
+    esac
+
+    # Sanity checks
+    [[ -z "$SSID" ]] && continue
+
+    if [[ "$SECURITY" != "OPEN" && -z "$PASSWORD" ]]; then
+        logger "$SERVICE_NAME: Skipping '$SSID' due to missing password for a secured network."
+        ((error_count++))
+        continue
+    fi
+
+    logger "$SERVICE_NAME: Importing '$SSID' with priority '$PRIORITY'..."
+
+    # Check if a connection with the same name already exists and delete it to ensure a clean import.
+    # The grep pattern is corrected to "^${SSID}$" to match the exact name.
+    if nmcli -t -f NAME connection show | grep -q "^${SSID}$"; then
+        logger "$SERVICE_NAME: Deleting existing connection for '$SSID'."
+        nmcli connection delete "$SSID" >/dev/null 2>&1 || true
+    fi
+
+    # Build nmcli command in an array. This is safer than using 'eval' as it
+    # correctly handles arguments with spaces or special characters.
+    cmd_array=(nmcli connection add type wifi con-name "$SSID" ifname "$INTERFACE_TO_USE" ssid "$SSID")
+
+    case "$SECURITY" in
+        WPA)
+            cmd_array+=("wifi-sec.key-mgmt" "wpa-psk" "wifi-sec.psk" "$PASSWORD")
+            ;;
+        WEP)
+            cmd_array+=("wifi-sec.key-mgmt" "wep" "wifi-sec.wep-key-type" "passphrase" "wifi-sec.wep-key0" "$PASSWORD")
+            ;;
+        OPEN)
+            cmd_array+=("wifi-sec.key-mgmt" "none")
+            ;;
+        *)
+            # Default to WPA for any other security value
+            cmd_array+=("wifi-sec.key-mgmt" "wpa-psk" "wifi-sec.psk" "$PASSWORD")
+            ;;
+    esac
+
+    if [[ "$HIDDEN" == "yes" ]]; then
+        cmd_array+=("802-11-wireless.hidden" "yes")
+    fi
+
+    # Execute the command and check its exit status
+    if "${cmd_array[@]}"; then
+        # On success, apply optional modifications
+        if [[ -n "$BSSID" ]]; then
+            nmcli connection modify "$SSID" 802-11-wireless.bssid "$BSSID" || {
+                logger "$SERVICE_NAME: Warning - Failed to set BSSID for '$SSID'."
+            }
+        fi
+        if [[ -n "$PRIORITY" && "$PRIORITY" != "0" ]]; then
+            nmcli connection modify "$SSID" connection.autoconnect-priority "$PRIORITY" || {
+                logger "$SERVICE_NAME: Warning - Failed to set priority for '$SSID'."
+            }
+        fi
+        ((import_count++))
+    else
+        # On failure, log the error and continue to the next network
+        logger "$SERVICE_NAME: Failed to import '$SSID'."
+        ((error_count++))
+        continue
+    fi
+done < <(tr -d '\r' < "$IMPORT_FILE")
+
+
+logger "$SERVICE_NAME: Import task finished. Success: $import_count, Failed: $error_count."
+
+if [[ $import_count -gt 0 || $error_count -gt 0 ]]; then
+    logger "$SERVICE_NAME: Disabling service after execution."
+    systemctl disable "$SERVICE_NAME"
+fi
+
+exit 0
+EOF
+	)
+
+	# Safely inject the dynamic values for the import file path and service name
+	# into the script content by replacing the placeholders.
+	# parameter expansion with search-and-replace:
+	# ${variable//pattern/replacement}
+	# // means: replace ALL occurrences of pattern with replacement in the value of variable
+	# If you used only one slash /, it would replace only the first occurrence
+	helper_script_content="${helper_script_content//__IMPORT_FILE__/$import_file}"
+	helper_script_content="${helper_script_content//__SERVICE_NAME__/$service_name}"
+
+	# --- 5. Define Service Unit Content ---
+	# Defines the systemd service unit file content.
+	# - Description: Explains what the service does.
+	# - After/Wants: Ensures it runs after the network is online.
+	# - Type=oneshot: The service does its work and exits.
+	# - ExecStart: The command to run (our helper script).
+	# - WantedBy: Enables the service to start at boot in a multi-user environment.
+	local service_unit_content
+	service_unit_content=$(
+		printf '%s' \
+			"[Unit]
+Description=One-shot WiFi Network Importer for Headless Setup
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$script_path
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+"
+	)
+
+	# --- 6. Write Files and Enable Service ---
+	# This block performs the installation, wrapped in a subshell piped to a
+	# whiptail gauge to provide visual feedback to the user.
+	(
+		# Clean up existing service if it exists
+		if [[ -f "$service_path" ]]; then
+			echo "Stopping and removing existing service..."
+			sudo systemctl stop "$service_name" >/dev/null 2>&1 || true
+			sudo systemctl disable "$service_name" >/dev/null 2>&1 || true
+			sudo rm -f "$service_path" "$script_path"
+			echo 15
+			sleep 1
+		fi
+
+		echo "Writing helper script to $script_path..."
+		# Use 'sudo tee' to write the script content to its destination with root privileges.
+		echo "$helper_script_content" | sudo tee "$script_path" >/dev/null
+		echo 35
+		sleep 1
+
+		echo "Setting script permissions..."
+		# Make the helper script executable.
+		sudo chmod +x "$script_path"
+		echo 55
+		sleep 1
+
+		echo "Writing systemd service to $service_path..."
+		# Use 'sudo tee' to write the service unit file to the systemd directory.
+		echo "$service_unit_content" | sudo tee "$service_path" >/dev/null
+		echo 75
+		sleep 1
+
+		echo "Reloading systemd and enabling service..."
+		# Reload the systemd daemon to recognize the new service.
+		sudo systemctl daemon-reload
+		# Enable the service to start on the next boot.
+		sudo systemctl enable "$service_name"
+		echo 100
+		sleep 1
+	) | whiptail --gauge "Installing headless import service..." 8 70 0
+
+	show_message "Success" "The headless import service '$service_name' has been installed and enabled.\n\nIt will run on the next boot to import networks from '$import_file' as soon as a WiFi interface is detected."
+}
+
+# --- SCRIPT START ---
+check_dependencies
+
+# Check for root privileges
+if [[ $EUID -ne 0 ]]; then
+	echo -e "\e[48;5;1m" "This script requires root privileges to manage network connections. Please run with sudo" "\e[0m"
+	sudo -E bash "$0" "$@"
+	exit $?
+fi
+
+# --- MAIN MENU ---
+main_menu() {
+
+	# The '--' argument tells whiptail that all subsequent arguments are menu items (tags and descriptions),
+	# not additional whiptail options. This prevents misinterpretation of numerical tags (like '10' or '11')
+	# or other strings that might resemble options, like "---"; this measure was taken due to the item "=== Maintenance ===" was "--- Maintenance ---"
+	# we added '--' argument to the menu to prevent it and changeed the item "--- Maintenance ---" to "=== Maintenance ==="
+	while true; do
+		# default File to store exported WiFi networks - defined here so it persists across menu loops
+		local EXPORT_FILE="/bin/CUSTOM-WIFI-MIGRATOR/wifi_networks.txt"
+
+		CHOICE=$(whiptail --title "WiFi Network Manager v${SCRIPT_VERSION}" \
+			--menu "Choose an option" 0 0 18 \
+			-- \
+			1 "Add a new WiFi network [TO EXPORT FILE]" \
+			2 "List saved WiFi networks [FROM SYSTEM]" \
+			3 "List saved WiFi networks [FROM EXPORT FILE]" \
+			4 "Delete a WiFi network [FROM SYSTEM]" \
+			5 "Delete a WiFi network [FROM EXPORT FILE]" \
+			6 "Export WiFi networks to file" \
+			7 "Import WiFi networks from file" \
+			8 "Setup Auto-Import Service (Headless)" \
+			9 "●──── Maintenance ────●" \
+			10 "Edit a network in Export File" \
+			11 "Delete ALL from Export File" \
+			12 "Restore from Backup" \
+			13 "●──── QR Code Tools ────●" \
+			14 "Generate QR Code" \
+			15 "Import from QR" \
+			16 "Read QR Data From Image" \
+			17 "Help" \
+			18 "Exit" \
+			3>&1 1>&2 2>&3)
+
+		# Exit if user presses ESC, Cancel, or an error occurs
+		if [ $? -ne 0 ]; then
+			break
+		fi
+
+		case "$CHOICE" in
+		1) add_network ;;
+		2) list_networks ;;
+		3) list_networks_from_export_file ;;
+		4) delete_network ;;
+		5) delete_network_from_export_file ;;
+		6) export_networks ;;
+		7) import_networks ;;
+		8) setup_headless_import_service ;;
+		9) ;; # Separator
+		10) edit_network_in_export_file ;;
+		11) delete_all_from_export_file ;;
+		12) recover_from_backup ;;
+		13) ;; # Separator
+		14) generate_qr_code_menu ;;
+		15) export_from_qr_code ;;
+		16) display_qr_data_from_image ;;
+		17) show_help_page ;;
+		18) break ;;
+		*) break ;;
+		esac
+	done
+}
+
+main_menu
+
+show_message "Goodbye" "Exiting WiFi Manager."

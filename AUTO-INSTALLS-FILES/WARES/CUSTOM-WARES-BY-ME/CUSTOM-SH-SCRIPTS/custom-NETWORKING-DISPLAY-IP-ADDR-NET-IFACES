@@ -1,0 +1,90 @@
+#!/bin/bash
+
+####################################################################
+# BASH escape sequences color codes (associative array)
+declare -A _FCOLORS=(
+	[black]='\e[30m'
+	[red]='\e[31m'
+	[green]='\e[32m'
+	[yellow]='\e[33m'
+	[blue]='\e[34m'
+	[magenta]='\e[35m'
+	[cyan]='\e[36m'
+	[gray]='\e[90m'
+	# LIGHT COLOURS
+	[lgray]='\e[37m'
+	[lred]='\e[91m'
+	[lgreen]='\e[92m'
+	[lyellow]='\e[93m'
+	[lblue]='\e[94m'
+	[lmagenta]='\e[95m'
+	[lcyan]='\e[96m'
+	[white]='\e[97m'
+	[default]='\e[0m'
+)
+
+function FUN_CONNECTION_DETAILS_INFO {
+	# Clear screen for clean refresh
+	clear
+
+	echo -e "\e[1;48;5;8m DISPLAY IP ADDRESS OF NETWORK INTERFACES (If Available) \e[0m\n"
+
+	# Get list of network interfaces
+	LIST_AVAILABLE_NET_INTERFACES=$(ip link show | grep -E '^[0-9]+:' | cut -d: -f2 | awk '{print $1}')
+
+	for VAL in $LIST_AVAILABLE_NET_INTERFACES; do
+		# Get IPv4 address(es)
+		NET_IFACE_IP_ADDR=$(ip -4 addr show dev "$VAL" 2>/dev/null | grep -w inet | awk '{print $2}' | cut -d/ -f1)
+
+		# Print interface name
+		echo -e "${_FCOLORS[cyan]}[NET-IFACE]:${_FCOLORS[yellow]} $VAL ${_FCOLORS[default]}"
+
+		# Show full inet lines
+		ip -4 addr show dev "$VAL" 2>/dev/null | grep -w inet || echo -e "\t${_FCOLORS[gray]}No IPv4 address${_FCOLORS[default]}"
+
+		# Separator
+		echo -e "\t⬞⬞⬞ip-addr⬞⬞⬞ip-addr⬞⬞⬞ip-addr⬞⬞⬞ip-addr⬞⬞⬞"
+
+		# Concise IP display
+		if [[ -n $NET_IFACE_IP_ADDR ]]; then
+			echo -e "\t[${_FCOLORS[green]}$VAL${_FCOLORS[default]}] >>>>>> [[${_FCOLORS[lgreen]}${NET_IFACE_IP_ADDR}${_FCOLORS[default]}]]"
+		else
+			echo -e "\t[${_FCOLORS[red]}$VAL${_FCOLORS[default]}] >>>>>> [[${_FCOLORS[gray]}No IP${_FCOLORS[default]}]]"
+		fi
+		echo
+	done
+
+	echo "::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::"
+	echo "::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::"
+	echo
+	echo -e "${_FCOLORS[gray]}" "Press [ENTER] to refresh • [ESC] / [CTRL+C] to exit • Any other key ignored" "${_FCOLORS[default]} "
+}
+
+# Trap Ctrl-C (optional but clean)
+trap 'echo -e "\n${_FCOLORS[yellow]}Interrupted. Goodbye!${_FCOLORS[default]}"; exit 0' INT
+
+# Main loop with smart key handling
+while true; do
+	FUN_CONNECTION_DETAILS_INFO
+
+	# Non-blocking key check (poll every 0.1s)
+	while true; do
+		if read -s -n 1 -t 0.1 key 2>/dev/null; then
+			case "$key" in
+			$'\e') # ESC key
+				echo -e "\n${_FCOLORS[red]}ESC pressed. Exiting...${_FCOLORS[default]}"
+				exit 0
+				;;
+			"")    # Enter key (empty input)
+				break # Refresh (go back to while true; do FUN...)
+				;;
+			*) # Any other key
+				: # Do nothing (silently ignore)
+				;;
+			esac
+		else
+			# Timeout: no key pressed → keep polling
+			:
+		fi
+	done
+done

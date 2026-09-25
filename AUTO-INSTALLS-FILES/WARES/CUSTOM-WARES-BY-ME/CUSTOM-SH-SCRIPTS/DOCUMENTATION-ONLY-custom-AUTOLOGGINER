@@ -1,0 +1,84 @@
+#!/bin/bash
+
+##AUTO-logginer program
+
+#Works !! :D
+function FUN_AUTOLOGGINER_ENABLE {
+
+	echo -e "\n\n"
+	echo "You Have chosen  1.-   AUTO_LOGGINER_ENABLE "
+
+	echo -e "\n\n Running :: \v sudo sed -i 's|autologin-user='$USER'||g' /etc/lightdm/lightdm.conf"
+	sudo sed -i 's|autologin-user='$USER'|autologin-user=|g' /etc/lightdm/lightdm.conf
+	sudo sed -i 's|#autologin-user=|autologin-user=|g' /etc/lightdm/lightdm.conf
+
+	echo -e "\n Running :: sudo sed -i 's|#autologin-user-timeout=0||g' /etc/lightdm/lightdm.conf"
+	sudo sed -i 's|#autologin-user-timeout=0|autologin-user-timeout=0|g' /etc/lightdm/lightdm.conf
+
+	echo -e "\n Running :: \v sudo sed -i 's|autologin-user=|autologin-user='${USER}'|g' /etc/lightdm/lightdm.conf"
+	sudo sed -i 's|autologin-user=|autologin-user='${USER}'|g' /etc/lightdm/lightdm.conf
+
+}
+
+##auto logginer reseter
+##WorkS !!!!!
+
+function FUN_AUTOLOGGINER_DISABLE {
+
+	echo -e "\n\n"
+	echo "You Have chosen  2.-   AUTO_LOGGINER_DISABLE "
+
+	echo -e "\n\n Running :: \v sudo sed -i 's|autologin-user='$USER'|#autologin-user=|g' /etc/lightdm/lightdm.conf"
+	sudo sed -i 's|autologin-user='$USER'|#autologin-user=|g' /etc/lightdm/lightdm.conf
+	echo -e "\n\n Running :: \v sudo sed -i 's|.*autologin-user=.*|#autologin-user=|g' /etc/lightdm/lightdm.conf"
+
+	sudo sed -i 's|.*autologin-user=.*|#autologin-user=|g' /etc/lightdm/lightdm.conf
+
+	echo -e "\n Running :: sudo sed -i 's|autologin-user-timeout=0|#autologin-user-timeout=0|g' /etc/lightdm/lightdm.conf"
+	sudo sed -i 's|autologin-user-timeout=0|#autologin-user-timeout=0|g' /etc/lightdm/lightdm.conf
+
+	echo -e "\n Running :: \v 	sudo sed -i 's|.*autologin-user-timeout=0.*|#autologin-user-timeout=0|g' /etc/lightdm/lightdm.conf"
+	sudo sed -i 's|.*autologin-user-timeout=0.*|#autologin-user-timeout=0|g' /etc/lightdm/lightdm.conf
+
+}
+
+############################################################################################################
+############################################################################################################
+###########################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+############################################################################################################
+
+tput setab 8
+tput setaf 7
+tput bold
+
+echo "AUTO-logginer program .... By   LINUX-LIVING"
+echo ""
+echo "Input Your Choice ::	[1..2] "
+echo "		1.- Enable autologin		2.-Disable autologin"
+
+read -p "Input Your Choice  [1..2] :: " CHOICE
+
+if [ -z $CHOICE ]; then
+	echo -e "\n [EMPTY] !!!   Exiting"
+	exit
+elif [ $CHOICE = 1 ]; then
+	FUN_AUTOLOGGINER_ENABLE
+	echo "Done"
+elif [ $CHOICE = 2 ]; then
+	FUN_AUTOLOGGINER_DISABLE
+	echo "Done"
+else
+	echo "Not a valid Choice MUST be  [1..2]"
+fi

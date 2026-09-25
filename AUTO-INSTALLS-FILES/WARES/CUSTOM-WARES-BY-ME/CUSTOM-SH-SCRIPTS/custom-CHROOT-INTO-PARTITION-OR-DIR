@@ -1,0 +1,374 @@
+#!/bin/bash
+
+# =============================================================================
+#
+# chroot_helper.sh
+#
+# Description:
+#   A Bash script that provides a user-friendly whiptail interface to
+#   easily chroot into any available Linux partition or a directory.
+#   It also handles the mounting and unmounting of necessary
+#   pseudo-filesystems and preserves network connectivity, which are
+#   essential for a functional chroot environment.
+#
+# Author:
+#   Gemini
+#
+# Dependencies:
+#   - whiptail: For creating dialog boxes in the terminal.
+#   - lsblk: For listing block devices.
+#   - awk: For text processing.
+#
+# Usage:
+#   Run with root privileges: sudo ./chroot_helper.sh
+#
+# Execution Flow:
+#   1.  Initial Checks: The script first verifies it is running with root
+#       privileges and that all required command dependencies (whiptail,
+#       lsblk) are installed.
+#   2.  Main Menu: A loop displays the main menu, offering to chroot into
+#       a partition, a directory, or exit the script.
+#   3.  Chroot Process:
+#       a. When a chroot option is chosen, the script mounts the target
+#          and the necessary pseudo-filesystems (/dev, /proc, /sys).
+#       b. A trap is set on the EXIT signal. This is a safety net that
+#          ensures the 'cleanup_mounts' function is called if the script
+#          is interrupted for any reason (e.g., Ctrl+C).
+#       c. Network is configured by backing up the target's resolv.conf
+#          and copying the host's version.
+#       d. The user is dropped into the chroot shell.
+#   4.  Exiting Chroot:
+#       a. When the user types 'exit' in the chroot shell, execution
+#          returns to the script.
+#       b. The 'cleanup_mounts' function is called immediately to unmount
+#          all filesystems and restore the original network configuration.
+#       c. The EXIT trap is cleared, as the cleanup was handled manually.
+#   5.  Script Exit: When "Exit script" is selected, the script terminates.
+#       The trap ensures that if the script exits uncleanly during a chroot
+#       session, all mounts are still cleaned up properly.
+#
+# =============================================================================
+
+# --- Pre-execution Checks and Setup -----------------------------------------
+
+# Function to check for root privileges
+check_root() {
+	if [ "$EUID" -ne 0 ]; then
+		echo -e "\e[48;5;196m" "Error: This script must be run as root. Please use sudo." "\e[0m"
+		echo -e "\e[48;5;196m" "Trying to relaunch with sudo" "\e[0m"
+		sudo "$0"
+		if [ "$EUID" -ne 0 ]; then
+			exit 1
+		fi
+	fi
+}
+
+# Function to check for necessary command dependencies
+check_dependencies() {
+	for cmd in whiptail lsblk awk; do
+		if ! command -v "$cmd" &>/dev/null; then
+			echo "Error: Required command '$cmd' is not installed."
+			echo "Please install it and try again."
+			exit 1
+		fi
+	done
+}
+
+# --- Function: show_help ----------------------------------------------------
+#
+#   Displays a help/about screen with information about the script.
+#
+# ------------------------------------------------------------------------------
+show_help() {
+	local help_text
+	help_text=$(
+		cat <<'EOF'
+This script provides a user-friendly terminal interface to chroot into any available Linux partition or a specified directory. It automates the mounting of necessary pseudo-filesystems like /dev, /proc, and /sys, and ensures network connectivity is available within the chroot environment.
+
+Features:
+- Chroot into Partitions: Automatically detects and lists all available disk partitions for you to choose from.
+- Chroot into Directories: Allows you to specify a directory path for chrooting.
+- Network Preservation: Copies the host's network DNS configuration (/etc/resolv.conf) into the chroot and restores it upon exit.
+- Automatic Cleanup: Uses traps to guarantee that all mounted filesystems are cleanly unmounted, even if the script is interrupted unexpectedly.
+
+Usage:
+- Run the script with root privileges (e.g., sudo ./chroot_helper.sh).
+- Use the main menu to select your desired action.
+- To exit a chroot session, simply type 'exit' or press Ctrl+D.
+
+Dependencies:
+- whiptail
+- lsblk
+- awk
+
+Author: Gemini
+EOF
+	)
+	whiptail --title "Help / About" --msgbox "$help_text" 0 0
+}
+
+# --- Function: setup_chroot_network -----------------------------------------
+#
+#   Backs up the chroot target's resolv.conf and copies the host's
+#   resolv.conf into the chroot to provide network access.
+#
+#   $1: The path to the chroot root (e.g., /mnt or /path/to/dir)
+#
+# ------------------------------------------------------------------------------
+setup_chroot_network() {
+	local chroot_path="$1"
+	# Ensure the target /etc directory exists
+	mkdir -p "$chroot_path/etc"
+
+	local resolv_conf_path="$chroot_path/etc/resolv.conf"
+	local backup_path="$chroot_path/etc/resolv.conf.chroot_backup"
+
+	echo "Setting up network for chroot at $chroot_path..."
+
+	# Check if resolv.conf exists in the chroot target
+	if [ -e "$resolv_conf_path" ]; then
+		echo "Backing up existing resolv.conf to $backup_path"
+		# Use 'cp -a' to preserve permissions and context if possible
+		if ! sudo cp -a "$resolv_conf_path" "$backup_path"; then
+			whiptail --title "Warning" --msgbox "Could not back up $resolv_conf_path. Network configuration inside chroot might be incorrect after exit." 0 0
+		fi
+	else
+		echo "No resolv.conf found in target. A new one will be created from host."
+		# Create an empty backup file so the exit function knows to remove the copied one
+		# and not restore a non-existent file.
+		touch "$backup_path"
+	fi
+
+	echo "Copying host's resolv.conf to chroot..."
+	# Use 'cp -L' to follow symlinks like /etc/resolv.conf -> /run/systemd/resolve/stub-resolv.conf
+	if ! sudo cp -L /etc/resolv.conf "$resolv_conf_path"; then
+		whiptail --title "Error" --msgbox "Failed to copy host's /etc/resolv.conf to $resolv_conf_path. Chroot may not have network access." 0 0
+	fi
+}
+
+# --- Function: restore_chroot_network ---------------------------------------
+#
+#   Restores the original resolv.conf from backup after exiting chroot.
+#
+#   $1: The path to the chroot root (e.g., /mnt or /path/to/dir)
+#
+# ------------------------------------------------------------------------------
+restore_chroot_network() {
+	local chroot_path="$1"
+	local resolv_conf_path="$chroot_path/etc/resolv.conf"
+	local backup_path="$chroot_path/etc/resolv.conf.chroot_backup"
+
+	echo "Restoring network configuration for $chroot_path..."
+
+	# Check if a backup file exists. If not, we have nothing to do.
+	if [ ! -f "$backup_path" ]; then
+		echo "No backup of resolv.conf found. Nothing to restore."
+		return
+	fi
+
+	# Check if the backup file is empty (meaning no original existed).
+	# The -s operator checks if file exists and has a size greater than zero.
+	if [ ! -s "$backup_path" ]; then
+		echo "Original resolv.conf did not exist. Removing the temporary one."
+		rm -f "$resolv_conf_path"
+	else
+		echo "Restoring original resolv.conf from backup."
+		# Use mv to restore the backup. -f forces overwrite.
+		if ! mv -f "$backup_path" "$resolv_conf_path"; then
+			echo "Error: Failed to restore $resolv_conf_path from $backup_path" >&2
+		fi
+	fi
+
+	# Clean up the backup file if it still exists (which it shouldn't after mv).
+	rm -f "$backup_path"
+}
+
+# --- Function: enter_chroot (for Partitions) --------------------------------
+#
+#   Handles the entire process of selecting a partition, mounting it,
+#   and entering the chroot environment.
+#
+# ------------------------------------------------------------------------------
+enter_chroot() {
+	# Use lsblk to get a list of all block devices of type 'part' (partition).
+	readarray -t partitions < <(lsblk -lnp -o NAME,TYPE | awk '$2=="part" {print $1}')
+
+	if [ ${#partitions[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "No partitions found on this system." 0 0
+		return
+	fi
+
+	# --- Prepare for the whiptail menu ---
+	local i=1
+	options=()        # Initialize an empty array to hold menu items for whiptail.
+	declare -A id_map # Use an associative array to map menu numbers back to partition names.
+
+	for partition_name in "${partitions[@]}"; do
+		options+=("$i" "$partition_name")
+		id_map[$i]="$partition_name"
+		((i++))
+	done
+
+	# --- Display the partition selection menu ---
+	choice=$(whiptail --title "Chroot Helper" --menu "Choose a partition to chroot into:" 0 0 "${#partitions[@]}" \
+		"${options[@]}" \
+		"EXIT" "Return to main menu" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ] || [ "$choice" == "EXIT" ]; then
+		echo "User cancelled. Returning to main menu."
+		return
+	fi
+
+	partition_choice="${id_map[$choice]}"
+
+	# --- Create a temporary directory for the mount point ---
+	temp_mount_dir=$(mktemp -d)
+	if [ ! -d "$temp_mount_dir" ]; then
+		whiptail --title "Error" --msgbox "Failed to create a temporary mount directory." 0 0
+		return
+	fi
+	echo "Created temporary mount directory at $temp_mount_dir"
+
+	# --- Mount filesystems and chroot ---
+	echo "Mounting $partition_choice on $temp_mount_dir..."
+	if ! mount "$partition_choice" "$temp_mount_dir"; then
+		whiptail --title "Error" --msgbox "Failed to mount $partition_choice on $temp_mount_dir.\nIt may already be mounted or contain filesystem errors." 0 0
+		rm -rf "$temp_mount_dir"
+		return
+	fi
+
+	# Set a trap to clean up if the script is interrupted
+	trap 'cleanup_mounts "$temp_mount_dir" "partition"' EXIT
+
+	echo "Bind-mounting pseudo-filesystems..."
+	if ! mount --bind /dev "$temp_mount_dir/dev" ||
+		! mount --bind /dev/pts "$temp_mount_dir/dev/pts" ||
+		! mount --bind /proc "$temp_mount_dir/proc" ||
+		! mount --bind /sys "$temp_mount_dir/sys"; then
+		whiptail --title "Error" --msgbox "Failed to bind-mount one of the pseudo-filesystems. Aborting." 0 0
+		# The trap will handle cleanup, so we just exit.
+		exit 1
+	fi
+
+	setup_chroot_network "$temp_mount_dir"
+
+	whiptail --title "Chroot Active" --msgbox "You are now in a chroot environment in $temp_mount_dir.\nTo exit the chroot, type 'exit' or press Ctrl+D.\nThis will return you to the main menu." 12 70
+
+	chroot "$temp_mount_dir"
+
+	# Cleanup after exiting chroot
+	cleanup_mounts "$temp_mount_dir" "partition"
+	trap - EXIT # Clear the trap
+	echo "Exited chroot shell. Returning to main menu."
+}
+
+# --- Function: enter_chroot_dir (for Directories) ---------------------------
+#
+#   Handles chrooting into a user-specified directory.
+#
+# ------------------------------------------------------------------------------
+enter_chroot_dir() {
+	chroot_dir=$(whiptail --title "Chroot Helper" --inputbox "Enter the full path to the chroot directory:" 10 80 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then
+		echo "User cancelled. Returning to main menu."
+		return
+	fi
+
+	if [ -z "$chroot_dir" ] || [ ! -d "$chroot_dir" ]; then
+		whiptail --title "Error" --msgbox "Directory path is invalid or does not exist.\nReturning to main menu." 0 0
+		return
+	fi
+
+	# --- Mount filesystems and chroot ---
+	echo "Preparing chroot for $chroot_dir..."
+	if mountpoint -q "$chroot_dir/dev" || mountpoint -q "$chroot_dir/proc" || mountpoint -q "$chroot_dir/sys"; then
+		whiptail --title "Error" --msgbox "One of the required subdirectories (dev, proc, sys) in '$chroot_dir' is already a mountpoint.\nPlease unmount it first." 0 0
+		return
+	fi
+
+	# Set a trap to clean up if the script is interrupted
+	trap 'cleanup_mounts "$chroot_dir" "directory"' EXIT
+
+	if ! mount --bind /dev "$chroot_dir/dev" ||
+		! mount --bind /dev/pts "$chroot_dir/dev/pts" ||
+		! mount --bind /proc "$chroot_dir/proc" ||
+		! mount --bind /sys "$chroot_dir/sys"; then
+		whiptail --title "Error" --msgbox "Failed to bind-mount one of the pseudo-filesystems. Aborting." 0 0
+		exit 1
+	fi
+
+	setup_chroot_network "$chroot_dir"
+
+	whiptail --title "Chroot Active" --msgbox "You are now in a chroot environment.\nTo exit the chroot, type 'exit' or press Ctrl+D.\nThis will return you to the main menu." 0 0
+
+	chroot "$chroot_dir"
+
+	# Cleanup after exiting chroot
+	cleanup_mounts "$chroot_dir" "directory"
+	trap - EXIT # Clear the trap
+	echo "Exited chroot shell. Returning to main menu."
+}
+
+# --- Function: cleanup_mounts (Cleanup Handler) -----------------------------
+#
+#   Unmounts all filesystems for a clean exit.
+#
+# ------------------------------------------------------------------------------
+cleanup_mounts() {
+	local chroot_path="$1"
+	local chroot_type="$2"
+
+	echo "--- Running cleanup for $chroot_path ---"
+
+	restore_chroot_network "$chroot_path"
+
+	echo "Unmounting filesystems from $chroot_path..."
+	umount -lf "$chroot_path/usr" 2>/dev/null
+	umount -lf "$chroot_path/dev/pts" 2>/dev/null
+	umount -lf "$chroot_path/dev" 2>/dev/null
+	umount -lf "$chroot_path/proc" 2>/dev/null
+	umount -lf "$chroot_path/sys" 2>/dev/null
+
+	if [ "$chroot_type" == "partition" ]; then
+		echo "Unmounting partition from $chroot_path..."
+		umount -lf "$chroot_path" 2>/dev/null
+	fi
+
+	echo "Cleanup complete."
+}
+
+# --- Main Script Logic --------------------------------------------------------
+
+# Run pre-execution checks first
+check_root
+check_dependencies
+
+while true; do
+	main_choice=$(whiptail --title "Chroot Helper" --menu "Select an option:" 0 0 10 \
+		"1" "Chroot into a partition" \
+		"2" "Chroot into a directory" \
+		"3" "Help / About" \
+		"4" "Exit script" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then
+		echo "User selected Cancel or pressed ESC. Exiting script."
+		exit 0
+	fi
+
+	case $main_choice in
+	1)
+		enter_chroot
+		;;
+	2)
+		enter_chroot_dir
+		;;
+	3)
+		show_help
+		;;
+	4)
+		echo "Exiting script."
+		exit 0
+		;;
+	esac
+done

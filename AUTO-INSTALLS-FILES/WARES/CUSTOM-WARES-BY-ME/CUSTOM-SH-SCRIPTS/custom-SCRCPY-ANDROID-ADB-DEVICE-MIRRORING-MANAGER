@@ -1,0 +1,1261 @@
+#!/bin/bash
+
+# ╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+# ║                                       *** GUIDE / REFRESHER ***                                                   ║
+# ║                The "Superior Pattern" for Creating Dynamic Whiptail Menus in Bash                                 ║
+# ║                                                                                                                   ║
+# ║ This script extensively uses a specific, robust pattern for creating dynamic menus. This guide serves as a quick  ║
+# ║ refresher for future maintenance.                                                                                 ║
+# ║                                                                                                                   ║
+# ║ CORE CONCEPT: We use two arrays:                                                                                  ║
+# ║   1. A standard indexed array (`options_array`) for the whiptail menu items. Whiptail requires pairs of           ║
+# ║      ("tag", "item"). We use a simple number as the "tag".                                                        ║
+# ║   2. An associative array (`value_map`) to create a reliable mapping from the numeric "tag" to the real,          ║
+# ║      potentially complex, value.                                                                                  ║
+# ║                                                                                                                   ║
+# ║ This avoids issues with special characters or mismatches between the displayed item and the required value.       ║
+# ╚═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+#
+# -----------------------------
+# --- EXAMPLE IMPLEMENTATION ---
+# -----------------------------
+#
+# hypothetical_menu_function() {
+#
+#   # --- STEP 1: Data Acquisition ---
+#   # Get the raw data from a source (e.g., a command, a file).
+#   # Here, we'll get a list of user shells from /etc/shells, filtering out comments and blank lines.
+#   local raw_data_source
+#   raw_data_source=$(cat /etc/shells | grep -v '^#' | grep -v '^$')
+#
+#   # --- STEP 2: Data Formatting ---
+#   # Use `readarray` to load the data source into a standard array.
+#   local source_array=()
+#   readarray -t source_array <<<"$raw_data_source"
+#
+#   # Declare the two arrays for the pattern.
+#   local options_array=()
+#   declare -A value_map
+#   local i=1
+#
+#   # Loop through the source data to populate the menu and map arrays.
+#   for item in "${source_array[@]}"; do
+#     # Skip any lingering empty lines.
+#     if [[ -z "$item" ]]; then continue; fi
+#
+#     # Add the numeric tag and the description to the whiptail options array.
+#     options_array+=("$i" "$item")
+#
+#     # Map the numeric tag to the actual value in the associative array.
+#     value_map[$i]="$item"
+#
+#     ((i++))
+#   done
+#
+#   # --- STEP 3: Menu Display ---
+#   # Check if we have any menu items to show.
+#   if [ ${#value_map[@]} -eq 0 ]; then
+#     whiptail --msgbox "No items found to display." 0 0
+#     return
+#   fi
+#
+#   # Use the populated arrays to display the whiptail menu.
+#   local chosen_num
+#   chosen_num=$(whiptail --title "Example Menu" --menu "Choose a shell:" 0 0 ${#value_map[@]} \
+#     "${options_array[@]}" \
+#     3>&1 1>&2 2>&3)
+#
+#   # --- STEP 4: Result Handling ---
+#   # Check if the user cancelled.
+#   if [ $? -ne 0 ] || [ -z "$chosen_num" ]; then
+#     whiptail --msgbox "Menu cancelled." 0 0
+#     return
+#   fi
+#
+#   # Retrieve the REAL value from the associative array using the number the user chose.
+#   local final_choice="${value_map[$chosen_num]}"
+#
+#   # Now you can use the real value.
+#   whiptail --msgbox "You chose menu item number '$chosen_num', which corresponds to the value: \n\n$final_choice" 0 0
+# }
+#
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🚀 SCRIPT METADATA 🚀
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# =========================================================
+#  SCRCPY / ADB HELPER
+#  Automates connection & screen mirroring of Android devices
+# ==========================================================
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 SCRIPT METADATA 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ⚙️ CONFIGURATION ⚙️
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Defines the directory and file for storing device profiles.
+CONFIG_DIR="/bin/CUSTOM_SCRCPY_ADB_HELPER_CONFIG"
+PROFILES_FILE="$CONFIG_DIR/device_profiles.conf"
+
+# 🛠️ Ensures the configuration directory and profiles file exist before use. 🛠️
+if [ ! -d "$CONFIG_DIR" ]; then
+	sudo mkdir -p "$CONFIG_DIR" || {
+		echo "Cannot create $CONFIG_DIR"
+		exit 1
+	}
+	sudo chmod 777 -R /bin/CUSTOM_SCRCPY_ADB_HELPER_CONFIG
+fi
+
+if [ ! -f "$PROFILES_FILE" ]; then
+	sudo touch "$PROFILES_FILE"
+	sudo chmod 777 /bin/CUSTOM_SCRCPY_ADB_HELPER_CONFIG/device_profiles.conf
+fi
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 CONFIGURATION 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🔍 FUN_CHECK_DEPENDENCIES 🔍
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Verifies that required command-line tools (whiptail, scrcpy, adb) are installed.
+FUN_CHECK_DEPENDENCIES() {
+	for cmd in whiptail scrcpy adb; do
+		if ! command -v "$cmd" >/dev/null 2>&1; then
+			whiptail --msgbox "$cmd is not installed. Please install it to continue." 0 0
+			exit 1
+		fi
+
+	done
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_CHECK_DEPENDENCIES 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🏃 FUN_LOAD_RUN_PROFILE 🏃
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Loads a saved device profile and launches scrcpy with its settings.
+FUN_LOAD_RUN_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --msgbox "No saved profiles found. Please create a profile first." 0 0
+		return
+	fi
+
+	local profiles_menu=()
+	local i=1
+	declare -A profile_map
+
+	while IFS= read -r line; do
+		local identifier=$(echo "$line" | cut -d'#' -f1 | xargs)
+		local name=$(echo "$line" | cut -d'#' -f2 | xargs)
+		local options=$(echo "$line" | cut -d'#' -f3- | xargs)
+
+		profiles_menu+=("$i" "$name ($identifier)")
+		profile_map[$i]="$identifier#$name#$options"
+		((i++))
+	done <"$PROFILES_FILE"
+
+	if [ ${#profile_map[@]} -eq 0 ]; then
+		whiptail --msgbox "Failed to read profiles." 0 0
+		return
+	fi
+
+	local chosen_num
+	chosen_num=$(whiptail --title "Load/RUN a Device Profile" \
+		--menu "Choose a profile to launch:" 0 0 ${#profile_map[@]} \
+		"${profiles_menu[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$chosen_num" ]; then
+		local profile_data="${profile_map[$chosen_num]}"
+		local chosen_identifier=$(echo "$profile_data" | cut -d'#' -f1)
+		local chosen_name=$(echo "$profile_data" | cut -d'#' -f2)
+		local chosen_options=$(echo "$profile_data" | cut -d'#' -f3-)
+
+		# Check if identifier is an IP or a Serial
+		if [[ "$chosen_identifier" == *.* ]] || [[ "$chosen_identifier" == *:* ]]; then
+			# Looks like an IP address
+			if ! whiptail --yesno "Attempting to connect to wireless device ${chosen_identifier} and launch scrcpy..." 0 0; then
+				echo "user cancelled connecting scrcpy to ${chosen_identifier}"
+				return
+			fi
+			for ATTEMPT in {1..3}; do
+				echo "Attempt $ATTEMPT/3 …"
+
+				adb tcpip 5555 >/dev/null 2>&1
+				adb connect "${chosen_identifier}:5555" >/dev/null 2>&1 && {
+					echo "✅ Connected: adb connect ${chosen_identifier}:5555"
+					break
+				}
+			done
+			sleep 1
+
+			if adb devices | grep -q "${chosen_identifier}:5555"; then
+				whiptail --infobox "Connection successful. Launching scrcpy with profile '${chosen_name}'." 0 0
+				FUN_RUN_SCRCPY -s "${chosen_identifier}:5555" $chosen_options
+			else
+				whiptail --msgbox "Failed to connect to device at ${chosen_identifier}:5555. Please ensure it's on the network and ADB over WiFi is enabled." 0 0
+			fi
+		else
+			# Looks like a Serial Number
+			whiptail --infobox "Launching scrcpy for wired device '${chosen_name}' (${chosen_identifier})." 0 0
+			FUN_RUN_SCRCPY -s "$chosen_identifier" $chosen_options
+		fi
+	else
+		whiptail --msgbox "Profile launch cancelled." 0 0
+	fi
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_LOAD_RUN_PROFILE 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ✨ FUN_CREATE_PROFILE ✨
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Guides the user through creating a new device profile for wired or wireless devices.
+FUN_CREATE_PROFILE() {
+	local profile_type
+	profile_type=$(whiptail --title "Profile Type" --menu "What type of device is this profile for?" 0 0 2 \
+		"1" "Wireless (IP Address)" \
+		"2" "Wired (Serial Number)" 3>&1 1>&2 2>&3)
+
+	if [[ $? -ne 0 ]]; then
+		whiptail --msgbox "Cancelled. No profile created." 0 0
+		return
+	fi
+
+	local IDENTIFIER=""
+	if [ "$profile_type" = "1" ]; then
+		IDENTIFIER=$(whiptail --inputbox "Enter the device IP address" 0 0 --title "New Wireless Profile" 3>&1 1>&2 2>&3)
+		if [[ $? -ne 0 ]] || [[ -z "$IDENTIFIER" ]]; then
+			whiptail --msgbox "Cancelled. No profile created." 0 0
+			return
+		fi
+		IDENTIFIER=$(echo "$IDENTIFIER" | tr -d '[:space:]')
+	else
+		readarray -t device_lines < <(adb devices | tail +2 | grep -v '^[[:space:]]*$' | grep -v ':')
+		if [ ${#device_lines[@]} -eq 0 ]; then
+			whiptail --msgbox "No wired devices detected. Please connect a device via USB." 0 0
+			return
+		fi
+
+		local wired_menu=()
+		local i=1
+		declare -A serial_map
+		for line in "${device_lines[@]}"; do
+			local serial=$(echo "$line" | awk '{print $1}')
+			local details=$(echo "$line" | awk '{print $1 " - " $2}')
+			wired_menu+=("$i" "$details")
+			serial_map[$i]="$serial"
+			((i++))
+		done
+
+		local chosen_num
+		chosen_num=$(whiptail --title "Select a Wired Device" --menu "Choose a device for this profile:" 0 0 ${#device_lines[@]} "${wired_menu[@]}" 3>&1 1>&2 2>&3)
+		if [[ $? -ne 0 ]] || [[ -z "$chosen_num" ]]; then
+			whiptail --msgbox "Cancelled. No profile created." 0 0
+			return
+		fi
+		IDENTIFIER="${serial_map[$chosen_num]}"
+	fi
+
+	DEVICE_NAME=$(whiptail --inputbox "Enter a name for this profile (e.g., MyPhone-Recording)" 0 0 --title "New Device Profile" 3>&1 1>&2 2>&3)
+	if [[ $? -ne 0 ]] || [[ -z "$DEVICE_NAME" ]]; then
+		whiptail --msgbox "Cancelled. No profile created." 0 0
+		return
+	fi
+	DEVICE_NAME=$(echo "$DEVICE_NAME" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/#//g')
+
+	local scrcpy_options=""
+
+	# --- Recording Toggle & Options (using Radiolist) ---
+	local record_choice
+	record_choice=$(whiptail --title "Recording Options" --radiolist "Do you want to record the screen?" 0 0 2 \
+		"ON" "Enable Recording" "OFF" \
+		"OFF" "Disable Recording" "ON" 3>&1 1>&2 2>&3)
+
+	if [[ $? -eq 0 ]] && [[ "$record_choice" == "ON" ]]; then
+		local filename
+		filename=$(whiptail --backtitle "$PWD" --inputbox "Enter filename for recording (e.g., my_recording.mp4)" 0 0 "${PWD}/recording.mp4" --title "Recording Filename" 3>&1 1>&2 2>&3)
+		if [[ $? -eq 0 ]] && [[ -n "$filename" ]]; then
+			scrcpy_options+=" --record=$filename"
+
+			local format
+			format=$(whiptail --inputbox "Enter record format (mp4 or mkv)" 0 0 "mp4" --title "Recording Format" 3>&1 1>&2 2>&3)
+			if [[ $? -eq 0 ]] && [[ -n "$format" ]]; then
+				scrcpy_options+=" --record-format=$format"
+			fi
+		else
+			whiptail --msgbox "Screen recording disabled as no filename was provided." 0 0
+		fi
+	fi
+
+	# --- Mutually Exclusive Audio Options via Radiolist ---
+	local audio_choice
+	audio_choice=$(whiptail --title "Audio Forwarding Options" --radiolist "Choose an audio forwarding mode:" 0 0 6 \
+		"output" "Device audio output (default)" ON \
+		"playback" "Forward playback audio only" OFF \
+		"playback_dup" "Forward playback AND duplicate on device" OFF \
+		"mic" "Forward device microphone audio" OFF \
+		"voice-call" "Forward device voice call audio" OFF \
+		"disabled" "Disable all audio forwarding (--no-audio)" OFF 3>&1 1>&2 2>&3)
+
+	case "$audio_choice" in
+	"playback")
+		scrcpy_options+=" --audio-source=playback"
+		;;
+	"playback_dup")
+		scrcpy_options+=" --audio-source=playback --audio-dup"
+		;;
+	"mic")
+		scrcpy_options+=" --audio-source=mic"
+		;;
+	"voice-call")
+		scrcpy_options+=" --audio-source=voice-call"
+		;;
+	"disabled")
+		scrcpy_options+=" --no-audio"
+		;;
+	esac
+
+	# --- Video Source ---
+	local video_source
+	video_source=$(whiptail --title "Video Source" --radiolist "Choose a video source:" 0 0 2 \
+		"display" "Mirror the device display" "ON" \
+		"camera" "Mirror a device camera" "OFF" 3>&1 1>&2 2>&3)
+
+	if [[ $? -eq 0 ]] && [[ "$video_source" == "camera" ]]; then
+		scrcpy_options+=" --video-source=camera"
+		whiptail --infobox "Listing available cameras for device $IDENTIFIER..." 0 0
+		# Need to connect to wireless device first if it's not connected
+		if [[ "$IDENTIFIER" == *.* ]] || [[ "$IDENTIFIER" == *:* ]]; then
+			if ! adb devices | grep -q "${IDENTIFIER}"; then
+				whiptail --infobox "Temporary connection to $IDENTIFIER to list cameras..." 0 0
+				adb connect "${IDENTIFIER}:5555" >/dev/null 2>&1
+				sleep 1
+			fi
+
+		fi
+		local camera_list=$(scrcpy -s "$IDENTIFIER" --list-cameras 2>&1)
+		local camera_info_lines=$(echo "$camera_list" | grep -- '--camera-id=')
+
+		if [ -z "$camera_info_lines" ]; then
+			whiptail --msgbox "Could not find any cameras on device $IDENTIFIER. Aborting camera selection." 0 0
+			# remove the video source option if no cameras found
+			scrcpy_options=$(echo "$scrcpy_options" | sed 's/--video-source=camera//g')
+		else
+			local camera_menu=()
+			local first_cam="ON"
+			while IFS= read -r line; do
+				local id=$(echo "$line" | sed 's/.*--camera-id=\([0-9]*\).*/\1/')
+				local desc=$(echo "$line" | sed 's/.*--camera-id=[0-9]*//' | xargs)
+				camera_menu+=("$id" "$desc" "$first_cam")
+				first_cam="OFF" # Only the first one is ON
+			done <<<"$camera_info_lines"
+
+			local camera_id
+			camera_id=$(whiptail --title "Select Camera ID" --radiolist "Choose a camera ID to mirror:" 0 0 $((${#camera_menu[@]} / 3)) "${camera_menu[@]}" 3>&1 1>&2 2>&3)
+
+			if [[ $? -eq 0 ]] && [[ -n "$camera_id" ]]; then
+				scrcpy_options+=" --camera-id=$camera_id"
+
+				local orientation
+				orientation=$(whiptail --title "Camera Orientation" --radiolist "Choose capture orientation:" 0 0 4 \
+					"0" "0 degrees" "ON" \
+					"90" "90 degrees" "OFF" \
+					"180" "180 degrees" "OFF" \
+					"270" "270 degrees" "OFF" 3>&1 1>&2 2>&3)
+
+				if [[ $? -eq 0 ]] && [[ -n "$orientation" ]] && [[ "$orientation" != "0" ]]; then
+					scrcpy_options+=" --capture-orientation=$orientation"
+				fi
+			else
+				# User cancelled camera ID selection, so remove the video source option
+				scrcpy_options=$(echo "$scrcpy_options" | sed 's/--video-source=camera//g' | xargs)
+			fi
+		fi
+	fi
+
+	# --- Turn Screen Off ---
+	local turn_screen_off_choice
+	turn_screen_off_choice=$(whiptail --title "Turn Screen Off" --radiolist "Turn device screen off during mirroring?" 0 0 2 \
+		"ON" "Yes, turn screen off" "OFF" \
+		"OFF" "No, keep screen on" "ON" 3>&1 1>&2 2>&3)
+
+	if [[ $? -eq 0 ]] && [[ "$turn_screen_off_choice" == "ON" ]]; then
+		scrcpy_options+=" --turn-screen-off"
+	fi
+
+	# --- Save the Profile ---
+	echo "${IDENTIFIER} # ${DEVICE_NAME} # ${scrcpy_options}" >>"$PROFILES_FILE"
+	whiptail --msgbox "Profile '${DEVICE_NAME}' saved successfully." 0 0
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_CREATE_PROFILE 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ✏️ FUN_EDIT_PROFILE ✏️
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Allows the user to modify an existing device profile's name and scrcpy options.
+FUN_EDIT_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --msgbox "No saved profiles to edit." 0 0
+		return
+	fi
+
+	local profiles_menu=()
+	local i=1
+	declare -A profile_map
+
+	while IFS= read -r line; do
+		local identifier=$(echo "$line" | cut -d'#' -f1 | xargs)
+		local name=$(echo "$line" | cut -d'#' -f2 | xargs)
+		profiles_menu+=("$i" "$name ($identifier)")
+		profile_map[$i]="$line"
+		((i++))
+	done <"$PROFILES_FILE"
+
+	local chosen_num
+	chosen_num=$(whiptail --title "Edit a Device Profile" \
+		--menu "Choose a profile to edit (Identifier cannot be changed):" 0 0 ${#profile_map[@]} \
+		"${profiles_menu[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$chosen_num" ]; then
+		local line_to_edit="${profile_map[$chosen_num]}"
+		local identifier=$(echo "$line_to_edit" | cut -d'#' -f1 | xargs)
+		local name=$(echo "$line_to_edit" | cut -d'#' -f2 | xargs)
+		local old_options=$(echo "$line_to_edit" | cut -d'#' -f3- | xargs)
+
+		# --- Edit Name ---
+		local new_name
+		new_name=$(whiptail --inputbox "Enter the new name for this profile:" 0 0 "$name" --title "Edit Profile Name" 3>&1 1>&2 2>&3)
+		if [[ $? -ne 0 ]]; then
+			whiptail --msgbox "Edit cancelled." 0 0
+			return
+		fi
+		new_name=$(echo "$new_name" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/#//g')
+		if [[ -z "$new_name" ]]; then
+			whiptail --msgbox "Profile name cannot be empty. Edit cancelled." 0 0
+			return
+		fi
+
+		# --- Edit Identifier (IP/Serial) ---
+		if whiptail --title "Edit Identifier?" --defaultno --yesno "Do you want to edit the Device Identifier (IP/Serial)?\n\nCurrent value: $identifier" 10 60; then
+			local new_id
+			new_id=$(whiptail --inputbox "Enter the new IP or Serial Number:" 0 0 "$identifier" --title "Edit Identifier" 3>&1 1>&2 2>&3)
+			if [[ $? -eq 0 ]] && [[ -n "$new_id" ]]; then
+				identifier=$(echo "$new_id" | tr -d '[:space:]')
+			fi
+		fi
+
+		whiptail --msgbox "You are now editing the mirroring options for '${new_name}' ($identifier)." 0 0
+
+		# Initialize new options with old options to preserve settings on cancel
+		local new_scrcpy_options="$old_options"
+
+		# --- Recording Toggle & Options (using Radiolist) ---
+		local record_status="OFF"
+		[[ "$new_scrcpy_options" == *"--record"* ]] && record_status="ON"
+
+		local record_choice
+		record_choice=$(whiptail --title "Recording Options" --radiolist "Do you want to record the screen?" 0 0 2 \
+			"ON" "Enable Recording" "$record_status" \
+			"OFF" "Disable Recording" $([[ "$record_status" == "OFF" ]] && echo "ON" || echo "OFF") 3>&1 1>&2 2>&3)
+
+		if [[ $? -eq 0 ]]; then # Only if user hits OK
+			# Clear old recording options first
+			new_scrcpy_options=$(echo "$new_scrcpy_options" | sed -E 's/--record(=[^ ]*)?|--record-format=[^ ]+//g')
+
+			if [[ "$record_choice" == "ON" ]]; then
+				local old_filename=$(echo "$old_options" | grep -o -e '--record=[^ ]*' | cut -d'=' -f2)
+				[ -z "$old_filename" ] && old_filename="${PWD}/recording.mp4"
+				local filename
+				filename=$(whiptail --backtitle "$PWD" --inputbox "Enter filename for recording" 0 0 "$old_filename" --title "Recording Filename" 3>&1 1>&2 2>&3)
+
+				if [[ $? -eq 0 ]] && [[ -n "$filename" ]]; then
+					new_scrcpy_options+=" --record=$filename"
+
+					local old_format=$(echo "$old_options" | grep -o -e '--record-format=[^ ]*' | cut -d'=' -f2)
+					[ -z "$old_format" ] && old_format="mp4"
+					local format
+					format=$(whiptail --inputbox "Enter record format (mp4 or mkv)" 0 0 "$old_format" --title "Recording Format" 3>&1 1>&2 2>&3)
+					if [[ $? -eq 0 ]] && [[ -n "$format" ]]; then
+						new_scrcpy_options+=" --record-format=$format"
+					fi
+				else
+					whiptail --msgbox "Recording was enabled but no filename was provided. Recording is now disabled." 0 0
+				fi
+			fi
+		fi
+
+		# --- Audio Source ---
+		local current_audio_choice="output"
+		if [[ "$new_scrcpy_options" == *"--no-audio"* ]]; then current_audio_choice="disabled"; fi
+		if [[ "$new_scrcpy_options" == *"--audio-dup"* ]]; then current_audio_choice="playback_dup"; fi
+		if [[ "$new_scrcpy_options" == *"--audio-source=mic"* ]]; then current_audio_choice="mic"; fi
+		if [[ "$new_scrcpy_options" == *"--audio-source=voice-call"* ]]; then current_audio_choice="voice-call"; fi
+		if [[ "$new_scrcpy_options" == *"--audio-source=playback"* ]] && [[ "$new_scrcpy_options" != *"--audio-dup"* ]]; then current_audio_choice="playback"; fi
+
+		local audio_choice
+		audio_choice=$(whiptail --title "Audio Forwarding Options" --radiolist "Choose an audio forwarding mode:" 0 0 6 \
+			"output" "Device audio output (default)" $([[ "$current_audio_choice" == "output" ]] && echo "ON" || echo "OFF") \
+			"playback" "Forward playback audio only" $([[ "$current_audio_choice" == "playback" ]] && echo "ON" || echo "OFF") \
+			"playback_dup" "Forward playback AND duplicate on device" $([[ "$current_audio_choice" == "playback_dup" ]] && echo "ON" || echo "OFF") \
+			"mic" "Forward device microphone audio" $([[ "$current_audio_choice" == "mic" ]] && echo "ON" || echo "OFF") \
+			"voice-call" "Forward device voice call audio" $([[ "$current_audio_choice" == "voice-call" ]] && echo "ON" || echo "OFF") \
+			"disabled" "Disable all audio forwarding (--no-audio)" $([[ "$current_audio_choice" == "disabled" ]] && echo "ON" || echo "OFF") 3>&1 1>&2 2>&3)
+
+		if [[ $? -eq 0 ]]; then # Only if user hits OK
+			# Clear old audio options
+			new_scrcpy_options=$(echo "$new_scrcpy_options" | sed -E 's/--no-audio//g' | sed -E 's/--audio-source=[^ ]+//g' | sed -E 's/--audio-dup//g')
+			case "$audio_choice" in
+			"playback") new_scrcpy_options+=" --audio-source=playback" ;;
+			"playback_dup") new_scrcpy_options+=" --audio-source=playback --audio-dup" ;;
+			"mic") new_scrcpy_options+=" --audio-source=mic" ;;
+			"voice-call") new_scrcpy_options+=" --audio-source=voice-call" ;;
+			"disabled") new_scrcpy_options+=" --no-audio" ;;
+			esac
+		fi
+
+		# --- Video Source ---
+		local current_video_source="display"
+		[[ "$new_scrcpy_options" == *"--video-source=camera"* ]] && current_video_source="camera"
+		local video_source
+		video_source=$(whiptail --title "Video Source" --radiolist "Choose a video source:" 0 0 2 \
+			"display" "Mirror the device display" $([[ "$current_video_source" == "display" ]] && echo "ON" || echo "OFF") \
+			"camera" "Mirror a device camera" $([[ "$current_video_source" == "camera" ]] && echo "ON" || echo "OFF") 3>&1 1>&2 2>&3)
+
+		if [[ $? -eq 0 ]]; then # Only if user hits OK
+			# Clear old video source options
+			new_scrcpy_options=$(echo "$new_scrcpy_options" | sed -E 's/--video-source=[^ ]+//g' | sed -E 's/--camera-id=[^ ]+//g' | sed -E 's/--capture-orientation=[^ ]+//g')
+
+			if [[ "$video_source" == "camera" ]]; then
+				new_scrcpy_options+=" --video-source=camera"
+				whiptail --infobox "Listing available cameras for device $identifier..." 0 0
+				local camera_list=$(scrcpy -s "$identifier" --list-cameras 2>&1)
+				local camera_info_lines=$(echo "$camera_list" | grep -- '--camera-id=')
+
+				if [ -z "$camera_info_lines" ]; then
+					whiptail --msgbox "Could not find any cameras on device $identifier. Aborting camera selection." 0 0
+				else
+					local camera_menu=()
+					local current_cam_id=$(echo "$old_options" | grep -o -e '--camera-id=[^ ]*' | cut -d'=' -f2)
+
+					while IFS= read -r line; do
+						local id=$(echo "$line" | sed 's/.*--camera-id=\([0-9]*\).*/\1/')
+						local desc=$(echo "$line" | sed 's/.*--camera-id=[0-9]*//' | xargs)
+						local state="OFF"
+						[[ "$id" == "$current_cam_id" ]] && state="ON"
+						camera_menu+=("$id" "$desc" "$state")
+
+					done <<<"$camera_info_lines"
+
+					local camera_id
+					camera_id=$(whiptail --title "Select Camera ID" --radiolist "Choose a camera ID to mirror:" 0 0 ${#camera_menu[@]} "${camera_menu[@]}" 3>&1 1>&2 2>&3)
+
+					if [[ $? -eq 0 ]] && [[ -n "$camera_id" ]]; then
+						new_scrcpy_options+=" --camera-id=$camera_id"
+
+						local current_orientation=$(echo "$old_options" | grep -o -e '--capture-orientation=[^ ]*' | cut -d'=' -f2)
+						[ -z "$current_orientation" ] && current_orientation="0"
+						local orientation orientation=$(whiptail --title "Camera Orientation" --radiolist "Choose capture orientation:" 0 0 4 \
+							"0" "0 degrees" $([[ "$current_orientation" == "0" ]] && echo "ON" || echo "OFF") \
+							"90" "90 degrees" $([[ "$current_orientation" == "90" ]] && echo "ON" || echo "OFF") \
+							"180" "180 degrees" $([[ "$current_orientation" == "180" ]] && echo "ON" || echo "OFF") \
+							"270" "270 degrees" $([[ "$current_orientation" == "270" ]] && echo "ON" || echo "OFF") 3>&1 1>&2 2>&3)
+
+						if [[ $? -eq 0 ]] && [[ -n "$orientation" ]]; then
+							new_scrcpy_options+=" --capture-orientation=$orientation"
+						fi
+					fi
+				fi
+			fi
+		fi
+
+		# --- Turn Screen Off ---
+		local current_screen_off_status="OFF"
+		[[ "$new_scrcpy_options" == *"--turn-screen-off"* ]] && current_screen_off_status="ON"
+
+		local turn_screen_off_choice
+		turn_screen_off_choice=$(whiptail --title "Turn Screen Off" --radiolist "Turn device screen off during mirroring?" 0 0 2 \
+			"ON" "Yes, turn screen off" "$current_screen_off_status" \
+			"OFF" "No, keep screen on" $([[ "$current_screen_off_status" == "OFF" ]] && echo "ON" || echo "OFF") 3>&1 1>&2 2>&3)
+
+		if [[ $? -eq 0 ]]; then # Only if user hits OK
+			# Clear old screen off option first
+			new_scrcpy_options=$(echo "$new_scrcpy_options" | sed -E 's/--turn-screen-off//g')
+
+			if [[ "$turn_screen_off_choice" == "ON" ]]; then
+				new_scrcpy_options+=" --turn-screen-off"
+			fi
+		fi
+
+		# --- Update the Profile File ---
+		local final_options=$(echo "$new_scrcpy_options" | xargs)
+		local new_line="${identifier} # ${new_name} # ${final_options}"
+		awk -v old="$line_to_edit" -v new="$new_line" '{if ($0 == old) print new; else print $0}' "$PROFILES_FILE" >"${PROFILES_FILE}.tmp"
+		mv "${PROFILES_FILE}.tmp" "$PROFILES_FILE"
+
+		whiptail --msgbox "Profile '${new_name}' updated successfully." 0 0
+	else
+		whiptail --msgbox "Edit cancelled." 0 0
+	fi
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_EDIT_PROFILE 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# SECTION: 👁️ FUN_VIEW_PROFILE 👁️
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Displays the details of a selected device profile in a read-only view.
+FUN_VIEW_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --msgbox "No saved profiles to view." 0 0
+		return
+	fi
+
+	local profiles_menu=()
+	local i=1
+	declare -A profile_map
+
+	while IFS= read -r line; do
+		local identifier=$(echo "$line" | cut -d'#' -f1 | xargs)
+		local name=$(echo "$line" | cut -d'#' -f2 | xargs)
+		profiles_menu+=("$i" "$name ($identifier)")
+		profile_map[$i]="$line"
+		((i++))
+	done <"$PROFILES_FILE"
+
+	local chosen_num
+	chosen_num=$(whiptail --title "View a Device Profile" \
+		--menu "Choose a profile to view:" 0 0 ${#profile_map[@]} \
+		"${profiles_menu[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$chosen_num" ]; then
+		local line_to_view="${profile_map[$chosen_num]}"
+		local identifier=$(echo "$line_to_view" | cut -d'#' -f1 | xargs)
+		local name=$(echo "$line_to_view" | cut -d'#' -f2 | xargs)
+		local options=$(echo "$line_to_view" | cut -d'#' -f3- | xargs)
+
+		local formatted_view="Profile Name: ${name}\n"
+		formatted_view+="Identifier:   ${identifier}\n\n"
+		formatted_view+="--- scrcpy options ---\n"
+		# Replace any space preceding a hyphen with a newline to list each option separately
+		local formatted_options=$(echo "$options" | sed 's/ -/\n-/g' | sed 's/^ *//')
+		formatted_view+="${formatted_options}"
+
+		whiptail --title "Viewing Profile: ${name}" --scrolltext --msgbox "$formatted_view" 20 78
+	else
+		whiptail --msgbox "View cancelled." 0 0
+	fi
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_VIEW_PROFILE 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🗑️ FUN_DELETE_PROFILE 🗑️
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Deletes a selected device profile from the configuration file.
+FUN_DELETE_PROFILE() {
+	[ ! -s "$PROFILES_FILE" ] && {
+		whiptail --msgbox "No saved profiles to delete." 0 0
+		return
+	}
+
+	local profiles_menu=()
+	local i=1
+	declare -A profile_map
+
+	while IFS= read -r line; do
+		local identifier=$(echo "$line" | cut -d'#' -f1 | xargs)
+		local name=$(echo "$line" | cut -d'#' -f2 | xargs)
+
+		profiles_menu+=("$i" "$name ($identifier)")
+		profile_map[$i]="$line"
+		((i++))
+	done <"$PROFILES_FILE"
+
+	local chosen_num
+	chosen_num=$(whiptail --title "Delete a Device Profile" \
+		--menu "Choose a profile to delete:" 0 0 ${#profile_map[@]} \
+		"${profiles_menu[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$chosen_num" ]; then
+		local line_to_delete="${profile_map[$chosen_num]}"
+
+		grep -v -x -F "$line_to_delete" "$PROFILES_FILE" >"${PROFILES_FILE}.tmp"
+
+		if ! cmp -s "$PROFILES_FILE" "${PROFILES_FILE}.tmp"; then
+			mv "${PROFILES_FILE}.tmp" "$PROFILES_FILE"
+			whiptail --msgbox "Profile has been deleted." 0 0
+		else
+			rm "${PROFILES_FILE}.tmp"
+			whiptail --msgbox "Error: Profile not found or file is identical. No changes made." 0 0
+		fi
+	else
+		whiptail --msgbox "Deletion cancelled." 0 0
+	fi
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_DELETE_PROFILE 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 📶 FUN_ENABLE_WIRELESS_MODE 📶
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Switches a USB-connected device to wireless ADB mode (tcpip).
+FUN_ENABLE_WIRELESS_MODE() {
+	readarray -t device_lines < <(adb devices | tail +2 | grep -v '^[[:space:]]*$' | grep -v ':')
+	if [ ${#device_lines[@]} -eq 0 ]; then
+		whiptail --msgbox "No wired devices detected. Please connect a device via USB to enable wireless mode." 0 0
+		return
+	fi
+
+	local wired_menu=()
+	local i=1
+	declare -A serial_map
+	for line in "${device_lines[@]}"; do
+		local serial=$(echo "$line" | awk '{print $1}')
+		local details=$(echo "$line" | awk '{print $1 " - " $2}')
+		wired_menu+=("$i" "$details")
+		serial_map[$i]="$serial"
+		((i++))
+	done
+
+	local chosen_num
+	chosen_num=$(whiptail --title "Enable Wireless Mode" --menu "Choose a USB-connected device to switch to wireless mode:" 0 0 ${#device_lines[@]} "${wired_menu[@]}" 3>&1 1>&2 2>&3)
+	if [[ $? -ne 0 ]] || [[ -z "$chosen_num" ]]; then
+		whiptail --msgbox "Cancelled." 0 0
+		return
+	fi
+
+	local CHOSEN_SERIAL="${serial_map[$chosen_num]}"
+	adb -s "$CHOSEN_SERIAL" tcpip 5555
+
+	whiptail --infobox "Attempting to retrieve device IP..." 0 0
+	sleep 1
+	local device_ip=$(adb -s "$CHOSEN_SERIAL" shell ip addr show wlan0 | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+
+	if [ -n "$device_ip" ]; then
+		whiptail --msgbox "Wireless mode enabled for $CHOSEN_SERIAL. The device IP is likely $device_ip. You can now disconnect the USB cable and use the 'Connect to Device by IP' option." 0 0
+	else
+		whiptail --msgbox "Wireless mode enabled for $CHOSEN_SERIAL, but could not determine IP address. You may need to find it manually in your device's Wi-Fi settings." 0 0
+	fi
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_ENABLE_WIRELESS_MODE 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🌐 FUN_CONNECT_DEVICE_BY_IP 🌐
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Connects to an Android device over the network using its IP address.
+FUN_CONNECT_DEVICE_BY_IP() {
+	local menu_options=()
+	# Add the static manual option first, and select it by default.
+	menu_options+=("MANUAL" "Manually input an IP address" "ON")
+
+	declare -A seen_ips
+	local first_ip_found=true
+
+	# 1. Process currently connected wireless devices
+	readarray -t wireless_lines < <(adb devices | grep ':' | grep -v 'List of devices attached')
+	for line in "${wireless_lines[@]}"; do
+		if [[ -n "$line" ]]; then
+			local serial
+			serial=$(echo "$line" | awk '{print $1}')
+			local ip
+			ip=$(echo "$serial" | cut -d':' -f1)
+			if [[ -z "${seen_ips[$ip]}" ]]; then
+				if $first_ip_found; then
+					menu_options[2]="OFF"                       # Deselect MANUAL
+					menu_options+=("$ip" "Connected: $ip" "ON") # Select this one
+					first_ip_found=false
+				else
+					menu_options+=("$ip" "Connected: $ip" "OFF")
+				fi
+				seen_ips["$ip"]=1
+			fi
+		fi
+	done
+
+	# 2. Process saved wireless profiles
+	if [ -f "$PROFILES_FILE" ]; then
+		while IFS= read -r line; do
+			local identifier
+			identifier=$(echo "$line" | cut -d'#' -f1 | xargs)
+			# Check if it's a wireless profile (IP address) and not already seen
+			if [[ ("$identifier" == *.* || "$identifier" == *:*) && -z "${seen_ips[$identifier]}" ]]; then
+				local name
+				name=$(echo "$line" | cut -d'#' -f2 | xargs)
+				if $first_ip_found; then
+					menu_options[2]="OFF" # Deselect MANUAL
+					menu_options+=("$identifier" "Profile: $name ($identifier)" "ON")
+					first_ip_found=false
+				else
+					menu_options+=("$identifier" "Profile: $name ($identifier)" "OFF")
+				fi
+				seen_ips["$identifier"]=1
+			fi
+		done <"$PROFILES_FILE"
+	fi
+
+	local ip_addr=""
+	local choice
+
+	# If we found any devices (connected or from profiles), show the menu. Otherwise, go straight to manual input.
+	if [ ${#seen_ips[@]} -gt 0 ]; then
+		choice=$(whiptail --title "Connect to Wireless Device" --radiolist "Choose a connection method:" 0 0 $((${#seen_ips[@]} + 1)) "${menu_options[@]}" 3>&1 1>&2 2>&3)
+	else
+		choice="MANUAL"
+	fi
+
+	# Exit if user cancelled the menu
+	if [[ $? -ne 0 ]]; then
+		whiptail --msgbox "Connection cancelled." 0 0
+		return
+	fi
+
+	if [[ "$choice" == "MANUAL" ]]; then
+		# If manual is chosen, show the input box
+		ip_addr=$(whiptail --inputbox "Enter the device IP address:" 0 0 --title "Manual IP Input" 3>&1 1>&2 2>&3)
+		if [[ $? -ne 0 ]] || [[ -z "$ip_addr" ]]; then
+			whiptail --msgbox "Connection cancelled." 0 0
+			return
+		fi
+	else
+		# Otherwise, the choice is the IP address itself
+		ip_addr="$choice"
+	fi
+
+	# Final check if ip_addr is empty
+	if [[ -z "$ip_addr" ]]; then
+		whiptail --msgbox "No IP address provided. Connection cancelled." 0 0
+		return
+	fi
+
+	whiptail --infobox "Attempting to connect to ${ip_addr}:5555..." 0 0
+	local connect_result
+	connect_result=$(adb connect "${ip_addr}:5555")
+	sleep 1
+
+	if [[ "$connect_result" == *"connected"* ]] || [[ "$connect_result" == *"already connected"* ]]; then
+		whiptail --msgbox "Successfully connected to ${ip_addr}:5555." 0 0
+	else
+		whiptail --msgbox "Failed to connect to device at ${ip_addr}:5555.\n\nResponse:\n$connect_result" 0 0
+	fi
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_CONNECT_DEVICE_BY_IP 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 📱 FUN_ADB_CONNECT_MENU 📱
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Displays a menu for ADB connection utilities.
+FUN_ADB_CONNECT_MENU() {
+	CHOICE=$(whiptail --separate-output --title "ADB Connection Tools" --menu "Select a tool:" 0 0 0 \
+		"1" "Enable Wireless Mode for USB Device" \
+		"2" "Connect to Device by IP" \
+		"3" "Back" 3>&1 1>&2 2>&3)
+
+	case $CHOICE in
+	1) FUN_ENABLE_WIRELESS_MODE ;;
+	2) FUN_CONNECT_DEVICE_BY_IP ;;
+	3) return ;;
+	*) return ;;
+	esac
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_ADB_CONNECT_MENU 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🗂️ FUN_MANAGE_DEVICE_PROFILES 🗂️
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Displays the main menu for managing device profiles.
+FUN_MANAGE_DEVICE_PROFILES() {
+
+	CHOICE=$(whiptail --separate-output --title "Manage Device Profiles" --menu "Select an option:" 0 0 0 \
+		"1" "[Load/RUN] a device profile [options]" \
+		"2" "View a device profile" \
+		"3" "Create a new device profile" \
+		"4" "Edit a device profile" \
+		"5" "Delete a device profile" \
+		"6" "EXIT / BACK" 3>&1 1>&2 2>&3)
+
+	case $CHOICE in
+	1)
+		FUN_LOAD_RUN_PROFILE
+		;;
+	2)
+		FUN_VIEW_PROFILE
+		;;
+	3)
+		FUN_CREATE_PROFILE
+		;;
+	4)
+		FUN_EDIT_PROFILE
+		;;
+	5)
+		FUN_DELETE_PROFILE
+		;;
+	6)
+		return
+		;;
+	*)
+		return
+		;;
+	esac
+
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_MANAGE_DEVICE_PROFILES 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ▶️ FUN_RUN_SCRCPY ▶️
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# A simple wrapper function to execute the scrcpy command.
+FUN_RUN_SCRCPY() {
+	scrcpy "$@"
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_RUN_SCRCPY 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ❓ FUN_SHOW_HELP ❓
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Displays a help message with usage instructions.
+FUN_SHOW_HELP() {
+	HELP_TEXT="This script automates Android device mirroring using scrcpy, primarily through a powerful profile system.
+
+---
+SCRIPT USAGE: DEVICE PROFILES ---
+
+The recommended way to use this script is via the profile system, which saves your settings for each device.
+
+1. CREATE a Profile:
+   - Go to 'Manage Device Profiles' -> 'Create a new device profile'.
+   - Choose 'Wired' or 'Wireless'.
+   - Select your device or enter its IP.
+   - Choose your desired scrcpy options (recording, audio, etc.).
+
+2. LOAD a Profile:
+   - Go to 'Manage Device Profiles' -> '[Load/RUN] a device profile'.
+   - Select a previously saved profile to instantly connect and mirror with your saved settings.
+
+
+---
+MANUAL CONNECTION CHEATSHEET ---
+
+For quick, one-off connections without saving a profile.
+
+* Wired Connection:
+  1. Connect device via USB.
+  2. Check connection with: adb devices
+  3. Use the script's 'Start Mirroring (Wired)' option.
+
+* Wireless Connection:
+  1. Connect device via USB and ensure it's on the same Wi-Fi as your PC.
+  2. Enable network mode:
+     $ adb tcpip 5555
+  3. Disconnect USB and find your device's IP address.
+  4. Connect to the device:
+     $ adb connect <device_ip>:5555
+  5. Once connected, use the script's 'Start Mirroring (Wireless)' option or run scrcpy manually:
+     $ scrcpy -s <device_ip>:5555 [options]
+
+
+---
+FURTHER HELP ---
+
+For a complete list of all possible mirroring options, run the following command in your terminal:
+
+  scrcpy --help
+
+For more information on the Android Debug Bridge (adb), refer to the official Android developer documentation."
+
+	whiptail --scrolltext --msgbox "$HELP_TEXT" 0 0
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_SHOW_HELP 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 📋 FUN_LIST_DEVICES 📋
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Lists all currently connected ADB devices.
+FUN_LIST_DEVICES() {
+	DEVICES_FILE=$(mktemp)
+	adb devices >"$DEVICES_FILE"
+	DEVICES=$(adb devices | tee "$DEVICES_FILE" | tail +2 | grep -v '^[[:space:]]*$' | awk '{print $1 " - " $2}')
+	DEVICE_COUNT=$(printf '%s\n' "$DEVICES" | grep -v '^[[:space:]]*$' | wc -l)
+
+	if ((DEVICE_COUNT > 0)); then
+		whiptail --scrolltext --msgbox "List of devices attached: \n\n $DEVICES " 0 0 3>&1 1>&2 2>&3
+	else
+		whiptail --msgbox "No devices detected." 0 0
+	fi
+	rm -f "$DEVICES_FILE"
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_LIST_DEVICES 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🔌 FUN_START_MIRRORING_WIRED 🔌
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Starts mirroring a wired (USB) device, handling single or multiple device scenarios.
+FUN_START_MIRRORING_WIRED() {
+	# Get all devices into an array, excluding header/blanks
+	readarray -t device_lines < <(adb devices | tail +2 | grep -v '^[[:space:]]*$')
+
+	# Count devices
+	local DEVICE_COUNT=${#device_lines[@]}
+
+	if [ "$DEVICE_COUNT" -eq 0 ]; then
+		whiptail --msgbox "No devices detected." 0 0
+		return
+	fi
+
+	# If only one device, just use the simple command
+	if [ "$DEVICE_COUNT" -eq 1 ]; then
+		FUN_RUN_SCRCPY -d
+		return
+	fi
+
+	# If multiple devices, build a numbered menu using an associative array
+	local options=()
+	declare -A serial_map # Associative array for reliable mapping
+
+	local i=1
+	for line in "${device_lines[@]}"; do
+		if [[ -n "$line" ]]; then
+			local serial
+			local details
+			serial=$(echo "$line" | awk '{print $1}')
+			details=$(echo "$line" | awk '{print $1 " - " $2}')
+
+			options+=("$i" "$details") # Tag is the number, item is the description
+			serial_map[$i]="$serial"   # Map the number to the actual serial
+			((i++))
+		fi
+	done
+
+	# Check if any entries were processed
+	if [ ${#serial_map[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "Failed to process device list." 8 78
+		return
+	fi
+
+	# Dynamically set height and show the menu
+	local menu_height=${#serial_map[@]}
+	local CHOSEN_NUM
+	CHOSEN_NUM=$(whiptail --title "Select a Device" \
+		--menu "Multiple devices found. Choose one to mirror:" 0 0 "$menu_height" \
+		"${options[@]}" \
+		3>&1 1>&2 2>&3)
+
+	# Handle the result
+	if [ $? -eq 0 ] && [ -n "$CHOSEN_NUM" ]; then
+		# Retrieve the actual serial from the map
+		local CHOSEN_SERIAL="${serial_map[$CHOSEN_NUM]}"
+		FUN_RUN_SCRCPY -s "$CHOSEN_SERIAL"
+	else
+		whiptail --msgbox "Mirroring cancelled." 0 0
+	fi
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_START_MIRRORING_WIRED 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 📶 FUN_START_MIRRORING_WIRELESS 📶
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Starts mirroring a wireless (TCP/IP) device, handling single or multiple device scenarios.
+FUN_START_MIRRORING_WIRELESS() {
+
+	# Get device list into an array, filter for wireless (contains ":"), and exclude header/blanks
+	readarray -t wireless_lines < <(adb devices | grep ':' | grep -v 'List of devices attached')
+
+	# Count devices
+	local DEVICE_COUNT=${#wireless_lines[@]}
+
+	if [ "$DEVICE_COUNT" -eq 0 ]; then
+		whiptail --msgbox "No wireless devices are connected." 0 0
+		return
+	fi
+
+	# If only one wireless device, use the simple command
+	if [ "$DEVICE_COUNT" -eq 1 ]; then
+		FUN_RUN_SCRCPY -e
+		return
+	fi
+
+	# If multiple devices, build a numbered menu using an associative array
+	local options=()
+	declare -A serial_map # Associative array for reliable mapping
+
+	local i=1
+	for line in "${wireless_lines[@]}"; do
+		# Double check for empty lines
+		if [[ -n "$line" ]]; then
+			local serial
+			local details
+			serial=$(echo "$line" | awk '{print $1}')
+			details=$(echo "$line" | awk '{print $1 " - " $2}')
+
+			options+=("$i" "$details") # Tag is the number, item is the description
+			serial_map[$i]="$serial"   # Map the number to the actual serial
+			((i++))
+		fi
+	done
+
+	# Check if any entries were processed
+	if [ ${#serial_map[@]} -eq 0 ]; then
+		whiptail --title "Error" --msgbox "Failed to process wireless device list." 8 78
+		return
+	fi
+
+	# Dynamically set height and show the menu
+	local menu_height=${#serial_map[@]}
+	local CHOSEN_NUM
+	CHOSEN_NUM=$(whiptail --title "Select a Wireless Device" \
+		--menu "Multiple wireless devices found. Choose one to mirror:" 0 0 "$menu_height" \
+		"${options[@]}" \
+		3>&1 1>&2 2>&3)
+
+	# Handle the result
+	if [ $? -eq 0 ] && [ -n "$CHOSEN_NUM" ]; then
+		# Retrieve the actual serial from the map
+		local CHOSEN_SERIAL="${serial_map[$CHOSEN_NUM]}"
+		FUN_RUN_SCRCPY -s "$CHOSEN_SERIAL" && {
+			echo "✅ Connected and launched scrcpy!"
+			return 0
+		}
+	else
+		whiptail --msgbox "Mirroring cancelled." 0 0
+	fi
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_START_MIRRORING_WIRELESS 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🔌 FUN_DISCONNECT_DEVICES 🔌
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Disconnects one or all currently connected wireless (TCP/IP) devices.
+FUN_DISCONNECT_DEVICES() {
+	# Get device list into an array, filter for wireless (contains ":"), and exclude header/blanks
+	readarray -t wireless_lines < <(adb devices | grep ':' | grep -v 'List of devices attached')
+
+	# Count devices
+	local DEVICE_COUNT=${#wireless_lines[@]}
+
+	if [ "$DEVICE_COUNT" -eq 0 ]; then
+		whiptail --msgbox "No wireless devices are connected to disconnect." 0 0
+		return
+	fi
+
+	local checklist_options=()
+	# Add a special option to disconnect all
+	checklist_options+=("__ALL__" "Disconnect ALL listed wireless devices" "OFF")
+
+	for line in "${wireless_lines[@]}"; do
+		if [[ -n "$line" ]]; then
+			local serial
+			serial=$(echo "$line" | awk '{print $1}')
+			checklist_options+=("$serial" "" "OFF")
+		fi
+	done
+
+	local chosen_devices
+	chosen_devices=$(whiptail --title "Select Devices to Disconnect" \
+		--checklist "Use SPACE to select/deselect devices. Press ENTER when done." 0 0 $DEVICE_COUNT \
+		"${checklist_options[@]}" \
+		3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$chosen_devices" ]; then
+		local disconnected_list=""
+		# Check if the 'ALL' option was selected
+		if [[ "$chosen_devices" == *"__ALL__"* ]]; then
+			whiptail --infobox "Disconnecting all wireless devices..." 0 0
+			adb disconnect
+			disconnected_list="All wireless devices."
+		else
+			for device in $chosen_devices; do
+				local device_id=$(echo "$device" | tr -d '"')
+				whiptail --infobox "Disconnecting $device_id..." 0 0
+				adb disconnect "$device_id"
+				disconnected_list+="\n- $device_id"
+			done
+		fi
+		whiptail --msgbox "Disconnection commands sent for the following: $disconnected_list" 0 0
+	else
+		whiptail --msgbox "Disconnect operation cancelled." 0 0
+	fi
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 FUN_DISCONNECT_DEVICES 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: ⚙️ MAIN PROGRAM LOOP ⚙️
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# The main function, which displays the primary menu and handles user input.
+MAIN() {
+
+	FUN_CHECK_DEPENDENCIES
+
+	while true; do
+		CHOICE=$(
+			whiptail --separate-output --title "SCRCPY ANDROID SCREEN MIRRORING" --menu "Select an option:" 0 0 0 \
+				"1" "List All Connected Devices" \
+				"2" "Start Mirroring (Wired Device)" \
+				"3" "Start Mirroring (Wireless Device)" \
+				"4" "Manage Device Profiles" \
+				"5" "Disconnect a Device" \
+				"6" "ADB Connection Tools" \
+				"7" "Help" \
+				"8" "Exit" 3>&1 1>&2 2>&3
+		)
+
+		if [[ $? != 0 ]]; then
+			echo "USER ABORTED ..... EXITING"
+			break
+		fi
+
+		case $CHOICE in
+		1) FUN_LIST_DEVICES ;;
+		2) FUN_START_MIRRORING_WIRED ;;
+		3) FUN_START_MIRRORING_WIRELESS ;;
+		4) FUN_MANAGE_DEVICE_PROFILES ;;
+		5) FUN_DISCONNECT_DEVICES ;;
+		6) FUN_ADB_CONNECT_MENU ;;
+		7) FUN_SHOW_HELP ;;
+		8)
+			echo "USER ABORTED ..... EXITING"
+			break
+			;;
+		esac
+	done
+}
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 MAIN PROGRAM LOOP 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: 🚀 SCRIPT EXECUTION ENTRY POINT 🚀
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Entry point for script execution.
+MAIN
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  !SECTION: 🏁 SCRIPT EXECUTION 🏁
+# ╚═══════════════════════════════════════════════════════════════════════════╝

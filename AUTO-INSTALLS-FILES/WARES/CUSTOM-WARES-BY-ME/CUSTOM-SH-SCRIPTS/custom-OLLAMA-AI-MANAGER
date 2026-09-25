@@ -1,0 +1,833 @@
+#!/bin/bash
+
+# ==============================================================================
+# Ollama Management Script (Whiptail UI)
+#
+# An interactive utility to manage Ollama models, service, and configuration.
+#
+# v6.0 - Relaunches with sudo, simplifies informational output to terminal.
+#
+# ==============================================================================
+
+# --- Sudo Check and Relaunch ---
+# Most operations in this script require root privileges (e.g., managing the
+# systemd service, writing to /etc). This block ensures the script is running
+# as root. If not, it re-launches itself using 'sudo'.
+if [ "$EUID" -ne 0 ]; then
+	# Inform the user that root privileges are required.
+	echo -e "\e[48;5;1m" "\e[1;38;5;16m" "This script requires root privileges to function correctly. It will now attempt to re-launch itself using sudo \nPlease enter your password if prompted." "\e[0m"
+	# Re-execute this script with sudo, passing along all original arguments.
+	sudo "$0" "$@"
+	# Exit the non-privileged script, passing the exit code from the sudo command.
+	exit $?
+fi
+
+# --- Configuration ---
+# Sets up global variables and configuration paths.
+
+# Determine the correct home directory for the user who invoked sudo.
+# This is crucial for finding the right .bashrc file to modify.
+if [ -n "$SUDO_USER" ]; then
+	# If sudo is used, SUDO_USER is set. Get their home directory.
+	USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+else
+	# If run directly as root, use root's home directory.
+	USER_HOME=$HOME
+fi
+# Define the path to the user's .bashrc file.
+BASH_CONFIG_FILE="$USER_HOME/.bashrc"
+
+# Define default dimensions for the whiptail UI dialogs.
+# Setting height and width to 0 enables whiptail's auto-sizing feature,
+# allowing dialogs to dynamically adjust to content and terminal size.
+# Note: Some whiptail calls below explicitly set height (e.g., '8 "$WT_WIDTH"'),
+# which will override WT_HEIGHT=0 for that specific dialog, but WT_WIDTH=0
+# will still apply for dynamic width.
+WT_HEIGHT=0
+WT_WIDTH=0
+# Define the main title for the whiptail UI.
+WT_TITLE="Ollama Manager v6.0 (Running as root)"
+
+# --- Pre-flight Checks ---
+# Ensures all required external commands are available before starting.
+
+# Function to check if a command exists on the system.
+# Exits gracefully with an error message if a command is not found.
+# @param $1: The name of the command to check.
+check_command() {
+	if ! command -v "$1" &>/dev/null; then
+		whiptail --title "Error: Command Not Found" --msgbox "The command '$1' is required but not found.\nPlease install it to continue." "$WT_HEIGHT" "$WT_WIDTH"
+		# Note the hardcoded height '8' for this message box.
+		if whiptail --yesno "Install ollama now?" "$WT_HEIGHT" "$WT_WIDTH"; then
+			curl -fsSL https://ollama.com/install.sh | sudo sh
+		else
+			exit 1
+		fi
+		exit 1
+	fi
+}
+
+# Perform checks for all required commands.
+check_command "whiptail"   # For the interactive UI.
+check_command "ollama"     # The core Ollama CLI.
+check_command "systemctl"  # For managing the systemd service.
+check_command "journalctl" # For viewing service logs.
+
+# Function to check if the systemd service exists and create it if missing.
+check_and_create_service() {
+	if ! systemctl list-unit-files ollama.service &>/dev/null; then
+		if whiptail --title "Service Missing" --yesno "The 'ollama.service' systemd unit was not found.\n\nMost features of this manager (autostart, background running, config) require it.\n\nCreate and install the service now?" "$WT_HEIGHT" "$WT_WIDTH"; then
+
+			# 1. Ensure User Exists
+			if ! id "ollama" &>/dev/null; then
+				if ! useradd -r -s /bin/false -U -m -d /usr/share/ollama ollama; then
+					whiptail --title "Error" --msgbox "Failed to create 'ollama' user." 0 0
+					return 1
+				fi
+				usermod -aG ollama $(whoami) 2>/dev/null
+			fi
+
+			# 2. Locate Binary
+			local ollama_bin
+			ollama_bin=$(which ollama)
+			if [ -z "$ollama_bin" ]; then
+				whiptail --title "Error" --msgbox "Could not locate 'ollama' binary." 0 0
+				return 1
+			fi
+
+			# 3. Create Service File
+			cat <<EOF >/etc/systemd/system/ollama.service
+[Unit]
+Description=Ollama Service
+After=network-online.target
+
+[Service]
+ExecStart=$ollama_bin serve
+User=ollama
+Group=ollama
+Restart=always
+RestartSec=3
+Environment="PATH=$PATH"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+			# 4. Enable and Start
+			systemctl daemon-reload
+			if systemctl enable --now ollama; then
+				whiptail --title "Success" --msgbox "Ollama service created and started successfully." 0 0
+			else
+				whiptail --title "Error" --msgbox "Service created but failed to start. Check logs." 0 0
+			fi
+		else
+			whiptail --title "Warning" --msgbox "Running without systemd service. Some features may not work." 0 0
+		fi
+	fi
+}
+
+check_and_create_service
+
+# --- Helper Functions ---
+# Reusable functions used by other parts of the script.
+
+# Gets a clean list of installed model names.
+# Runs 'ollama list', ignores the header row, and extracts the first column.
+_get_model_list() {
+	ollama list 2>/dev/null | awk 'NR>1 {print $1}'
+}
+
+# Presents a whiptail menu to select a single model from the installed list.
+# This function uses the "superior whiptail pattern" for robustness and clarity.
+# @param $1: The title to display for the whiptail menu.
+# @return: The name of the selected model (echoed to stdout).
+_select_model_from_menu() {
+	local title="$1"
+	local -a models_list  # Array to hold raw model names obtained from _get_model_list.
+	local -a options=()   # Array to store whiptail menu options in "TAG ITEM" format.
+	local -A model_map=() # Associative array to map numeric tags (used in whiptail) to original model names.
+	local i=1             # Counter for generating unique numeric tags for whiptail.
+
+	# Use readarray to safely read all model names into an array.
+	# This is more robust than 'while read' for names with spaces/special characters.
+	readarray -t models_list < <(_get_model_list)
+
+	# If no models are installed, display a message and return an error code.
+	if [ ${#models_list[@]} -eq 0 ]; then
+		whiptail --title "$title" --msgbox "No models available to select." 0 0
+		return 1 # Indicate failure/no selection to the caller.
+	fi
+
+	# Build the 'options' array for whiptail and the 'model_map' for safe retrieval.
+	for model_name in "${models_list[@]}"; do
+		options+=("$i" "$model_name") # whiptail menu format: TAG ITEM
+		model_map[$i]="$model_name"   # Map the numeric tag to the actual model name.
+		((i++))
+	done
+
+	# Show the menu and capture the user's choice (which will be the numeric tag).
+	local choice
+	# The 'if ! command' construct is used to capture the output and check the exit status.
+	# "${#model_map[@]}" provides the number of items, used by whiptail as 'menu-height'.
+	# This ensures whiptail can display all items or enable scrolling if needed.
+	if ! choice=$(whiptail --title "$title" --menu "Select a model:" "$WT_HEIGHT" "$WT_WIDTH" "${#model_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3); then
+		# User cancelled the menu (e.g., pressed Esc or the Cancel button).
+		return 1 # Indicate cancellation to the caller.
+	fi
+
+	# Echo the original model name using the associative map.
+	# This is a safe and robust way to retrieve the full, original model name
+	# based on the simple numeric tag returned by whiptail.
+	echo "${model_map[$choice]}"
+}
+
+# --- Core Functions ---
+# These functions implement the main features of the script.
+
+# Show a summary of the current Ollama configuration.
+# This output is printed directly to the terminal for review.
+view_configuration() {
+	local ollama_version
+	ollama_version=$(ollama --version 2>&1)
+	local service_status
+	service_status=$(systemctl is-active ollama 2>/dev/null || echo "inactive")
+	# Get the OLLAMA_MODELS path from the systemd service environment.
+	local systemd_path
+	systemd_path=$(systemctl show ollama --no-pager -p Environment --value 2>/dev/null | grep -o 'OLLAMA_MODELS=[^ ]*' | cut -d'=' -f2 | tr -d '"')
+	[ -z "$systemd_path" ] && systemd_path="(Not Set)"
+	# Get the OLLAMA_MODELS path from the user's .bashrc file.
+	local bashrc_path
+	bashrc_path=$(grep "export OLLAMA_MODELS=" "$BASH_CONFIG_FILE" 2>/dev/null | sed 's/export OLLAMA_MODELS=//' | tr -d '"')
+	[ -z "$bashrc_path" ] && bashrc_path="(Not Set)"
+
+	# Print the formatted summary.
+	printf "\n%s\n" "Ollama Configuration Summary"
+	printf "%s\n" "-----------------------------------"
+	printf "Ollama Version: %s\n" "$ollama_version"
+	printf "Service Status: %s\n" "$service_status"
+	printf "Script running as: %s\n" "$(whoami)"
+	printf "Original User: %s\n\n" "${SUDO_USER:-$(whoami)}"
+	printf "%s\n" "Model Directory Paths:"
+	printf "  - Systemd Service: %s\n" "$systemd_path"
+	printf "  - User Shell (.bashrc): %s\n" "$bashrc_path"
+	printf "\n"
+	# Wait for user input before returning to the menu.
+	read -s -n 1 -p "Press any key to continue..."
+}
+
+# List all downloaded models in the terminal.
+show_models_list() {
+	local ollama_output
+	ollama_output=$(ollama list 2>&1)
+	if [ $? -ne 0 ]; then
+		# Handle cases where the 'ollama list' command fails.
+		printf "\nError Listing Models\n"
+		printf "%s\n" "--------------------"
+		printf "The 'ollama list' command failed.\n\nError:\n%s\n" "$ollama_output"
+	else
+		# Print the successful output.
+		printf "\n%s\n" "Installed Ollama Models"
+		printf "%s\n" "-----------------------"
+		printf "%s\n" "$ollama_output"
+	fi
+	read -s -n 1 -p "Press any key to continue..."
+}
+
+# Add (pull) a new model from the Ollama registry.
+add_model() {
+	local model_name
+	local output_file
+
+	# Use a whiptail input box to get the model name from the user.
+	# Use a whiptail input box to get the model name from the user.
+	model_table=$(
+		cat <<'EOF'
+
+				  Example of models (name = size)
+
+	gemma3:4b             →  3.3 GB
+	phi4-mini:3.8b        →  2.5 GB
+	deepseek-coder:6.7b   →  3.8 GB
+	qwen3:8b              →  5.2 GB
+	qwen2.5-coder:3b      →  1.9 GB
+	qwen2.5-coder:7b      →  4.7 GB
+	qwen2.5-coder:14b     →  9.0 GB
+	ministral-3:8b        →  6.0 GB
+	ministral-3:14b       →  9.1 GB
+
+Just type the name exactly as shown on the left.
+EOF
+	)
+
+	model_name=$(
+		whiptail --scrolltext --title "Download Model. Enter the model name to download." \
+			--inputbox "$model_table" \
+			0 0 \
+			3>&1 1>&2 2>&3
+	)
+
+	# Exit if the user cancelled or entered an empty string.
+	if [ $? -ne 0 ] || [ -z "$model_name" ]; then
+		printf "Model download cancelled.\n"
+		return 1
+	fi
+
+	# Create a temporary file to capture the download log.
+	output_file=$(mktemp)
+
+	printf "\nDownloading model '%s'...\n" "$model_name"
+	printf "%s\n" "-----------------------------------"
+
+	# Stream the download progress to the terminal in real-time.
+	# 'stdbuf' adjusts buffering to ensure output appears line-by-line.
+	# 'tee' simultaneously writes the output to the terminal and the log file.
+	if stdbuf -oL -eL ollama pull "$model_name" 2>&1 | tee "$output_file"; then
+		printf "\n✓ Successfully downloaded '%s'.\n" "$model_name"
+	else
+		# If the download fails, print the captured error log.
+		printf "\n✗ Failed to download '%s'.\n" "$model_name"
+		printf "%s\n" "-----------------------------------"
+		printf "Error details:\n"
+		cat "$output_file"
+	fi
+
+	# Clean up the temporary file.
+	rm -f "$output_file"
+
+	read -s -n 1 -p "Press any key to continue..."
+}
+
+# Remove one or more installed models.
+# This function uses the "superior whiptail pattern" for robust selection and deletion.
+remove_models() {
+	local -a models_list          # Installed models retrieved from _get_model_list
+	local -a checklist_options=() # Whiptail TAG/ITEM/STATUS triplets
+	local -A model_map=()         # TAG → model_name lookup table
+	local i=1                     # Numeric tag counter for whiptail
+
+	# Populate models_list
+	readarray -t models_list < <(_get_model_list)
+
+	# Nothing to remove
+	if ((${#models_list[@]} == 0)); then
+		whiptail --title "Remove Models" --msgbox "No models to remove." 0 0
+		return
+	fi
+
+	# Build checklist entries and maintain a mapping from numeric tags to model names
+	for model in "${models_list[@]}"; do
+		checklist_options+=("$i" "$model" "OFF")
+		model_map[$i]="$model"
+		((i++))
+	done
+
+	# Use --separate-output so whiptail returns clean numeric tags (one per line)
+	local selected_tags_str
+	if ! selected_tags_str=$(whiptail \
+		--title "Remove Models" \
+		--separate-output \
+		--checklist "Select models to remove (spacebar):" \
+		"$WT_HEIGHT" "$WT_WIDTH" "${#model_map[@]}" \
+		"${checklist_options[@]}" \
+		3>&1 1>&2 2>&3); then
+		# User cancelled the dialog
+		whiptail --title "Cancelled" --msgbox "Model removal cancelled." 0 0
+		return
+	fi
+
+	# OK pressed but nothing selected
+	if [[ -z $selected_tags_str ]]; then
+		whiptail --title "Cancelled" --msgbox "No models selected. Cancelled." 0 0
+		return
+	fi
+
+	# Convert newline-separated tags into an array
+	local -a selected_tags=()
+	while IFS= read -r tag; do
+		[[ -n $tag ]] && selected_tags+=("$tag")
+	done <<<"$selected_tags_str"
+
+	# Prepare deletion list and confirmation message
+	local -a models_to_delete=()
+	local confirmation_list=""
+	for tag in "${selected_tags[@]}"; do
+		models_to_delete+=("${model_map[$tag]}")
+		confirmation_list+="- ${model_map[$tag]}\n"
+	done
+
+	# Final confirmation before destructive action
+	if ! whiptail \
+		--title "Confirm Deletion" \
+		--yesno "Delete the following models?\n\n$confirmation_list" \
+		"$WT_HEIGHT" "$WT_WIDTH"; then
+		whiptail --title "Cancelled" --msgbox "Model removal cancelled." 0 0
+		return
+	fi
+
+	# Delete each selected model and accumulate results
+	local summary="Removal Summary:\n\n"
+	for model in "${models_to_delete[@]}"; do
+		# Force non-interactive, no spinner, no ANSI escape codes [TERM=dumb]
+		local result
+		result=$(TERM=dumb ollama rm "$model")
+		summary+="* $model → $result\n"
+	done
+
+	# Display the operation summary
+	whiptail --title "Removal Complete" --msgbox "$summary" "$WT_HEIGHT" "$WT_WIDTH"
+}
+
+# Show detailed information (Modelfile, etc.) for a specific model.
+show_model_details() {
+	local chosen_model
+	# Use the helper function to let the user select a model.
+	# The _select_model_from_menu function handles its own cancellation logic,
+	# returning 1 if the user cancels, which is then checked here.
+	chosen_model=$(_select_model_from_menu "Show Model Details")
+	if [ $? -eq 0 ] && [ -n "$chosen_model" ]; then # Check if a model was actually chosen and not cancelled.
+		local details
+		# Get the model details from 'ollama show'.
+		details=$(ollama show "$chosen_model" 2>&1)
+		if [ $? -ne 0 ]; then
+			# Handle errors if the 'ollama show' command fails.
+			printf "\nError showing details for '%s'.\n" "$chosen_model"
+			printf "%s\n" "-----------------------------------"
+			printf "Error:\n%s\n" "$details"
+		else
+			# Print the details to the terminal for review.
+			printf "\nShowing details for: %s\n" "$chosen_model"
+			printf "%s\n" "----------------------------------------------------"
+			printf "%s\n" "$details"
+		fi
+		read -s -n 1 -p "Press any key to continue..."
+	fi
+}
+
+# Copy/tag a model to a new name.
+copy_model() {
+	local source_model
+	# Select the source model to copy using the helper function.
+	# _select_model_from_menu handles its own cancellation.
+	source_model=$(_select_model_from_menu "Copy Model")
+	if [ $? -ne 0 ] || [ -z "$source_model" ]; then
+		whiptail --title "Cancelled" --msgbox "Copy operation cancelled." 0 0 # Dynamic height and width.
+		return
+	fi
+
+	# Get the new name/tag for the destination model from the user.
+	# Note the hardcoded height '8' for this input box.
+	local dest_model
+	dest_model=$(whiptail --title "Copy Model" --inputbox "Enter the new name/tag for the copied model:" "$WT_HEIGHT" "$WT_WIDTH" "$source_model" 3>&1 1>&2 2>&3)
+	if [ $? -eq 0 ] && [ -n "$dest_model" ]; then
+		local output
+		# Perform the copy operation using 'ollama cp'.
+		output=$(ollama cp "$source_model" "$dest_model" 2>&1)
+		if [ $? -eq 0 ]; then
+			whiptail --title "Copy Complete" --msgbox "Copied '$source_model' to '$dest_model'." 0 0 # Dynamic height and width.
+		else
+			whiptail --title "Error" --msgbox "Failed to copy model.\n\nError:\n$output" "$WT_HEIGHT" "$WT_WIDTH" # Dynamic height and width.
+		fi
+	else
+		whiptail --title "Cancelled" --msgbox "Copy operation cancelled." 0 0 # Dynamic height and width.
+	fi
+}
+
+# Run an interactive session with a model.
+run_model() {
+	local chosen_model
+	# Use the helper function to let the user select a model.
+	chosen_model=$(_select_model_from_menu "Run Model")
+	if [ $? -eq 0 ] && [ -n "$chosen_model" ]; then
+		# A model was chosen.
+		printf "\nStarting interactive session with '%s'.\n" "$chosen_model"
+		printf "Type '/bye' to exit the session and return to the menu.\n"
+		read -s -n 1 -p "Press any key to continue..."
+
+		# Clear the screen for the interactive session
+		clear
+
+		# Execute ollama run, which will take over the terminal
+		ollama run "$chosen_model"
+
+		# After the user exits 'ollama run', inform them they are back in the manager.
+		printf "\nSession with '%s' ended.\n" "$chosen_model"
+		read -s -n 1 -p "Press any key to return to the Ollama Manager menu..."
+	else
+		# No model was chosen or user cancelled.
+		whiptail --title "Cancelled" --msgbox "Run model operation cancelled." 0 0
+	fi
+}
+
+# List currently running models.
+show_running_models() {
+	local ollama_output
+	ollama_output=$(ollama ps 2>&1)
+	if [ $? -ne 0 ]; then
+		# Handle cases where the 'ollama ps' command fails.
+		printf "\nError Listing Running Models\n"
+		printf "%s\n" "----------------------------"
+		printf "The 'ollama ps' command failed.\n\nError:\n%s\n" "$ollama_output"
+	else
+		# Print the successful output.
+		printf "\n%s\n" "Currently Running Ollama Models"
+		printf "%s\n" "-------------------------------"
+		printf "%s\n" "$ollama_output"
+	fi
+	read -s -n 1 -p "Press any key to continue..."
+}
+
+# Show a detailed help and usage guide.
+show_help() {
+	local help_text
+	# Using a HEREDOC for a clean, multi-line string.
+	read -r -d '' help_text <<'EOF'
+Ollama Manager v6.0 - Help
+
+This script provides an interactive terminal interface to manage the Ollama service and its models.
+
+--- Main Menu Options ---
+
+1. View Configuration:
+   Prints a summary of your Ollama setup to the terminal, including the version, service status, and configured model directory paths.
+
+2. List Installed Models:
+   Displays all downloaded models, same as running 'ollama list' in your terminal.
+
+3. Download a New Model:
+   Prompts for a model name (e.g., llama3:8b) and downloads it from the Ollama registry.
+
+4. Run a Model:
+   Starts an interactive session with a selected model. Type '/bye' to exit the session.
+
+5. List Running Models:
+   Shows all models that are currently running.
+
+6. Model Management...
+   - Remove Models: Select one or more models to delete permanently.
+   - Show Model Details: View the Modelfile and other metadata for a specific model.
+   - Copy/Tag a Model: Create a new name/tag for an existing model.
+7. Configuration...
+   - Set Directory (systemd): Recommended method. Configures the model storage path for the Ollama service and your shell. Restarts the service.
+   - Set Directory (symlink): Alternative method. Replaces the default model folder with a symbolic link to your custom location.
+
+8. Service Management...
+   - Show Status: Checks if the Ollama service is running and shows detailed status.
+   - View Logs: Displays recent logs to help with troubleshooting.
+   - Start/Stop/Restart: Basic controls for the Ollama systemd service.
+
+9. Exit:
+   Closes the Ollama Manager.
+EOF
+
+	whiptail --title "Ollama Manager Help" --msgbox "$help_text" "$WT_HEIGHT" "$WT_WIDTH"
+}
+
+# --- Configuration Functions ---
+# Functions for modifying the Ollama configuration, specifically the model storage location.
+
+# Set the OLLAMA_MODELS directory using a systemd override file.
+# This is the recommended method as it doesn't modify base system files directly
+# and integrates well with systemd's service management.
+set_model_directory_systemd() {
+	local current_dir
+	# Try to find the currently configured directory from systemd service environment.
+	current_dir=$(systemctl show ollama --no-pager -p Environment --value 2>/dev/null | grep -o 'OLLAMA_MODELS=[^ ]*' | cut -d'=' -f2 | tr -d '"')
+	# If not found in systemd, try to find it in the user's .bashrc.
+	if [ -z "$current_dir" ]; then
+		current_dir=$(grep "export OLLAMA_MODELS=" "$BASH_CONFIG_FILE" 2>/dev/null | sed 's/export OLLAMA_MODELS=//' | tr -d '"')
+	fi
+
+	# Ask the user for the new absolute path for Ollama models.
+	# Note the hardcoded height '10' for this input box.
+	local new_dir
+	new_dir=$(whiptail --title "Set Model Directory (systemd)" --inputbox "Enter the absolute path for Ollama models.\nThis will configure the Ollama systemd service and your shell." "$WT_HEIGHT" "$WT_WIDTH" "$current_dir" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ] || [ -z "$new_dir" ]; then
+		whiptail --title "Cancelled" --msgbox "Operation cancelled." 0 0 # Dynamic height and width.
+		return
+	fi
+
+	# If the specified directory does not exist, offer to create it.
+	if [ ! -d "$new_dir" ]; then
+		# Note the hardcoded height '8' for this yes/no dialog.
+		if whiptail --title "Create Directory?" --yesno "Directory '$new_dir' does not exist. Create it now?" "$WT_HEIGHT" "$WT_WIDTH"; then
+			mkdir -p "$new_dir" # Create parent directories if they don't exist.
+			# If an 'ollama' system user exists, set them as the owner for proper permissions.
+			if id -u ollama >/dev/null 2>&1; then
+				chown ollama:ollama "$new_dir"
+			fi
+		else
+			whiptail --title "Cancelled" --msgbox "Operation cancelled." 0 0 # Dynamic height and width.
+			return
+		fi
+	fi
+
+	# Create a systemd override directory and file for the ollama service.
+	# This allows modifying service environment variables without editing the original unit file.
+	local override_dir="/etc/systemd/system/ollama.service.d"
+	mkdir -p "$override_dir"
+	echo -e "[Service]\nEnvironment=\"OLLAMA_MODELS=$new_dir\"" >"$override_dir/override.conf"
+
+	# Update the user's .bashrc to keep the shell environment consistent.
+	local EXPORT_LINE="export OLLAMA_MODELS=\"$new_dir\""
+	if grep -q "export OLLAMA_MODELS=" "$BASH_CONFIG_FILE"; then
+		# If the export line already exists, replace it to update the path.
+		sed -i.bak "s|export OLLAMA_MODELS=.*|$EXPORT_LINE|" "$BASH_CONFIG_FILE" && rm -f "${BASH_CONFIG_FILE}.bak"
+	else
+		# If not, append the new export line to .bashrc.
+		echo -e "\n# Set Ollama models directory (managed by script)\n$EXPORT_LINE" >>"$BASH_CONFIG_FILE"
+	fi
+
+	# Reload systemd daemon and restart the Ollama service to apply the new configuration.
+	# Note the hardcoded height '8' for this infobox.
+	whiptail --title "Restarting Service" --infobox "Reloading systemd daemon and restarting Ollama service..." "$WT_HEIGHT" "$WT_WIDTH"
+	sleep 2 # Give user time to read the infobox.
+	if systemctl daemon-reload && systemctl restart ollama; then
+		# Display success message. Note the hardcoded height '12' for this message box.
+		whiptail --title "Success" --msgbox "Ollama service configured and restarted.\n\nNew model directory: $new_dir\n\nPlease run 'source $BASH_CONFIG_FILE' or open a new terminal." 12 "$WT_WIDTH"
+	else
+		# Display error message if service restart fails. Note the hardcoded height '8' for this message box.
+		whiptail --title "Error" --msgbox "Failed to restart Ollama service. Check 'systemctl status ollama'." "$WT_HEIGHT" "$WT_WIDTH"
+	fi
+}
+
+# Set the OLLAMA_MODELS directory by creating a symbolic link.
+# This is an alternative method that physically alters the filesystem layout
+# by replacing the default Ollama models directory with a symlink to a custom path.
+set_model_directory_symlink() {
+	local default_ollama_dir="/usr/share/ollama/.ollama/models" # Default Ollama models location.
+	local backup_dir="/usr/share/ollama/.ollama/models.bak"     # Backup location for original directory.
+
+	# Get the custom directory path from the user.
+	# Note the hardcoded height '10' for this input box.
+	local custom_dir
+	custom_dir=$(whiptail --title "Set Directory (Symlink)" --inputbox "Enter the absolute path where your models are stored." "$WT_HEIGHT" "$WT_WIDTH" "" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ] || [ -z "$custom_dir" ]; then
+		whiptail --title "Cancelled" --msgbox "Operation cancelled." 0 0 # Dynamic height and width.
+		return
+	fi
+	# Validate that the specified custom directory exists.
+	if [ ! -d "$custom_dir" ]; then
+		whiptail --title "Error" --msgbox "The specified directory '$custom_dir' does not exist." 0 0 # Dynamic height and width.
+		return
+	fi
+
+	# Stop the Ollama service before making filesystem changes to avoid conflicts.
+	# Note the hardcoded height '8' for this infobox.
+	whiptail --title "Applying Symlink" --infobox "Stopping Ollama service..." "$WT_HEIGHT" "$WT_WIDTH"
+	sleep 1
+	systemctl stop ollama
+
+	# Safely handle the original default Ollama models directory.
+	if [ -L "$default_ollama_dir" ]; then
+		# If it's already a symlink, remove the old symlink.
+		rm "$default_ollama_dir"
+	elif [ -d "$default_ollama_dir" ]; then
+		# If it's an actual directory, back it up before replacing.
+		if [ -e "$backup_dir" ]; then
+			# If a backup already exists, ask the user if they want to overwrite it.
+			# Note the hardcoded height '8' for this yes/no dialog.
+			if ! whiptail --title "Backup Exists" --yesno "Backup '$backup_dir' already exists. Overwrite it?" "$WT_HEIGHT" "$WT_WIDTH"; then
+				whiptail --title "Cancelled" --msgbox "Operation cancelled." "$WT_HEIGHT" "$WT_WIDTH" # Dynamic height and width.
+				systemctl start ollama                                                                # Restart service as no changes were made.
+				return
+			fi
+			rm -rf "$backup_dir" # Overwrite existing backup.
+		fi
+		mv "$default_ollama_dir" "$backup_dir" # Move original directory to backup.
+	fi
+
+	# Create the new symbolic link from the default location to the custom directory.
+	if ! ln -s "$custom_dir" "$default_ollama_dir"; then
+		# If symlink creation fails, attempt to restore the original state.
+		whiptail --title "Error" --msgbox "Failed to create symlink. Restoring state..." 0 0 # Dynamic height and width.
+		if [ -d "$backup_dir" ]; then
+			mv "$backup_dir" "$default_ollama_dir" # Restore original directory.
+		fi
+		systemctl start ollama # Restart service.
+		return
+	fi
+
+	# Start the Ollama service again after applying the symlink.
+	# Note the hardcoded height '8' for this infobox.
+	whiptail --title "Applying Symlink" --infobox "Starting Ollama service..." "$WT_HEIGHT" "$WT_WIDTH"
+	sleep 1
+	systemctl start ollama
+
+	# Update the user's .bashrc to match the new directory.
+	local EXPORT_LINE="export OLLAMA_MODELS=\"$custom_dir\""
+	if grep -q "export OLLAMA_MODELS=" "$BASH_CONFIG_FILE"; then
+		sed -i.bak "s|export OLLAMA_MODELS=.*|$EXPORT_LINE|" "$BASH_CONFIG_FILE" && rm -f "${BASH_CONFIG_FILE}.bak"
+	else
+		echo -e "\n# Set Ollama models directory (managed by script)\n$EXPORT_LINE" >>"$BASH_CONFIG_FILE"
+	fi
+	# Display success message. Note the hardcoded height '12' for this message box.
+	whiptail --title "Success" --msgbox "Successfully linked model directory.\n\nOllama is now using: $custom_dir\n\nPlease run 'source $BASH_CONFIG_FILE' or open a new terminal." 12 "$WT_WIDTH"
+}
+
+# --- Service Functions ---
+# Functions for interacting with the ollama systemd service.
+
+# Show the detailed status of the Ollama service.
+show_service_status() {
+	printf "\n%s\n" "Ollama Service Status"
+	printf "%s\n" "---------------------"
+	local status_output
+	status_output=$(systemctl status ollama 2>&1)
+	local exit_code=$?
+	# Provide a simple, human-readable summary based on the exit code.
+	if [ $exit_code -eq 0 ]; then
+		printf "%s\n" "Ollama service is running."
+	elif [ $exit_code -eq 3 ]; then
+		printf "%s\n" "Ollama service is installed but not running (inactive/dead)."
+	elif [ $exit_code -eq 4 ]; then
+		printf "%s\n" "Ollama service is not found (not installed?)."
+	else
+		printf "Could not determine service status (Exit code: %s).\n" "$exit_code"
+	fi
+	printf "%s\n" "----------------------------------------------------"
+	# Print the full, detailed status output.
+	printf "%s\n" "$status_output"
+	read -s -n 1 -p "Press any key to continue..."
+}
+
+# View the latest logs from the Ollama service journal.
+view_service_logs() {
+	local num_lines
+	# Ask the user how many log lines they want to see.
+	# Note the hardcoded height '8' for this input box.
+	num_lines=$(whiptail --title "View Logs" --inputbox "How many log lines to display?" "$WT_HEIGHT" "$WT_WIDTH" "100" 3>&1 1>&2 2>&3)
+	if [ $? -eq 0 ] && [ -n "$num_lines" ]; then
+		printf "\n%s\n" "Ollama Service Logs (Newest First)"
+		printf "%s\n" "----------------------------------"
+		# Fetch the logs using journalctl.
+		# --no-pager prevents it from opening in 'less' or similar.
+		# --reverse shows newest logs first.
+		journalctl -u ollama -n "$num_lines" --no-pager --reverse
+		read -s -n 1 -p "Press any key to continue..."
+	fi
+}
+
+# Generic function to manage the ollama service (start, stop, restart).
+# @param $1: The action to perform (e.g., "start", "stop", "restart").
+manage_service() {
+	local action=$1
+	# Display an infobox while attempting the service action.
+	# Note the hardcoded height '8' for this infobox.
+	whiptail --title "Service Management" --infobox "Attempting to ${action} Ollama service..." "$WT_HEIGHT" "$WT_WIDTH"
+	sleep 1 # Give user time to read the infobox.
+	if systemctl "$action" ollama; then
+		# Display success message. Note the hardcoded height '8' for this message box.
+		whiptail --title "Success" --msgbox "Ollama service has been ${action}ed." "$WT_HEIGHT" "$WT_WIDTH"
+	else
+		# Display error message. Note the hardcoded height '8' for this message box.
+		whiptail --title "Error" --msgbox "Failed to ${action} Ollama service." "$WT_HEIGHT" "$WT_WIDTH"
+	fi
+}
+
+# --- Menus ---
+# Functions that define the different UI menus, structuring the user interaction.
+
+# The menu for model-specific management tasks.
+model_management_menu() {
+	while true; do
+		# Display the model management menu.
+		# Note the hardcoded menu-height '5'. WT_HEIGHT and WT_WIDTH are dynamic for overall dialog dimensions.
+		CHOICE=$(whiptail --title "Model Management" --menu "Choose an option:" "$WT_HEIGHT" "$WT_WIDTH" 4 \
+			"1" "Remove Installed Models" \
+			"2" "Show Model Details" \
+			"3" "Copy/Tag a Model" \
+			"4" "Back to Main Menu" 3>&1 1>&2 2>&3)
+		# Check whiptail's exit status: non-zero means user pressed Esc or Cancel.
+		if [ $? -ne 0 ]; then break; fi # Exit menu if user cancels.
+		case "$CHOICE" in
+		1) remove_models ;;
+		2) show_model_details ;;
+		3) copy_model ;;
+		4) break ;; # Option to explicitly return to the main menu.
+		esac
+	done
+}
+
+# The menu for configuration-related tasks.
+configuration_menu() {
+	while true; do
+		# Display the configuration menu.
+		# Note the hardcoded menu-height '3'. WT_HEIGHT and WT_WIDTH are dynamic for overall dialog dimensions.
+		CHOICE=$(whiptail --title "Configuration" --menu "Choose an option:" "$WT_HEIGHT" "$WT_WIDTH" 3 \
+			"1" "Set Model Directory (systemd)" \
+			"2" "Set Model Directory (symlink)" \
+			"3" "Back to Main Menu" 3>&1 1>&2 2>&3)
+		if [ $? -ne 0 ]; then break; fi
+		case "$CHOICE" in
+		1) set_model_directory_systemd ;;
+		2) set_model_directory_symlink ;;
+		3) break ;;
+		esac
+	done
+}
+
+# The menu for service-related tasks.
+service_management_menu() {
+	while true; do
+		# Display the service management menu.
+		# Note the hardcoded menu-height '6'. WT_HEIGHT and WT_WIDTH are dynamic for overall dialog dimensions.
+		CHOICE=$(whiptail --title "Service Management" --menu "Choose an option:" "$WT_HEIGHT" "$WT_WIDTH" 6 \
+			"1" "Show Service Status" \
+			"2" "View Service Logs" \
+			"3" "Start Service" \
+			"4" "Stop Service" \
+			"5" "Restart Service" \
+			"6" "Back to Main Menu" 3>&1 1>&2 2>&3)
+		if [ $? -ne 0 ]; then break; fi
+		case "$CHOICE" in
+		1) show_service_status ;;
+		2) view_service_logs ;;
+		3) manage_service "start" ;;
+		4) manage_service "stop" ;;
+		5) manage_service "restart" ;;
+		6) break ;;
+		esac
+	done
+}
+
+# --- Main Menu Logic ---
+# The main application loop that displays the top-level menu and directs traffic
+# to the appropriate sub-menus or functions based on user selection.
+while true; do
+	# Display the main menu.
+	# Note the hardcoded menu-height '9'. WT_HEIGHT and WT_WIDTH are dynamic for overall dialog dimensions.
+	CHOICE=$(whiptail --title "$WT_TITLE" --menu "Choose an option:" "$WT_HEIGHT" "$WT_WIDTH" 10 \
+		"1" "View Configuration" \
+		"2" "List Installed Models" \
+		"3" "Download a New Model" \
+		"4" "Run a Model" \
+		"5" "List Running Models" \
+		"6" "Model Management..." \
+		"7" "Configuration..." \
+		"8" "Service Management..." \
+		"9" "Help" \
+		"10" "Exit" 3>&1 1>&2 2>&3)
+
+	# Exit the entire script if user presses Esc or Cancel on the main menu.
+	if [ $? -ne 0 ]; then break; fi
+
+	# Call the appropriate function based on user's choice.
+	case "$CHOICE" in
+	1) view_configuration ;;
+	2) show_models_list ;;
+	3) add_model ;;
+	4) run_model ;;
+	5) show_running_models ;;
+	6) model_management_menu ;;
+	7) configuration_menu ;;
+	8) service_management_menu ;;
+	9) show_help ;;
+	10) break ;;                                                  # Option to explicitly exit the script.
+	*) whiptail --title "Error" --msgbox "Invalid option." 0 0 ;; # Fallback for invalid choice (should not happen with whiptail menu).
+	esac
+done
+
+# --- Exit ---
+# Final cleanup and exit message displayed to the terminal.
+echo "Exited Ollama Manager."
+exit 0

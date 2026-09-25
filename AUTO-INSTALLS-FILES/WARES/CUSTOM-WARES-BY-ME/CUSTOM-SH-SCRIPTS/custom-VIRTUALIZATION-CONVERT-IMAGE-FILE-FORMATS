@@ -1,0 +1,392 @@
+#!/bin/bash
+
+# Program to convert virtual machine image files (.VDI, .VHD, .VMDK, .QCOW, .QCOW2 .QED, .IMG, .BIN) to another format
+
+# check if qemu-img is installed and try to install it if not
+if ! command -v qemu-img &>/dev/null; then
+	echo "qemu-img could not be found. Please install it to use this script."
+	echo "For Debian/Ubuntu: sudo apt install qemu-utils"
+	echo "For Fedora: sudo dnf install qemu-img"
+	echo "For Arch: sudo pacman -S qemu"
+	exit 1
+fi
+
+function FUNCTION_CONVERT_VIRT_MACHINE_IMG_FILE_IN_PWD {
+	# Temp file to store found image files
+	IMG_LIST_TMP="/tmp/vm_image_files_in_pwd.tmp"
+
+	# Find image files in current directory
+	find . -maxdepth 1 -type f \( -iname "*.vdi" -o -iname "*.vhd" -o -iname "*.vmdk" -o -iname "*.qcow" -o -iname "*.qcow2" -o -iname "*.qed" -o -iname "*.img" -o -iname "*.bin" \) -exec basename {} \; >"$IMG_LIST_TMP"
+
+	# Exit if no image files found
+	if [ ! -s "$IMG_LIST_TMP" ]; then
+		echo "No virtual machine image files found in current directory."
+		whiptail --backtitle "No virtual machine image files found in current directory." --title "No virtual machine image files found in current directory." --msgbox "No virtual machine image files found in current directory." 0 0
+		exit 1
+	fi
+
+	# Prepare formatted list for whiptail menu
+	WHIPTAIL_MENU_ENTRIES=$(
+		cat "$IMG_LIST_TMP" |
+			sed 's/^[ \t]*//' |    # remove leading whitespace
+			sed 's/^/"/; s/$/"/' | # wrap in double quotes
+			cat -n |               # add line numbers
+			sed 's/^[ \t]*//'      # trim spaces again
+	)
+
+	# Menu height based on number of entries
+	MENU_HEIGHT=$(wc -l <"$IMG_LIST_TMP")
+
+	# Show menu and capture selected item
+	SELECTED_IMAGE_FILE_CHOICE=$(whiptail --backtitle "Select VM Image File to Convert" \
+		--title "Virtual Machine Image Selector" \
+		--menu "Choose a file to convert:" 0 0 "$MENU_HEIGHT" $WHIPTAIL_MENU_ENTRIES 3>&1 1>&2 2>&3)
+
+	# Get the selected file name from the list
+	SELECTED_IMAGE_FILE_CHOICE_JUST_FILE_NAME_PWD=$(cat -n "$IMG_LIST_TMP" | sed 's/^[ \t]*//' | grep -w "^$SELECTED_IMAGE_FILE_CHOICE" | sed "s/$SELECTED_IMAGE_FILE_CHOICE//1")
+	# Get the selected file name with full path
+	SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE=$(realpath $SELECTED_IMAGE_FILE_CHOICE_JUST_FILE_NAME_PWD)
+
+	# Get the file extension
+
+	# ${VAR##PATTERN} is a Bash parameter expansion that:
+	# Removes the longest match of PATTERN from the beginning of the variable's value
+	# matches everything up to the last dot
+	SELECTED_IMAGE_FILE_CHOICE_EXTENSION="${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE##*.}"
+
+	# if file extension is empty exit
+	if [ -z "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" ]; then
+		echo SELECTED IMAGE FILE HAS NO FILENAME EXTENSION .... EXITING
+		exit
+	fi
+
+	# check if filename extension is valid. if not exit
+	if [[ ! "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" =~ ^(vdi|vhd|vmdk|qcow|qcow2|qed|img|bin)$ ]]; then
+		echo "Invalid file extension: $SELECTED_IMAGE_FILE_CHOICE_EXTENSION"
+		exit 1
+	fi
+
+	# choose format to convert to
+	SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO=$(whiptail --backtitle "Select VM Image File Format to Convert To" \
+		--title "Virtual Machine Image Format Converter" \
+		--menu "Choose a format to convert to:" 0 0 8 \
+		"vdi" "VirtualBox Disk Image" \
+		"vhd" "Virtual Hard Disk" \
+		"vmdk" "VMware Virtual Machine Disk" \
+		"qcow" "QEMU Copy On Write" \
+		"qcow2" "QEMU Copy On Write" \
+		"qed" "QEMU Enhanced Disk Format" \
+		"img" "Raw Disk Image" \
+		"bin" "Binary Disk Image" 3>&1 1>&2 2>&3)
+
+	# check if user cancelled
+	if [ -z $SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO ]; then
+		echo "User cancelled the operation."
+		exit 1
+	fi
+	# check if the selected image file is already in the selected format
+	if [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" ]; then
+		echo "Selected format is the same as the original format. No conversion needed."
+		exit 1
+	fi
+
+	# sanity check
+
+	echo -e "will convert \n $SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE \n from \n [ $SELECTED_IMAGE_FILE_CHOICE_EXTENSION ] to [ $SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO ] \n\n"
+	echo -e "Press [Enter] to continue or [Ctrl+C] to cancel"
+
+	read -r confirm
+
+	if [ -n "$confirm" ]; then
+		echo "Unexpected input detected. Only press [Enter] to proceed. Exiting."
+		exit 1
+	fi
+
+	echo -e "\nFinal confirmation: Are you absolutely sure? This will begin the conversion."
+	echo -e "Press [Enter] again to proceed or [Ctrl+C] to abort."
+
+	read -r final_confirm
+	if [ -n "$final_confirm" ]; then
+		echo "Unexpected input. Only press [Enter] to proceed. Exiting."
+		exit 1
+	fi
+
+	#NOTES: The % in this Bash parameter expansion is doing string trimming from the end of the variable.
+
+	# Normalize the input format extension if needed
+	# 'img' and 'bin' are treated as raw images by qemu-img
+	if [ "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" == "img" ] || [ "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" == "bin" ]; then
+		SELECTED_IMAGE_FILE_CHOICE_EXTENSION=raw
+	# 'vhd' is known as 'vpc' format internally by qemu-img
+	elif [ "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" == "vhd" ]; then
+		SELECTED_IMAGE_FILE_CHOICE_EXTENSION=vpc
+	fi
+
+	# Perform image conversion based on the desired output format
+	# The output file will have the same base name, but a new extension
+
+	# Convert to VDI
+	if [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "vdi" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O vdi "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.vdi"
+
+	# Convert to VHD (vpc format)
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "vhd" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O vpc "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.vhd"
+
+	# Convert to VMDK
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "vmdk" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O vmdk "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.vmdk"
+
+	# Convert to QCOW (qcow2 is the standard modern format)
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "qcow" ] || [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "qcow2" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O qcow2 "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.qcow2"
+
+	# Convert to QED
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "qed" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O qed "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.qed"
+
+	# Convert to RAW (.img)
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "img" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O raw "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.img"
+
+	# Convert to RAW (.bin)
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "bin" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O raw "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.bin"
+	fi
+
+	# Clean up temp file
+	rm -f "$IMG_LIST_TMP"
+}
+
+function FUNCTION_CONVERT_VIRT_MACHINE_IMG_FILE_IN_OTHER_DIR {
+	# Temp file to store found image files
+	INPUTTED_IMG_FILE=$(whiptail --backtitle "Input Virtual Machine Image/Disk File Path" --title "Input Virtual Machine Image/Disk File Path" --inputbox "Input Virtual Machine Image/Disk File Path" 0 0 3>&1 1>&2 2>&3)
+
+	# Check if user cancelled
+	if [ -z "$INPUTTED_IMG_FILE" ]; then
+		echo "User cancelled the operation. exiting."
+		whiptail --backtitle "User cancelled the operation." --title "User cancelled the operation." --msgbox "User cancelled the operation." 0 0
+		exit 1
+	fi
+
+	# Check if the file exists
+	if [ ! -f "$INPUTTED_IMG_FILE" ]; then
+		echo "File not found: $INPUTTED_IMG_FILE"
+		whiptail --backtitle "File not found: $INPUTTED_IMG_FILE" --title "File not found" --msgbox "File not found: $INPUTTED_IMG_FILE" 0 0
+		exit 1
+	fi
+
+	# sanitize input
+	# remove leading and trailing whitespace
+	INPUTTED_IMG_FILE=$(echo "$INPUTTED_IMG_FILE" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+	# remove double quotes
+	INPUTTED_IMG_FILE=$(echo "$INPUTTED_IMG_FILE" | sed 's/^"//;s/"$//')
+	# remove single quotes
+	INPUTTED_IMG_FILE=$(echo "$INPUTTED_IMG_FILE" | sed "s/^'//;s/'$//")
+	# remove backslashes
+	INPUTTED_IMG_FILE=$(echo "$INPUTTED_IMG_FILE" | sed 's/\\//g')
+	# remove double backslashes
+	INPUTTED_IMG_FILE=$(echo "$INPUTTED_IMG_FILE" | sed 's/\\\\//g')
+
+	# Check if the file exists after sanitization
+	if [ ! -f "$INPUTTED_IMG_FILE" ]; then
+		echo "File not found: $INPUTTED_IMG_FILE"
+		whiptail --backtitle "File not found: $INPUTTED_IMG_FILE" --title "File not found" --msgbox "File not found: $INPUTTED_IMG_FILE" 0 0
+		exit 1
+	fi
+
+	# Get the selected file name with full path
+	SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE=$(realpath "$INPUTTED_IMG_FILE")
+
+	# Get the file extension
+
+	# ${VAR##PATTERN} is a Bash parameter expansion that:
+	# Removes the longest match of PATTERN from the beginning of the variable's value
+	# matches everything up to the last dot
+	SELECTED_IMAGE_FILE_CHOICE_EXTENSION="${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE##*.}"
+
+	# if file extension is empty exit
+	if [ -z "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" ]; then
+		echo SELECTED IMAGE FILE HAS NO FILENAME EXTENSION .... EXITING
+		whiptail --backtitle "Selected image file has no filename extension." --title "Selected image file has no filename extension." --msgbox "Selected image file has no filename extension." 0 0
+		exit
+	fi
+
+	# check if filename extension is valid. if not exit
+	if [[ ! "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" =~ ^(vdi|vhd|vmdk|qcow|qcow2|qed|img|bin)$ ]]; then
+		echo "Invalid file extension: $SELECTED_IMAGE_FILE_CHOICE_EXTENSION"
+		exit 1
+	fi
+
+	# choose format to convert to
+	SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO=$(whiptail --backtitle "Select VM Image File Format to Convert To" \
+		--title "Virtual Machine Image Format Converter" \
+		--menu "Choose a format to convert to:" 0 0 8 \
+		"vdi" "VirtualBox Disk Image" \
+		"vhd" "Virtual Hard Disk" \
+		"vmdk" "VMware Virtual Machine Disk" \
+		"qcow" "QEMU Copy On Write" \
+		"qcow2" "QEMU Copy On Write" \
+		"qed" "QEMU Enhanced Disk Format" \
+		"img" "Raw Disk Image" \
+		"bin" "Binary Disk Image" 3>&1 1>&2 2>&3)
+
+	# check if user cancelled
+	if [ -z "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" ]; then
+		echo "User cancelled the operation."
+		exit 1
+	fi
+	# check if the selected image file is already in the selected format
+	if [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" ]; then
+		echo "Selected format is the same as the original format. No conversion needed."
+		exit 1
+	fi
+
+	# sanity check
+
+	echo -e "will convert \n $SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE \n from \n [ $SELECTED_IMAGE_FILE_CHOICE_EXTENSION ] to [ $SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO ] \n\n"
+	echo -e "Press [Enter] to continue or [Ctrl+C] to cancel"
+
+	read -r confirm
+
+	if [ -n "$confirm" ]; then
+		echo "Unexpected input detected. Only press [Enter] to proceed. Exiting."
+		exit 1
+	fi
+
+	echo -e "\nFinal confirmation: Are you absolutely sure? This will begin the conversion."
+	echo -e "Press [Enter] again to proceed or [Ctrl+C] to abort."
+
+	read -r final_confirm
+	if [ -n "$final_confirm" ]; then
+		echo "Unexpected input. Only press [Enter] to proceed. Exiting."
+		exit 1
+	fi
+
+	#NOTES: The % in this Bash parameter expansion is doing string trimming from the end of the variable.
+
+	# Normalize the input format extension if needed
+	# 'img' and 'bin' are treated as raw images by qemu-img
+	if [ "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" == "img" ] || [ "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" == "bin" ]; then
+		SELECTED_IMAGE_FILE_CHOICE_EXTENSION=raw
+	# 'vhd' is known as 'vpc' format internally by qemu-img
+	elif [ "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" == "vhd" ]; then
+		SELECTED_IMAGE_FILE_CHOICE_EXTENSION=vpc
+	fi
+
+	# Perform image conversion based on the desired output format
+	# The output file will have the same base name, but a new extension
+
+	# Convert to VDI
+	if [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "vdi" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O vdi "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.vdi"
+
+	# Convert to VHD (vpc format)
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "vhd" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O vpc "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.vhd"
+
+	# Convert to VMDK
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "vmdk" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O vmdk "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.vmdk"
+
+	# Convert to QCOW (qcow2 is the standard modern format)
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "qcow" ] || [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "qcow2" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O qcow2 "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.qcow2"
+
+	# Convert to QED
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "qed" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O qed "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.qed"
+
+	# Convert to RAW (.img)
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "img" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O raw "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.img"
+
+	# Convert to RAW (.bin)
+	elif [ "$SELECTED_IMAGE_FILE_FORMAT_TO_CONVERT_TO" == "bin" ]; then
+		qemu-img convert -f "$SELECTED_IMAGE_FILE_CHOICE_EXTENSION" -O raw "$SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE" "${SELECTED_IMAGE_FILE_CHOICE_FINAL_FILE%.*}.bin"
+	fi
+}
+
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+# (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰) (▰˘◡˘▰)
+
+function FUNCTION_SHOW_HELP {
+	whiptail --scrolltext --title "About This Script" --msgbox \
+		"**Virtual Machine Image Converter**
+
+This script converts virtual machine disk images between various formats using the 'qemu-img' utility.
+
+**Supported Formats:**
+- VDI (VirtualBox)
+- VHD (Virtual PC)
+- VMDK (VMware)
+- QCOW / QCOW2 (QEMU)
+- QED (QEMU)
+- IMG / BIN (Raw disk image)
+
+**How it works:**
+1.  **Choose an action:** Use the main menu to decide how to locate your image file.
+2.  **Choose an image:** Select an image from the current directory or provide a full path.
+3.  **Choose an output format:** Select the desired format for the new image file.
+4.  **Convert:** The script calls 'qemu-img' to perform the conversion. The new file will be created in the same directory as the source file, with the new format's extension.
+
+**Requirement:**
+This script requires 'qemu-utils' (Debian/Ubuntu) or equivalent to be installed." 0 0
+}
+
+function main_menu {
+	while true; do
+		CHOICE=$(whiptail --title "Image Converter Main Menu" --menu "Select an action:" 0 0 4 \
+			"1" "Convert image in current directory" \
+			"2" "Convert image from a specific path" \
+			"3" "Help / About" \
+			"4" "Exit" 3>&1 1>&2 2>&3)
+
+		if [ $? -ne 0 ]; then
+			echo "User aborted. Exiting."
+			exit 0
+		fi
+
+		case $CHOICE in
+		1)
+			# Check for files before calling the function
+			if find . -maxdepth 1 -type f \( -iname "*.vdi" -o -iname "*.vhd" -o -iname "*.vmdk" -o -iname "*.qcow" -o -iname "*.qcow2" -o -iname "*.qed" -o -iname "*.img" -o -iname "*.bin" \) -print -quit | grep -q .; then
+				FUNCTION_CONVERT_VIRT_MACHINE_IMG_FILE_IN_PWD
+			else
+				whiptail --msgbox "No virtual machine image files found in the current directory." 0 0
+			fi
+			break
+			;;
+		2)
+			FUNCTION_CONVERT_VIRT_MACHINE_IMG_FILE_IN_OTHER_DIR
+			break
+			;;
+		3)
+			FUNCTION_SHOW_HELP
+			;;
+		4)
+			echo "Goodbye!"
+			exit 0
+			;;
+		esac
+	done
+}
+
+# --- Main Entry Point ---
+main_menu

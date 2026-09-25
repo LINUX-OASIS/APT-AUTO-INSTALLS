@@ -1,0 +1,524 @@
+#!/usr/bin/env bash
+
+# ==============================================================================
+# SCRIPT: custom-DEVDOCS-IO-LOCAL-VIA-DOCKER (DevDocs Offline Manager)
+# DESCRIPTION: Clean, user-friendly, reliable manager for DevDocs via Docker.
+#              Supports custom drive storage redirection, offline tar archives,
+#              and seamless portability across fresh Linux installs.
+# ==============================================================================
+
+set -euo pipefail
+
+# --- Configuration Defaults ---
+CONTAINER_NAME="devdocs"
+IMAGE_NAME="ghcr.io/freecodecamp/devdocs:latest"
+DEFAULT_PORT="9292"
+DAEMON_JSON="/etc/docker/daemon.json"
+CONTAINERD_CONFIG="/etc/containerd/config.toml"
+HOST_CONFIG="/etc/devdocs.conf"
+DEFAULT_STORAGE_DIR="/mnt/INT-WORKER-T470"
+
+# --- UI Helpers (ARG_MAX Safe) ---
+TITLE="DevDocs Offline Manager"
+
+_display_box() {
+	local text="${1:-}"
+	local title="${2:-$TITLE}"
+	local tmpfile=""
+	tmpfile=$(mktemp /tmp/devdocs_box_XXXXXX.txt)
+	trap '[[ -n "${tmpfile:-}" ]] && rm -f "$tmpfile"' RETURN
+	printf "%b\n" "$text" >"$tmpfile"
+	whiptail --title "$title" --scrolltext --textbox "$tmpfile" 18 78
+}
+
+msg_box() {
+	_display_box "$1" "${2:-$TITLE}"
+}
+
+error_box() {
+	_display_box "$1" "${2:-ERROR}"
+}
+
+# --- Privilege & Dependency Checks ---
+check_root() {
+	if [[ $EUID -ne 0 ]]; then
+
+		echo -e "\e[31m Please run this script as root or use sudo \e[0m"
+		echo "Please run this script as root or use sudo"
+		echo "RUN ::: sudo $(realpath "$0")"
+		exec sudo "$0" "$@"
+	fi
+}
+
+check_dependencies() {
+	if ! command -v whiptail >/dev/null 2>&1; then
+		echo "Installing required UI component (whiptail)..."
+		apt-get update && apt-get install -y whiptail
+	fi
+
+	local missing=()
+	for cmd in docker rsync curl jq; do
+		command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+	done
+
+	if [[ ${#missing[@]} -gt 0 ]]; then
+		msg_box "Installing required system packages: ${missing[*]}...\nPlease wait a moment." "Setup Dependencies"
+		apt-get update
+		for pkg in "${missing[@]}"; do
+			[[ "$pkg" == "docker" ]] && pkg="docker.io"
+			apt-get install -y "$pkg"
+		done
+		systemctl enable --now docker containerd 2>/dev/null || true
+
+		local original_user
+		original_user=$(logname 2>/dev/null || echo "${SUDO_USER:-}")
+		if [[ -n "$original_user" ]]; then
+			usermod -aG docker "$original_user" 2>/dev/null || true
+		fi
+	fi
+}
+
+# Fix mount flags (nosuid/nodev) on target partition so overlayfs works
+fix_mount_flags_if_needed() {
+	local path="$1"
+	local mp
+	mp=$(findmnt -n -o TARGET -T "$path" 2>/dev/null || true)
+	if [[ -n "$mp" && "$mp" != "/" ]]; then
+		local opts
+		opts=$(findmnt -n -o OPTIONS "$mp" 2>/dev/null || true)
+		if [[ "$opts" == *"nosuid"* || "$opts" == *"nodev"* ]]; then
+			mount -o remount,exec,suid,dev "$mp" 2>/dev/null || true
+		fi
+	fi
+}
+
+# Helper: Detect active storage path
+get_active_storage_dir() {
+	local current_docker_root
+	current_docker_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
+
+	if [[ -f "$HOST_CONFIG" ]]; then
+		# shellcheck source=/dev/null
+		source "$HOST_CONFIG" 2>/dev/null || true
+		if [[ -n "${STORAGE_DIR:-}" && -d "$STORAGE_DIR" ]]; then
+			echo "$STORAGE_DIR"
+			return
+		fi
+	fi
+
+	if [[ "$current_docker_root" != "/var/lib/docker" && -d "$current_docker_root" ]]; then
+		dirname "$current_docker_root"
+		return
+	fi
+
+	echo "$DEFAULT_STORAGE_DIR"
+}
+
+# --- Storage Configuration ---
+apply_storage_paths() {
+	local target="$1"
+	local docker_root="${target}/docker"
+	local containerd_root="${target}/containerd"
+
+	mkdir -p "$docker_root" "$containerd_root"
+	fix_mount_flags_if_needed "$target"
+
+	systemctl stop docker.socket docker containerd 2>/dev/null || true
+
+	# Update Docker daemon.json
+	mkdir -p /etc/docker
+	echo "{\"data-root\": \"$docker_root\"}" >"$DAEMON_JSON"
+
+	# Update Containerd config.toml
+	mkdir -p /etc/containerd
+	if [[ ! -f "$CONTAINERD_CONFIG" ]] || ! grep -q "root =" "$CONTAINERD_CONFIG" 2>/dev/null; then
+		containerd config default >"$CONTAINERD_CONFIG" 2>/dev/null || true
+	fi
+	sed -i "s|^root = .*|root = \"$containerd_root\"|" "$CONTAINERD_CONFIG" 2>/dev/null || true
+
+	# Clean stale containerd snapshots if meta.db exists but snapshots dir is missing
+	local snap_dir="${containerd_root}/io.containerd.snapshotter.v1.overlayfs/snapshots"
+	local meta_db="${containerd_root}/io.containerd.metadata.v1.bolt/meta.db"
+	if [[ -f "$meta_db" && ! -d "$snap_dir" ]]; then
+		rm -rf "$containerd_root"
+		mkdir -p "$containerd_root"
+	fi
+
+	systemctl daemon-reload
+	systemctl start containerd
+	systemctl start docker
+
+	# Save config
+	echo "STORAGE_DIR=\"$target\"" >"$HOST_CONFIG"
+	cp -a "$HOST_CONFIG" "${target}/devdocs.conf" 2>/dev/null || true
+}
+
+configure_docker_root() {
+	local current_docker_root
+	current_docker_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
+	local default_suggest
+	default_suggest=$(get_active_storage_dir)
+
+	local prompt=$'Enter the path on your drive where Docker images & containers will live.\n\n'
+	prompt+=$'• Default: '"$default_suggest"$'\n'
+	prompt+=$'• Current Docker Root: '"$current_docker_root"$'\n\n'
+	prompt+=$'NOTE: On a fresh OS install, enter your existing drive path to connect\n'
+	prompt+=$'directly to your saved images without using your OS SSD space.'
+
+	local target_dir
+	target_dir=$(whiptail --title "Set Storage Drive Location" --inputbox \
+		"$prompt" 16 74 "$default_suggest" 3>&1 1>&2 2>&3) || return 0
+
+	if [[ -z "$target_dir" ]]; then
+		error_box "Target directory path cannot be empty."
+		return 1
+	fi
+
+	mkdir -p "$target_dir"
+	apply_storage_paths "$target_dir"
+
+	local new_root
+	new_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo "$target_dir/docker")
+	msg_box "Storage Path Connected Successfully!\n\n• Docker Images Location: $new_root\n• Containerd Runtime: $target_dir/containerd\n\nYour OS disk will remain clean. You can now choose 'Deploy / Run DevDocs'." "Storage Configured"
+}
+
+# --- Container Deployment ---
+deploy_container() {
+	local current_root
+	current_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
+	fix_mount_flags_if_needed "$current_root"
+
+	if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+		if whiptail --title "Container Already Exists" --yesno \
+			"DevDocs is already deployed on this system.\n\nWould you like to recreate it fresh (Yes) or just start it (No)?" 11 65; then
+			docker rm -f "$CONTAINER_NAME" >/dev/null
+		else
+			if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+				docker start "$CONTAINER_NAME" >/dev/null
+			fi
+			local running_msg=$'DevDocs is already running!\n\n'
+			running_msg+=$'Open your web browser and visit:\n'
+			running_msg+=$'  http://localhost:'"${DEFAULT_PORT}"
+			msg_box "$running_msg" "DevDocs Ready"
+			return 0
+		fi
+	fi
+
+	# Check if image is available in Docker daemon
+	if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+		local base_dir
+		base_dir=$(get_active_storage_dir)
+		local tar_file="${base_dir}/devdocs-image.tar"
+
+		if [[ -f "$tar_file" ]]; then
+			msg_box "Offline image archive detected!\n\nLoading image directly from:\n  $tar_file\n\nZero internet connection required. Loading may take ~1 minute..." "Offline Auto-Restore"
+			docker load -i "$tar_file"
+		else
+			local pull_prompt=$'DevDocs image was not found on your local drive or daemon.\n\n'
+			pull_prompt+=$'Would you like to download it from GitHub Container Registry now?\n'
+			pull_prompt+=$'Image: '"$IMAGE_NAME"$' (~4.3 GB)\n\n'
+			pull_prompt+=$'(Tip: Once downloaded, use Option 3 to save an offline .tar archive\n'
+			pull_prompt+=$' so future OS installs will NEVER need internet again!)'
+
+			if ! whiptail --title "Download DevDocs Image" --yesno "$pull_prompt" 14 72; then
+				return 0
+			fi
+
+			msg_box "Downloading DevDocs image...\nThis may take several minutes depending on your internet connection.\nPlease leave this open." "Downloading Image"
+			docker pull "$IMAGE_NAME" || {
+				error_box "Failed to pull image: $IMAGE_NAME\nPlease check your internet connection or import an offline .tar archive via Option 3."
+				return 1
+			}
+		fi
+	fi
+
+	msg_box "Starting DevDocs container..." "Launching Service"
+
+	if docker run --name "$CONTAINER_NAME" \
+		-d \
+		-p "${DEFAULT_PORT}:9292" \
+		--restart unless-stopped \
+		"$IMAGE_NAME"; then
+
+		local guide=$'CONGRATULATIONS! DevDocs is running!\n\n'
+		guide+=$'• Access URL: http://localhost:'"${DEFAULT_PORT}"$'\n\n'
+		guide+=$'--- HOW TO USE OFFLINE DOCUMENTATION ---\n'
+		guide+=$'1. Open your browser and go to http://localhost:'"${DEFAULT_PORT}"$'\n'
+		guide+=$'2. Click the Preferences/Gear icon (⚙️) or "+" in the top bar to enable\n'
+		guide+=$'   the languages and frameworks you want (Python, Go, Rust, Bash, etc.).\n'
+		guide+=$'3. Click the "Offline" button in the header bar and click "Install"\n'
+		guide+=$'   to cache them in your browser for instant, offline local search.'
+		msg_box "$guide" "DevDocs Ready"
+	else
+		error_box "Failed to start container.\nCheck if port $DEFAULT_PORT is already in use by another service."
+	fi
+}
+
+# --- Offline Image Archive (.tar) Backup & Restore ---
+manage_image_tar() {
+	local base_dir
+	base_dir=$(get_active_storage_dir)
+	local tar_file="${base_dir}/devdocs-image.tar"
+
+	while true; do
+		local status="NOT FOUND"
+		local size=""
+		if [[ -f "$tar_file" ]]; then
+			status="EXISTS"
+			size="($(du -sh "$tar_file" 2>/dev/null | awk '{print $1}'))"
+		fi
+
+		local menu_desc=$'Archive Path: '"$tar_file"$'\n'
+		menu_desc+=$'Archive Status: '"$status $size"$'\n\n'
+		menu_desc+=$'This feature exports the entire container into an offline file on your drive.\n'
+		menu_desc+=$'On any fresh Linux install, it restores 100% offline with ZERO internet!'
+
+		local choice
+		choice=$(whiptail --title "Offline Image Archive (.tar)" --menu \
+			"$menu_desc" 17 76 3 \
+			"1. Save Archive (Export)" "Save current DevDocs image to .tar file on drive" \
+			"2. Load Archive (Import)" "Load DevDocs image from .tar file into Docker" \
+			"3. Back" "Return to main menu" 3>&1 1>&2 2>&3) || break
+
+		case "$choice" in
+		"1. Save Archive (Export)")
+			if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+				error_box "DevDocs image is not currently in Docker.\nPlease run Option 2 (Deploy / Run DevDocs) first."
+				continue
+			fi
+			msg_box "Exporting DevDocs image to:\n  $tar_file\n\nThis will take ~1-2 minutes depending on drive speed. Click OK to begin." "Exporting Image"
+			if docker save "$IMAGE_NAME" -o "$tar_file"; then
+				msg_box "SUCCESS!\n\nImage exported to:\n  $tar_file\nSize: $(du -sh "$tar_file" | awk '{print $1}')\n\nYou can keep this file on your drive for permanent offline portability across any Linux installs." "Export Complete"
+			else
+				error_box "Failed to export image. Please check available disk space."
+			fi
+			;;
+		"2. Load Archive (Import)")
+			if [[ ! -f "$tar_file" ]]; then
+				error_box "No archive file found at:\n  $tar_file\n\nPlease export it first via Option 1 once downloaded."
+				continue
+			fi
+			msg_box "Loading DevDocs image into Docker daemon from:\n  $tar_file\n\nThis will take ~1 minute. Click OK to begin." "Importing Image"
+			if docker load -i "$tar_file"; then
+				msg_box "SUCCESS! DevDocs image loaded into Docker.\n\nYou can now run Option 2 (Deploy / Run DevDocs) to start the app!" "Import Complete"
+			else
+				error_box "Failed to load image from archive."
+			fi
+			;;
+		"3. Back") break ;;
+		esac
+	done
+}
+
+# --- Status & Service Operations ---
+show_status() {
+	local cstatus="STOPPED"
+	if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER_NAME}$"; then
+		cstatus="RUNNING (Active at http://localhost:${DEFAULT_PORT})"
+	elif ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER_NAME}$"; then
+		cstatus="NOT CREATED (Run Option 2 to create)"
+	fi
+
+	local d_root
+	d_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo "Unknown")
+	local base_dir
+	base_dir=$(get_active_storage_dir)
+	local tar_file="${base_dir}/devdocs-image.tar"
+
+	local summary="=== SYSTEM & STORAGE STATUS ===
+• Active Storage Path : $base_dir
+• Docker Root Dir     : $d_root
+• Containerd Runtime  : ${base_dir}/containerd
+• Offline .tar Backup : $([[ -f "$tar_file" ]] && echo "PRESENT ($(du -sh "$tar_file" | awk '{print $1}'))" || echo "NOT CREATED YET")
+
+=== CONTAINER STATUS ===
+• Container State     : $cstatus
+• Container Name      : $CONTAINER_NAME
+• Port Forwarding     : 0.0.0.0:${DEFAULT_PORT} -> 9292
+• Web Browser URL     : http://localhost:${DEFAULT_PORT}"
+
+	msg_box "$summary" "DevDocs System & Service Status"
+}
+
+manage_service() {
+	local action
+	action=$(whiptail --title "Container Actions" --menu "Manage DevDocs container ($CONTAINER_NAME):" 15 65 5 \
+		"START" "Start the DevDocs container" \
+		"STOP" "Stop the DevDocs container" \
+		"RESTART" "Restart the DevDocs container" \
+		"LOGS" "View recent container output logs" \
+		"REMOVE" "Remove container (safe: images & data preserved)" 3>&1 1>&2 2>&3) || return 0
+
+	case "$action" in
+	START) docker start "$CONTAINER_NAME" && msg_box "Container started!\nVisit: http://localhost:${DEFAULT_PORT}" "Started" ;;
+	STOP) docker stop "$CONTAINER_NAME" && msg_box "Container stopped." "Stopped" ;;
+	RESTART) docker restart "$CONTAINER_NAME" && msg_box "Container restarted!\nVisit: http://localhost:${DEFAULT_PORT}" "Restarted" ;;
+	LOGS) msg_box "$(docker logs -n 50 "$CONTAINER_NAME" 2>&1)" "Container Logs" ;;
+	REMOVE)
+		if whiptail --title "Confirm Removal" --yesno \
+			"Are you sure you want to remove the DevDocs container?\n\n(Your downloaded images and drive storage will NOT be deleted)" 10 65; then
+			docker rm -f "$CONTAINER_NAME" && msg_box "Container removed.\nYou can recreate it anytime using Option 2." "Removed"
+		fi
+		;;
+	esac
+}
+
+# --- Scorched Earth: Factory Reset / Nuke Corruptions ---
+reset_to_blank_slate() {
+	local base_dir
+	base_dir=$(get_active_storage_dir)
+
+	local warning=$'⚠️  SCORCHED EARTH / FACTORY RESET WARNING ⚠️\n\n'
+	warning+=$'This action completely nukes and cleans:\n'
+	warning+=$'  • The "devdocs" container\n'
+	warning+=$'  • Any corrupted Docker/containerd layer caches\n'
+	warning+=$'  • Stale build caches, dead snapshot DBs, and stopped containers\n'
+	warning+=$'  • Local daemon configuration caches\n\n'
+	warning+=$'SAFEGUARD: Your offline backup (devdocs-image.tar) WILL BE PRESERVED!\n'
+	warning+=$'After reset, you can immediately recreate DevDocs in ~1 minute from the .tar archive.\n\n'
+	warning+=$'Are you absolutely sure you want to reset to a clean blank slate?'
+
+	if ! whiptail --title "DANGER: Factory Reset / Nuke Docker" --yesno "$warning" 18 74; then
+		return 0
+	fi
+
+	# Second confirmation
+	if ! whiptail --title "Final Confirmation" --yesno "Proceed with resetting Docker & DevDocs to a blank slate now?" 9 60; then
+		return 0
+	fi
+
+	msg_box "Nuking corrupted state and resetting Docker...\nPlease wait." "Reset in Progress"
+
+	# 1. Stop and remove container
+	docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+
+	# 2. Prune all dead containers, dangling layers, and builder caches
+	docker system prune -af --volumes 2>/dev/null || true
+
+	# 3. Stop services
+	systemctl stop docker.socket docker containerd 2>/dev/null || true
+
+	# 4. Clean broken containerd snapshots on the storage drive
+	if [[ -d "${base_dir}/containerd" ]]; then
+		rm -rf "${base_dir}/containerd"
+		mkdir -p "${base_dir}/containerd"
+	fi
+
+	# 5. Clean containers folder in docker root
+	if [[ -d "${base_dir}/docker/containers" ]]; then
+		rm -rf "${base_dir}/docker/containers"
+		mkdir -p "${base_dir}/docker/containers"
+	fi
+
+	# 6. Restart clean services
+	fix_mount_flags_if_needed "$base_dir"
+	systemctl daemon-reload
+	systemctl start containerd
+	systemctl start docker
+
+	local result=$'CLEAN RESET COMPLETED!\n\n'
+	result+=$'• All corrupted containers, stale snapshots, and dead layers were nuked.\n'
+	result+=$'• Docker and containerd daemons restarted with clean databases.\n'
+	result+=$'• Storage Path: '"$base_dir"$'\n\n'
+	result+=$'NEXT STEP: Choose Option 2 ("Deploy / Run DevDocs") to start fresh!'
+
+	msg_box "$result" "Factory Reset Succeeded"
+}
+
+show_help() {
+	local content=$'DevDocs Offline Manager - Complete User Guide\n'
+	content+=$'====================================================================\n\n'
+	content+=$'OVERVIEW:\n'
+	content+=$'• Runs a fast, local, offline DevDocs instance inside Docker.\n'
+	content+=$'• Relocates Docker storage to any external partition or drive,\n'
+	content+=$'  keeping your main Linux OS root (/) SSD completely empty.\n'
+	content+=$'• 100% portable across fresh Linux installs with zero redownloads.\n\n'
+	content+=$'====================================================================\n'
+	content+=$'PORTABILITY IN A NUTSHELL: ALL YOU NEED IS THE .TAR FILE!\n'
+	content+=$'====================================================================\n'
+	content+=$'You only need TWO files on your drive for permanent portability:\n'
+	content+=$'  1. devdocs-image.tar (~4.3 GB) — The self-contained Docker image\n'
+	content+=$'     containing all 780+ pre-compiled documentation sets.\n'
+	content+=$'  2. This script (custom-DEVDOCS-IO-LOCAL-VIA-DOCKER) to manage it.\n\n'
+	content+=$'Why? Raw Docker internal folders (like /docker or /containerd) become\n'
+	content+=$'broken or corrupted across different Linux OS installs. A .tar file\n'
+	content+=$'never breaks and loads in ~1 minute without any internet connection!\n\n'
+	content+=$'====================================================================\n'
+	content+=$'WORKFLOW 1: INITIAL ONE-TIME SETUP (While Connected to Internet)\n'
+	content+=$'====================================================================\n'
+	content+=$'1. Choose Option 1: "Set Storage Drive Location"\n'
+	content+=$'   Enter the path to your drive (e.g. /mnt/INT-WORKER-T470).\n'
+	content+=$'2. Choose Option 2: "Deploy / Run DevDocs"\n'
+	content+=$'   Downloads the Docker image (~4.3 GB) and starts the container.\n'
+	content+=$'3. Choose Option 3: "Offline Image Archive (.tar)" -> "Save Archive"\n'
+	content+=$'   Exports devdocs-image.tar onto your drive. This single file guarantees\n'
+	content+=$'   permanent offline portability across any current or future OS installs!\n\n'
+	content+=$'====================================================================\n'
+	content+=$'WORKFLOW 2: ON ANY FRESH LINUX INSTALL (Zero Internet Required!)\n'
+	content+=$'====================================================================\n'
+	content+=$'1. Mount your drive on the new Linux install (e.g. /mnt/INT-WORKER-T470).\n'
+	content+=$'2. Run this script and choose Option 1: Point to your drive path.\n'
+	content+=$'3. Choose Option 2: "Deploy / Run DevDocs".\n'
+	content+=$'   The script automatically detects your devdocs-image.tar file,\n'
+	content+=$'   loads it directly into Docker, and starts DevDocs in ~1 minute.\n'
+	content+=$'4. Open http://localhost:9292 in any web browser.\n\n'
+	content+=$'====================================================================\n'
+	content+=$'HOW TO SELECT & SEARCH DOCS IN YOUR BROWSER:\n'
+	content+=$'====================================================================\n'
+	content+=$'• The container includes 780+ pre-compiled documentation sets!\n'
+	content+=$'• In DevDocs (http://localhost:9292):\n'
+	content+=$'  1. Click the "+" or Gear icon (⚙️) in the top-left corner.\n'
+	content+=$'  2. Check the boxes for languages/tools you need (Python, Rust, etc.).\n'
+	content+=$'  3. (Optional) Click the "Offline" tab at the top and click "Install"\n'
+	content+=$'     to cache search indexes into your browser for instant responses.\n\n'
+	content+=$'====================================================================\n'
+	content+=$'TROUBLESHOOTING & DRIVE TIPS:\n'
+	content+=$'====================================================================\n'
+	content+=$'• External Drive Mount Flags:\n'
+	content+=$'  If your drive was automounted by a desktop file manager (GNOME/KDE),\n'
+	content+=$'  it may have "nosuid,nodev" flags. The script automatically fixes\n'
+	content+=$'  these so Docker can mount overlay filesystems without errors.\n'
+	content+=$'• Port 9292 Busy:\n'
+	content+=$'  If port 9292 is reported busy, use Option 5 ("Container Actions")\n'
+	content+=$'  to restart or recreate the DevDocs container.'
+
+	msg_box "$content" "Help / Complete User Guide"
+}
+
+# --- Main Menu ---
+main() {
+	check_root "$@"
+	check_dependencies
+
+	while true; do
+		local active_dir
+		active_dir=$(get_active_storage_dir)
+
+		local choice
+		choice=$(whiptail --title "$TITLE" --menu \
+			"Current Drive Storage: $active_dir\nSelect an action:" 0 0 8 \
+			"1. Set Storage Drive Location" "Point Docker to your custom drive path" \
+			"2. Deploy / Run DevDocs" "Launch DevDocs (auto-restores from .tar if present)" \
+			"3. Offline Image Archive (.tar)" "Save or load image backup for 100% offline portability" \
+			"4. Check System & Service Status" "View container state, storage path, and port info" \
+			"5. Container Actions" "Start, Stop, Restart, View Logs, or Remove" \
+			"6. Help / User Guide" "Complete guide for fresh OS installs and offline use" \
+			"7. Factory Reset / Scorched Earth" "Nuke corrupted containers, caches & dead snapshot DBs" \
+			"8. Exit" "Close this manager" 3>&1 1>&2 2>&3) || break
+
+		case "$choice" in
+		"1. Set Storage Drive Location") configure_docker_root ;;
+		"2. Deploy / Run DevDocs") deploy_container ;;
+		"3. Offline Image Archive (.tar)") manage_image_tar ;;
+		"4. Check System & Service Status") show_status ;;
+		"5. Container Actions") manage_service ;;
+		"6. Help / User Guide") show_help ;;
+		"7. Factory Reset / Scorched Earth") reset_to_blank_slate ;;
+		"8. Exit") break ;;
+		esac
+	done
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+	main "$@"
+fi

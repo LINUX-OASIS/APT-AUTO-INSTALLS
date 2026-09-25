@@ -1,0 +1,244 @@
+#!/bin/bash
+# ✨ Nyaa~ Magical SMB Explorer — Always in Loop Mode! 🐾✨
+# Explore Samba shares across your LAN using adorable magic and terminal spells! 💖
+# Uses `whiptail` for UI, `nmap` for scanning, `nmblookup` for names, and `smbclient` for listing shares.
+
+set -euo pipefail
+
+check_dependencies() {
+	local missing_pkgs=()
+	declare -A CMD_PKG_MAP=(
+		[whiptail]="whiptail"
+		[nmap]="nmap"
+		[smbclient]="smbclient"
+		[nmblookup]="smbclient"
+		[nbtscan]="nbtscan"
+	)
+
+	for cmd in "${!CMD_PKG_MAP[@]}"; do
+		if ! command -v "$cmd" &>/dev/null; then
+			missing_pkgs+=("${CMD_PKG_MAP[$cmd]}")
+		fi
+	done
+
+	if [ ${#missing_pkgs[@]} -gt 0 ]; then
+		local unique_pkgs=($(printf "%s\n" "${missing_pkgs[@]}" | sort -u))
+		echo "Missing packages: ${unique_pkgs[*]}"
+		sudo apt install -y "${unique_pkgs[@]}" || {
+			echo "Failed to install required packages."
+			exit 1
+		}
+	fi
+}
+
+greet_user() {
+	whiptail --title "🐾✨ Network Adventure! ✨🐾" --msgbox \
+		"I'll cast a wide magic net to find all SMB hosts for you, senpai! Press Ok to start!" 0 0 3>&1 1>&2 2>&3
+}
+
+build_host_menu() {
+	echo -e "\n✨ Scanning your network for Samba creatures~ 🧙 This might take a while...🔮\n"
+	echo -e "\e[4;101m" " BE PATIENT !!! " "\e[0m"
+
+	NETWORK_RANGES=$(ip -o -f inet addr show | awk '/scope global/ {print $4}')
+	echo -e "\e[3;42m ✨(｡•ᴗ•｡)✨ 🔍 Scanning networks: \e[0m\n$NETWORK_RANGES"
+
+	[ -z "$NETWORK_RANGES" ] && whiptail --title "😭 Oh noes!" --msgbox \
+		"No network ranges found to scan." 0 0 3>&1 1>&2 2>&3 && exit 1
+
+	whiptail --scrolltext --title "🔮 🧙 Casting Spell..." --msgbox \
+		"Scanning these ranges:\n\n$NETWORK_RANGES\n\nPlease be patient..." 0 0 3>&1 1>&2 2>&3
+
+	echo -e "\n🎀 Discovered SMB Hosts with Hostnames:\n"
+
+	declare -gA HOST_MAP
+	declare -gA INDEX_MAP
+	i=1
+	options=()
+
+	for range in $NETWORK_RANGES; do
+		while read -r ip hostname; do
+			if [[ -n "$ip" && -n "$hostname" && -z "${HOST_MAP[$ip]+exists}" ]]; then
+				HOST_MAP["$ip"]="$hostname"
+				INDEX_MAP["$i"]="$ip"
+				options+=("$i" "$ip [$hostname]")
+				((i++))
+			fi
+		done < <(sudo nbtscan -s @ "$range" 2>/dev/null | awk -F @ '{print $1, $4}')
+	done
+
+	if [ ${#options[@]} -eq 0 ]; then
+		whiptail --title "😿 No Hosts Found" --msgbox "No SMB hosts found~" 0 0 3>&1 1>&2 2>&3
+		return
+	fi
+
+	SELECTED=$(whiptail --title "📱 Choose a Host" --menu \
+		"Choose a Samba host, nya~ 🐾" 0 0 "${#INDEX_MAP[@]}" "${options[@]}" \
+		3>&1 1>&2 2>&3) || return
+
+	# 💖 Extract the selected IP and hostname
+	SELECTED_IP="${INDEX_MAP[$SELECTED]}"
+	SELECTED_HOSTNAME="${HOST_MAP[$SELECTED_IP]}"
+
+	# 🎀 Pretty echo (optional)
+	echo -e "\n[INFO] Selected: $SELECTED_IP $SELECTED_HOSTNAME"
+
+	# 💫 Temporary file for Samba share info
+	SHARE_INFO_TMP="/tmp/CUSTOM-SAMBA-SCANNER-TARGET-SHARES-INFO.tmp"
+	echo -e "🌐 SAMBA SHARE INFO — [$SELECTED_IP] [$SELECTED_HOSTNAME]\n" >"$SHARE_INFO_TMP"
+
+	# 📦 List available shares using smbclient, formatted
+	if smbclient -g -L "$SELECTED_IP" -N &>>"$SHARE_INFO_TMP"; then
+		whiptail --title "📂 Samba Shares on $SELECTED_HOSTNAME" \
+			--scrolltext --msgbox "$(cat "$SHARE_INFO_TMP")" 0 0 3>&1 1>&2 2>&3
+		# else
+		#     whiptail --title "😿 Failed to Fetch Shares" \
+		#         --msgbox "Could not list shares from $SELECTED_IP ($SELECTED_HOSTNAME)~" 12 60 3>&1 1>&2 2>&3
+	fi
+
+	# FINALLY ASK USER IF THEY WANT TO SAVE THE SAMBA TARGET (APPEND) TO /etc/hosts  (SO AS TO READ/WRITE TO SAMBA SHARE VIA SPECIFIC IP ADDR ALWAYS)
+	if whiptail --yesno "Do you want to save this host\n[ $SELECTED_IP $SELECTED_HOSTNAME ]\n to /etc/hosts, senpai?" 0 0; then
+		echo "$SELECTED_IP $SELECTED_HOSTNAME" | sudo tee -a /etc/hosts >/dev/null
+		whiptail --msgbox "Saved to /etc/hosts~! \n$SELECTED_IP $SELECTED_HOSTNAME" 0 0
+	fi
+}
+
+# 🎀 Function: Display saved hosts and allow user to delete one
+# 🎀 Function: Delete one of the saved custom hosts FORMAT <IP ADDR> <HOSTNAME>
+delete_host() {
+	local save_file=/etc/hosts
+
+	if [ ! -f "$save_file" ]; then
+		whiptail --title "😿 No Saved Hosts FILE 😿" --msgbox \
+			"I don't have any saved hosts FILE, senpai! My memory is empty~!" 0 0
+		return
+	fi
+
+	if [ ! -f "$save_file" ]; then
+		whiptail --title "😿 No Saved Hosts FILE 😿" --msgbox \
+			"I don't have any saved hosts FILE to delete, senpai! My memory is empty~!" 0 0
+		return
+	fi
+
+	# Read /etc/hosts and build a map of saved hosts
+	# Format: <IP ADDR> <HOSTNAME>
+	# We will use this to display options for deletion
+	declare -A map_file
+	i=1
+	options=()
+	while IFS= read -r line; do
+		options+=("$i" "$line")
+		map_file[$i]=$line
+		((i++))
+	done < <(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' /etc/hosts | grep -vE '^127\.' | awk '{print $1, $2}')
+
+	if [ ${#options[@]} -eq 0 ]; then
+		whiptail --title "😿 No Saved Hosts 😿" --msgbox \
+			"I don't have any saved hosts to delete, senpai! My memory is empty~!" 0 0
+		return
+	fi
+
+	# Menu Display: Dynamically set height and show the menu.
+	choice=$(whiptail --title "🗑️ Delete a Host 🗑️" --menu \
+		"Select a host to delete:" 0 0 "${#map_file[@]}" "${options[@]}" 3>&1 1>&2 2>&3) || return
+
+	if [ -z "$choice" ]; then
+		whiptail --title "😿 No Selection 😿" --msgbox "You didn't select anything, senpai! Exiting~!" 0 0
+		return
+	fi
+	# Retrieve the full, original value from the map
+	FINAL_CHOICE="${map_file[$choice]}"
+
+	# Sanity check: Ensure the choice is not empty
+	if [ -z "$FINAL_CHOICE" ]; then
+		whiptail --title "😿 No Selection 😿" --msgbox "exiting" 0 0
+		return
+	fi
+
+	# sanity check confirmation before deletion
+	if ! whiptail --title "🗑️ Confirm Deletion 🗑️" --yesno \
+		"Are you sure you want to delete:\n\n$FINAL_CHOICE\n\nThis action cannot be undone, senpai? 🗑" 0 0; then
+		whiptail --title "😿 Deletion Cancelled 😿" --msgbox "Deletion cancelled, senpai! Your host is safe~!" 0 0
+		return 1
+	else
+		whiptail --title "🗑️ Deleting Host 🗑️" --msgbox "Deleting host: $FINAL_CHOICE" 0 0
+
+		# Remove the selected host from the file
+		# first we make a hard backup of the file
+		sudo cp "$save_file" "${save_file}.bak"
+
+		# Remove the selected host from the file
+		# -v Invert match: Show lines that do NOT match the pattern.
+		# -F → Fixed strings: Treat the pattern as a literal string, not a regex (faster, safer for special characters).
+		# this will remove all lines that match the FINAL_CHOICE
+		sudo grep -vF "$FINAL_CHOICE" "${save_file}.bak" | sudo tee "$save_file" >/dev/null
+
+		# Notify the user of successful deletion
+		# 🎀🎀🎀🎀🎀🎀🎀🎀
+		whiptail --title "✅ Deleted!" --msgbox "Successfully deleted: $FINAL_CHOICE" 0 0
+		echo "[+] Deleted HOST from $save_file: $FINAL_CHOICE"
+		return 0
+	fi
+}
+
+show_about() {
+	whiptail --scrolltext --title "🔮 About & Help 🔮" --msgbox \
+		"✨ **Magical SMB Explorer** ✨
+
+Your cute and magical guide to finding and managing Samba hosts on your network!
+
+---
+**Menu Options**
+---
+1.  **🌟 Explore Samba Shares:**
+    *   Scans your network to find devices sharing files.
+    *   Lets you view shares on a selected device.
+    *   Saves host IP/name to '/etc/hosts' for easy access.
+
+2.  **🗑️ Delete Saved Host:**
+    *   Removes a previously saved host from your '/etc/hosts' file.
+
+3.  **🔮 About / Help:**
+    *   Shows this help message.
+
+4.  **🚪 Exit:**
+    *   Closes the script.
+
+---
+**Dependencies**
+---
+This script uses 'whiptail', 'nmap', 'smbclient', 'nmblookup', and 'nbtscan'. It will try to install them if they are missing.
+
+Made with love and magic! 💖" 0 0
+}
+
+main() {
+	check_dependencies
+	greet_user
+	build_host_menu
+}
+
+menu() {
+	while true; do
+		unset options HOST_IP_MAP
+		CHOICE=$(whiptail --title "✨ Magical SMB Explorer Menu ✨" --menu \
+			"💻  Choose an action, senpai~!  💻" 0 0 4 \
+			"1" "🌟 Explore Samba Shares 🌟" \
+			"2" "Delete Saved Host 🗑️" \
+			"3" "About / Help 🔮" \
+			"4" "Exit" 3>&1 1>&2 2>&3) || break
+
+		case $CHOICE in
+		1) main ;;
+		2) delete_host ;;
+		3) show_about ;;
+		4)
+			whiptail --title "👋 Bye Bye!" --msgbox "Come back anytime for another treasure hunt! 🔮" 0 0
+			exit
+			;;
+		*) whiptail --title "😿 Invalid Choice" --msgbox "Please choose a valid option, senpai!" 0 0 ;;
+		esac
+	done
+}
+
+menu

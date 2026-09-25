@@ -1,0 +1,392 @@
+#!/bin/bash
+
+# #############################################################################
+#
+#               FSTAB Fixer for EXT4/BTRFS OS Filesystems
+#
+#  This script provides a safe, interactive way to correct the UUID entries
+#  for the root (/) and EFI (/boot/efi) partitions in an /etc/fstab file.
+#
+#  Author: LINUX-OASIS
+#
+# #############################################################################
+
+# ==============================================================================
+#                           CONFIGURATION & SETUP
+# ==============================================================================
+
+# --- Style Note on Variable Declaration ---
+# For maximum formal correctness and to adhere to strict linter standards (like
+# ShellCheck's SC2155), this script separates variable declaration (e.g., local my_var)
+# from its assignment (e.g., my_var=$(command)). This practice ensures that the
+# exit code of the command substitution is not masked, which is critical in
+# more complex scripts where error checking on the assignment is required.
+
+# Set custom whiptail colors for a better user interface.
+export NEWT_COLORS='
+root=brightblue,gray
+border=gray,red
+window=brown,blue
+shadow=green,brightred
+title=white,brightred
+button=cyan,lightray
+actbutton=black,yellow
+checkbox=brightred,black
+actcheckbox=gray,white
+entry=white,gray
+label=black,magenta
+listbox=white,gray
+actlistbox=black,yellow
+textbox=brightred,black
+acttextbox=black,yellow
+helpline=brightblue,cyan
+roottext=brightmagenta,black
+emptyscale=magenta,gray
+fullscale=brightgreen,green
+disentry=brightmagenta,magenta
+compactbutton=magenta,gray
+actsellistbox=brightred,black
+sellistbox=green,gray'
+
+# ==============================================================================
+#                           CORE LOGIC FUNCTIONS
+# ==============================================================================
+
+# ==============================================================================
+# FUNCTION: FUN_CLEANUP
+#
+# DESCRIPTION:
+#   Safely unmounts and removes the temporary mount directory. This function
+#   is called by a trap to guarantee cleanup even if the script is interrupted.
+#
+# PARAMETERS:
+#   $1 - The temporary mount point to clean up.
+#
+# ==============================================================================
+function FUN_CLEANUP {
+	local mount_point
+	mount_point="$1"
+
+	if [ -n "$mount_point" ] && mountpoint -q "$mount_point"; then
+		echo "--- Running cleanup for $mount_point ---"
+		sudo umount -lf "$mount_point" 2>/dev/null
+		rm -rf "$mount_point"
+		echo "Cleanup complete."
+	elif [ -d "$mount_point" ]; then
+		# If the directory exists but isn't a mount, just remove it.
+		rm -rf "$mount_point"
+	fi
+}
+
+function show_help {
+	cat <<'EOF'
+FSTAB Fixer - A safe, interactive /etc/fstab UUID corrector.
+
+DESCRIPTION:
+  This script provides a TUI (Text-based User Interface) to fix the UUIDs
+  for the root (/) and EFI (/boot/efi) partitions within a target Linux
+  filesystem's /etc/fstab file.
+
+  It is useful for system recovery, especially after cloning a disk or if
+  partition UUIDs have changed, preventing the OS from booting.
+
+USAGE:
+  sudo ./custom-FSTAB-FIXER
+
+EXECUTION FLOW:
+  1. Presents a menu to select the target EFI (VFAT) partition.
+  2. Presents a menu to select the target OS (ext4/btrfs) partition.
+  3. For BTRFS filesystems, it detects and prompts you to select the
+     correct root subvolume (e.g., @ or @rootfs).
+  4. Asks for final confirmation.
+  5. Safely mounts the target OS partition to a temporary location.
+  6. Reads the UUIDs of your selected partitions.
+  7. Replaces the corresponding entries for "/" and "/boot/efi" in the
+     mounted /etc/fstab file.
+  8. Unmounts everything cleanly.
+
+WARNING:
+  - This script modifies /etc/fstab, a critical system file.
+  - Incorrectly selecting partitions can render a system unbootable.
+  - Ensure you know which partitions are the correct OS root and EFI System
+    Partition (ESP).
+  - This script MUST be run with root privileges (sudo).
+EOF
+}
+
+# ==============================================================================
+# FUNCTION: FUN_DO_FSTAB_FIX
+#
+# DESCRIPTION:
+#   Performs the safe replacement of root (/) and EFI (/boot/efi) entries
+#   in the specified fstab file.
+#
+# PARAMETERS:
+#   $1 - Path to the target fstab file.
+#   $2 - Device path for the new OS partition (e.g., /dev/sda2).
+#   $3 - Device path for the new EFI partition (e.g., /dev/sda1).
+#
+# ==============================================================================
+function FUN_DO_FSTAB_FIX {
+	local target_fstab os_device efi_device
+	target_fstab="$1"
+	os_device="$2"
+	efi_device="$3"
+
+	# --- Fix Root (/) Entry ---
+	local fstab_root_line new_os_uuid new_os_identifier old_os_identifier
+	# Use a single, precise awk command to find the correct root (/) line.
+	# Mechanics:
+	#   !/^[[:space:]]*#/: Exclude lines starting with optional whitespace and '#' (comments).
+	#   $2 == "/": Match lines where the second field (mount point) is exactly '/'.
+	#   (Default action is to print the entire line if conditions are met).
+	fstab_root_line=$(awk '!/^[[:space:]]*#/ && $2 == "/"' "$target_fstab")
+	new_os_uuid=$(blkid -s UUID -o value "$os_device")
+	new_os_identifier="/dev/disk/by-uuid/$new_os_uuid"
+
+	if [ -n "$fstab_root_line" ]; then
+		old_os_identifier=$(echo "$fstab_root_line" | awk '{print $1}')
+		echo "Replacing Root: $old_os_identifier -> $new_os_identifier"
+		sudo sed -i "s#$old_os_identifier#$new_os_identifier#g" "$target_fstab"
+	else
+		whiptail --title "Warning" --msgbox "Could not find a root (/) entry in $target_fstab. The root entry will not be updated." 10 78
+	fi
+
+	# --- Fix EFI (/boot/efi) Entry ---
+	local fstab_efi_line new_efi_uuid new_efi_identifier old_efi_identifier
+	# Use a single, precise awk command to find the correct EFI (/boot/efi) line.
+	# Mechanics:
+	#   !/^[[:space:]]*#/: Exclude lines starting with optional whitespace and '#' (comments).
+	#   $2 == "/boot/efi": Match lines where the second field (mount point) is exactly '/boot/efi'.
+	#   (Default action is to print the entire line if conditions are met).
+	fstab_efi_line=$(awk '!/^[[:space:]]*#/ && $2 == "/boot/efi"' "$target_fstab")
+	new_efi_uuid=$(blkid -s UUID -o value "$efi_device")
+	new_efi_identifier="/dev/disk/by-uuid/$new_efi_uuid"
+
+	if [ -n "$fstab_efi_line" ]; then
+		old_efi_identifier=$(echo "$fstab_efi_line" | awk '{print $1}')
+		echo "Replacing EFI: $old_efi_identifier -> $new_efi_identifier"
+		sudo sed -i "s#$old_efi_identifier#$new_efi_identifier#g" "$target_fstab"
+	else
+		whiptail --title "Warning" --msgbox "Could not find an EFI (/boot/efi) entry in $target_fstab. The EFI entry will not be updated." 10 78
+	fi
+}
+
+# ==============================================================================
+#                           MAIN WORKFLOW FUNCTIONS
+# ==============================================================================
+
+# FUNCTION: FUN_PROCESS_FILESYSTEM
+#
+# DESCRIPTION:
+#   Mounts the target filesystem (handling BTRFS subvolumes if necessary),
+#   calls the fstab fixer, and ensures cleanup. Menu auto-sizes perfectly 🐭
+#
+function FUN_PROCESS_FILESYSTEM {
+	local os_device efi_device fstype mount_location subvolumes subvol_choice
+	os_device="$CHOSEN_OS_PARTITION_DEV"
+	efi_device="$CHOSEN_EFI_PARTITION_DEV"
+	fstype="$OS_FSTYPE"
+
+	# --- Temporary mount location (unique for each run) ---
+	mount_location="/tmp/FSTAB-FIXER-$(basename "$os_device")"
+	mkdir -p -- "$mount_location"
+
+	# --- Cleanup safety net ---
+	trap 'FUN_CLEANUP "'"$mount_location"'"' EXIT
+
+	# --- Prepare mount command ---
+	local -a mount_cmd
+	mount_cmd=(sudo mount)
+
+	# --- Handle BTRFS subvolumes ---
+	if [ "$fstype" = "btrfs" ]; then
+		# Mount top-level readonly to enumerate subvolumes
+		if ! sudo mount -o ro -- "$os_device" "$mount_location"; then
+			whiptail --title "Error" --msgbox "Failed to mount $os_device (readonly) to enumerate subvolumes." 8 78
+			return 1
+		fi
+
+		# Get subvolumes into array (preserve spaces)
+		readarray -t subvolumes < <(sudo btrfs subvolume list "$mount_location" 2>/dev/null | sed -n 's+^.*path ++p')
+
+		# Unmount after listing
+		sudo umount -- "$mount_location" 2>/dev/null || true
+
+		# If subvolumes exist, ask user to choose
+		if [ "${#subvolumes[@]}" -gt 0 ]; then
+			local -a menu_items=()
+			for sv in "${subvolumes[@]}"; do
+				menu_items+=("$sv" "btrfs subvolume")
+			done
+
+			local menu_height
+			menu_height=${#subvolumes[@]} # exact visible items
+
+			output=$(sudo btrfs subvolume list "$mount_location" 2>/dev/null | sed -n 's+^.*path ++p')
+
+			if whiptail --scrolltext --yes-button "Proceed W/o Subvol" --no-button "Select Subvol" --title "Subvolume Selection" --yesno "$(printf 'Would you like to select a root subvolume?\n\n%s' "$output")" 0 80 3>&1 1>&2 2>&3 \
+				; then
+				# User chose to proceed without subvolume selection
+				subvol_choice=""
+			else
+				# User chose to select subvolume
+				subvol_choice=$(whiptail --title "BTRFS Subvolume Detected" --menu "Select the root subvolume:" 0 0 "$menu_height" "${menu_items[@]}" 3>&1 1>&2 2>&3)
+			fi
+
+			# Add subvol option if chosen
+			if [ -n "$subvol_choice" ]; then
+				mount_cmd+=("-o" "subvol=$subvol_choice")
+			fi
+		fi
+	fi
+
+	# --- Mount the filesystem ---
+	mount_cmd+=("--" "$os_device" "$mount_location")
+	echo "Mounting $os_device -> $mount_location with: ${mount_cmd[*]}"
+	if ! "${mount_cmd[@]}"; then
+		whiptail --title "Error" --msgbox "Failed to mount $os_device. Aborting." 8 78
+		return 1
+	fi
+
+	# --- Run the fstab fixer ---
+	if ! FUN_DO_FSTAB_FIX "$mount_location/etc/fstab" "$os_device" "$efi_device"; then
+		whiptail --title "Error" --msgbox "fstab fixer failed. Check output for details." 8 78
+		FUN_CLEANUP "$mount_location"
+		trap - EXIT
+		return 1
+	fi
+
+	whiptail --title "Success" --msgbox "/etc/fstab has been updated successfully!" 8 78
+
+	# --- Final cleanup ---
+	FUN_CLEANUP "$mount_location"
+	trap - EXIT
+	return 0
+}
+
+# ==============================================================================
+#                           USER INTERFACE FUNCTIONS
+# ==============================================================================
+
+# ==============================================================================
+# FUNCTION: FUN_SELECT_PARTITIONS
+#
+# DESCRIPTION:
+#   Presents menus for the user to select the target OS and EFI partitions.
+#   Uses simplified and more robust commands to get partition info.
+#
+# ==============================================================================
+
+function FUN_SELECT_PARTITIONS {
+	# --- EFI Partition Selection ---
+	readarray -t efi_partitions < <(lsblk --list -n -o NAME,FSTYPE,FSVER,LABEL,SIZE | grep -w "vfat")
+	efi_options=()
+	declare -A efi_map
+	i=1
+	efi_options+=("HELP / ABOUT" "Help and About Information")
+
+	for line in "${efi_partitions[@]}"; do
+		if [ -n "$line" ]; then
+			read -r name fstype fsver label size <<<"$line"
+			if [ -z "$size" ]; then
+				size="$label"
+				label="-" # handle missing LABEL
+			fi
+			_tag="/dev/$name"
+			_item=$(printf "%-6s %-6s %-15s %-6s" "$fstype" "$fsver" "$label" "$size")
+			efi_options+=("$_tag" "$_item")
+			efi_map[$i]="$line"
+			((i++))
+		fi
+	done
+
+	efi_height="${#efi_map[@]}"
+	CHOSEN_EFI_PARTITION_DEV=$(whiptail --title "Select EFI Partition" \
+		--menu "Choose the EFI/ESP partition:" 0 0 "$efi_height" "${efi_options[@]}" \
+		3>&1 1>&2 2>&3)
+
+	if [ -z "$CHOSEN_EFI_PARTITION_DEV" ]; then
+		echo "User aborted EFI partition selection" >&2
+		exit 1
+	elif [ "$CHOSEN_EFI_PARTITION_DEV" = "HELP / ABOUT" ]; then
+		show_help
+		echo -e "\n"
+		read -r -s -p "Press ENTER to exit..."
+		exit 0
+
+	fi
+
+	# --- OS Partition Selection ---
+	readarray -t os_partitions < <(lsblk --list -n -o NAME,FSTYPE,LABEL,SIZE | grep -E "ext4|btrfs")
+	os_options=()
+	declare -A os_map
+	i=1
+
+	for line in "${os_partitions[@]}"; do
+		if [ -n "$line" ]; then
+			read -r name fstype label size <<<"$line"
+			if [ -z "$size" ]; then
+				size="$label"
+				label="-" # handle missing LABEL
+			fi
+			_tag="/dev/$name"
+			_item=$(printf "%-6s %-15s %-6s" "$fstype" "$label" "$size")
+			os_options+=("$_tag" "$_item")
+			os_map[$i]="$line"
+			((i++))
+		fi
+	done
+
+	os_height="${#os_map[@]}"
+	CHOSEN_OS_PARTITION_DEV=$(whiptail --title "Select OS Partition" \
+		--menu "Choose the target OS partition:" 0 0 "$os_height" "${os_options[@]}" \
+		3>&1 1>&2 2>&3)
+
+	if [ -z "$CHOSEN_OS_PARTITION_DEV" ]; then
+		echo "User aborted OS partition selection" >&2
+		exit 1
+	fi
+
+	# --- Get Filesystem Type for the chosen OS partition ---
+	OS_FSTYPE=$(lsblk -n -o FSTYPE "$CHOSEN_OS_PARTITION_DEV")
+
+	# Debug output
+	echo "CHOSEN_EFI_PARTITION_DEV ::: $CHOSEN_EFI_PARTITION_DEV"
+	echo "CHOSEN_OS_PARTITION_DEV  ::: $CHOSEN_OS_PARTITION_DEV"
+	echo "OS_FSTYPE               ::: $OS_FSTYPE"
+}
+
+# ##############################################################################
+# ##############################################################################
+#
+#                                SCRIPT START - SCRIPT ENTRY POINT
+#
+# ##############################################################################
+# ##############################################################################
+
+# --- Initial Selection ---
+FUN_SELECT_PARTITIONS
+
+# --- Sanity Check ---
+whiptail --title "Confirm Selections" --yesno \
+	"You have selected:\n\n  OS PARTITION:  $CHOSEN_OS_PARTITION_DEV ($OS_FSTYPE)\n  EFI PARTITION: $CHOSEN_EFI_PARTITION_DEV\n\nIs this correct?" 12 78
+
+if [ $? -ne 0 ]; then
+	echo "USER ABORTED"
+	exit
+fi
+
+# --- Process the selected filesystem ---
+FUN_PROCESS_FILESYSTEM
+
+# --- Final exit message --- so user knows its run, and outside chroot at first obvious glance, with kawaii bash bunny
+cat <<EOF
+(\_/) (\_/) (\_/) (\_/) (\_/) (\_/) (\_/) (\_/) (\_/)
+(•x•) (•x•) (•x•) (•x•) (•x•) (•x•) (•x•) (•x•) (•x•)     
+(<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦) (<🍦)
+
+ALL DONE FSTAB-FIXER
+EOF
+
+unset NEWT_COLORS

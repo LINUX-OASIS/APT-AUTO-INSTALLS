@@ -1,0 +1,379 @@
+#!/bin/bash
+
+# ==============================================================================
+# SSHFS MOUNT MANAGER
+#
+# Description:
+#   An interactive TUI to manage SSHFS profiles and mount remote directories
+#   onto the local filesystem.
+#
+# Architecture:
+#   - Superior Pattern: Numeric tags mapped to profiles via associative arrays.
+#   - Persistence: Profiles stored in /bin/CUSTOM_SSHFS_MANAGER_CONFIG/
+#
+# Usage:
+#   Run as a normal user. The script will request sudo only when necessary.
+# ==============================================================================
+
+# CONFIGURATION
+CONFIG_DIR="/bin/CUSTOM_SSHFS_MANAGER_CONFIG"
+PROFILES_FILE="$CONFIG_DIR/sshfs_profiles.conf"
+
+# Ensure configuration environment exists (needs sudo for /bin)
+if [ ! -d "$CONFIG_DIR" ]; then
+	echo "Initializing configuration directory..."
+	sudo mkdir -p "$CONFIG_DIR"
+	sudo chmod -R 777 "$CONFIG_DIR"
+fi
+
+if [ ! -f "$PROFILES_FILE" ]; then
+	sudo touch "$PROFILES_FILE"
+	sudo chmod 777 "$PROFILES_FILE"
+fi
+
+# Define whiptail visual theme
+export NEWT_COLORS='
+root=white,black
+window=white,blue
+border=cyan,blue
+title=yellow,blue
+button=black,cyan
+actbutton=white,cyan
+'
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: FUN_CHECK_DEPENDENCIES
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_CHECK_DEPENDENCIES() {
+	local MISSING=()
+	local FUSERMOUNT_CMD=""
+
+	for cmd in whiptail sshfs; do
+		if ! command -v "$cmd" &>/dev/null; then
+			MISSING+=("$cmd")
+		fi
+	done
+
+	if command -v fusermount3 &>/dev/null; then
+		FUSERMOUNT_CMD="fusermount3"
+	elif command -v fusermount &>/dev/null; then
+		FUSERMOUNT_CMD="fusermount"
+	else
+		MISSING+=("fusermount/fusermount3")
+	fi
+
+	if [ ${#MISSING[@]} -gt 0 ]; then
+		whiptail --title "Missing Dependencies" --msgbox "Required commands not found: ${MISSING[*]}\n\nPlease install: sudo apt install sshfs whiptail fuse3" 0 0
+		exit 1
+	fi
+
+	# Check for user_allow_other in fuse.conf
+	if ! grep -qE '^\s*user_allow_other' /etc/fuse.conf; then
+		if whiptail --title "FUSE Configuration" --yesno "'user_allow_other' is not enabled in /etc/fuse.conf. This is required for the 'allow_other' mount option. Enable it now?" 0 0; then
+			sudo sed -i 's/^\s*#\s*user_allow_other/user_allow_other/' /etc/fuse.conf
+			if ! grep -qE '^\s*user_allow_other' /etc/fuse.conf; then
+				echo "user_allow_other" | sudo tee -a /etc/fuse.conf >/dev/null
+			fi
+			whiptail --title "Configuration Updated" --msgbox "/etc/fuse.conf has been updated successfully." 0 0
+		fi
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: FUN_CREATE_PROFILE
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_CREATE_PROFILE() {
+	local P_NAME P_USER P_IP P_PORT P_REMOTE P_LOCAL P_OPTS
+
+	P_NAME=$(whiptail --title "New Profile" --inputbox "Enter a unique profile name (e.g., WorkServer):" 0 0 3>&1 1>&2 2>&3)
+	[ -z "$P_NAME" ] && return
+	P_NAME="${P_NAME//[ #|]/}" # Sanitize
+
+	P_USER=$(whiptail --title "Remote Configuration" --inputbox "Enter remote target username:" 0 0 "$(id -un)" 3>&1 1>&2 2>&3)
+	[ -z "$P_USER" ] && return
+	P_USER="${P_USER//[ #|]/}"
+
+	P_IP=$(whiptail --title "Remote Configuration" --inputbox "Enter remote target IP address or hostname:" 0 0 3>&1 1>&2 2>&3)
+	[ -z "$P_IP" ] && return
+	P_IP="${P_IP//[ #|]/}"
+
+	P_PORT=$(whiptail --title "Remote Configuration" --inputbox "Enter SSH port (default 22):" 0 0 "22" 3>&1 1>&2 2>&3)
+	[ -z "$P_PORT" ] && P_PORT="22"
+	P_PORT="${P_PORT//[^0-9]/}"
+
+	P_REMOTE=$(whiptail --title "Remote Configuration" --inputbox "Enter the remote directory path to mount:" 0 0 "/home/$P_USER" 3>&1 1>&2 2>&3)
+	[ -z "$P_REMOTE" ] && return
+	P_REMOTE="${P_REMOTE//[ #|]/}"
+
+	P_LOCAL=$(whiptail --title "Local Configuration" --inputbox "Enter the local mountpoint path:" 0 0 "/home/$(id -un)/mnt/$P_NAME" 3>&1 1>&2 2>&3)
+	[ -z "$P_LOCAL" ] && return
+	P_LOCAL="${P_LOCAL//[ #|]/}"
+
+	P_OPTS=$(whiptail --title "SSHFS Options" --inputbox "Enter SSHFS mount options (comma-separated):" 0 0 "allow_other,default_permissions,reconnect" 3>&1 1>&2 2>&3)
+	P_OPTS="${P_OPTS//[ #|]/}"
+
+	# Store result: NAME#USER#IP#PORT#REMOTE#LOCAL#OPTIONS
+	echo "${P_NAME}#${P_USER}#${P_IP}#${P_PORT}#${P_REMOTE}#${P_LOCAL}#${P_OPTS}" >>"$PROFILES_FILE"
+	whiptail --title "Success" --msgbox "Profile '${P_NAME}' has been saved." 0 0
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: FUN_LOAD_RUN_PROFILE
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_LOAD_RUN_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --title "Information" --msgbox "No saved profiles found. Please create a profile first." 0 0
+		return
+	fi
+
+	local options=()
+	declare -A profile_map
+	local i=1
+
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		local name=$(echo "$line" | cut -d'#' -f1)
+		local remote=$(echo "$line" | cut -d'#' -f5)
+		options+=("$i" "$name ($remote)")
+		profile_map[$i]="$line"
+		((i++))
+	done <"$PROFILES_FILE"
+
+	local choice
+	choice=$(whiptail --title "Select Profile" --menu "Choose a profile to mount:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$choice" ]; then
+		local data="${profile_map[$choice]}"
+		local m_name=$(echo "$data" | cut -d'#' -f1)
+		local m_user=$(echo "$data" | cut -d'#' -f2)
+		local m_ip=$(echo "$data" | cut -d'#' -f3)
+		local m_port=$(echo "$data" | cut -d'#' -f4)
+		local m_remote=$(echo "$data" | cut -d'#' -f5)
+		local m_local=$(echo "$data" | cut -d'#' -f6)
+		local m_opts=$(echo "$data" | cut -d'#' -f7)
+
+		# Ensure local mountpoint exists
+		if [ ! -d "$m_local" ]; then
+			if whiptail --title "Directory Missing" --yesno "Mountpoint $m_local does not exist. Create it now?" 0 0; then
+				mkdir -p "$m_local" || sudo mkdir -p "$m_local"
+				sudo chmod 777 "$m_local"
+			else
+				return
+			fi
+		fi
+
+		# Construct SSHFS command arguments
+		local -a sshfs_args=()
+		if [ -n "$m_opts" ]; then
+			sshfs_args+=("-o" "$m_opts")
+		fi
+		if [ -n "$m_port" ] && [ "$m_port" != "22" ]; then
+			sshfs_args+=("-p" "$m_port")
+		fi
+
+		# Format target correctly
+		local target="${m_user}@${m_ip}:${m_remote}"
+
+		clear
+		echo "Executing SSHFS mount for profile: $m_name"
+		echo "Command: sshfs ${sshfs_args[*]} $target $m_local"
+		echo "----------------------------------------------------------------"
+
+		if sshfs "${sshfs_args[@]}" "$target" "$m_local"; then
+			whiptail --title "Success" --msgbox "Filesystem mounted successfully at $m_local." 0 0
+		else
+			local ERR_CODE=$?
+			whiptail --title "Error ($ERR_CODE)" --msgbox "Failed to mount filesystem.\n\nPossible reasons:\n1. Network/SSH connectivity issues\n2. Incorrect credentials\n3. Remote path does not exist\n4. Mountpoint is already in use\n\nTry running 'ssh $m_user@$m_ip' manually to verify access." 0 0
+		fi
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: FUN_UNMOUNT_ACTIVE
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_UNMOUNT_ACTIVE() {
+	local active_mounts
+	mapfile -t active_mounts < <(mount | grep "fuse.sshfs" | awk '{print $3}')
+
+	if [ ${#active_mounts[@]} -eq 0 ]; then
+		whiptail --title "Information" --msgbox "No active SSHFS mounts detected." 0 0
+		return
+	fi
+
+	local options=()
+	local i=1
+	declare -A mount_map
+	for m in "${active_mounts[@]}"; do
+		options+=("$i" "$m")
+		mount_map[$i]="$m"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --title "Unmount Filesystem" --menu "Select a mountpoint to disconnect:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$choice" ]; then
+		local target="${mount_map[$choice]}"
+		local F_CMD="fusermount"
+		command -v fusermount3 &>/dev/null && F_CMD="fusermount3"
+
+		if $F_CMD -u "$target"; then
+			whiptail --title "Success" --msgbox "Successfully unmounted $target." 0 0
+		else
+			whiptail --title "Error" --msgbox "Failed to unmount $target. The resource may be in use." 0 0
+		fi
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: FUN_EDIT_PROFILE
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_EDIT_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then return; fi
+
+	local options=()
+	declare -A profile_map
+	local i=1
+
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		options+=("$i" "$(echo "$line" | cut -d'#' -f1)")
+		profile_map[$i]="$line"
+		((i++))
+	done <"$PROFILES_FILE"
+
+	local choice
+	choice=$(whiptail --title "Edit Profile" --menu "Select a profile to modify:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$choice" ]; then
+		local old_data="${profile_map[$choice]}"
+		# Parse with port support: NAME#USER#IP#PORT#REMOTE#LOCAL#OPTIONS
+		local o_name o_user o_ip o_port o_remote o_local o_opts
+		IFS='#' read -r o_name o_user o_ip o_port o_remote o_local o_opts <<<"$old_data"
+
+		# Fallback for old 6-field profiles
+		if [ -z "$o_opts" ] && [ -n "$o_local" ]; then
+			# old format was NAME#USER#IP#REMOTE#LOCAL#OPTIONS
+			o_opts="$o_local"
+			o_local="$o_remote"
+			o_remote="$o_port"
+			o_port="22"
+		fi
+
+		local n_name n_user n_ip n_port n_remote n_local n_opts
+
+		n_name=$(whiptail --title "Edit Name" --inputbox "Profile Name:" 0 0 "$o_name" 3>&1 1>&2 2>&3) || return
+		n_name="${n_name//[ #|]/}"
+
+		n_user=$(whiptail --title "Edit User" --inputbox "Username:" 0 0 "$o_user" 3>&1 1>&2 2>&3) || return
+		n_user="${n_user//[ #|]/}"
+
+		n_ip=$(whiptail --title "Edit IP" --inputbox "IP/Hostname:" 0 0 "$o_ip" 3>&1 1>&2 2>&3) || return
+		n_ip="${n_ip//[ #|]/}"
+
+		n_port=$(whiptail --title "Edit Port" --inputbox "SSH Port:" 0 0 "$o_port" 3>&1 1>&2 2>&3) || return
+		n_port="${n_port//[^0-9]/}"
+
+		n_remote=$(whiptail --title "Edit Remote Path" --inputbox "Remote Path:" 0 0 "$o_remote" 3>&1 1>&2 2>&3) || return
+		n_remote="${n_remote//[ #|]/}"
+
+		n_local=$(whiptail --title "Edit Local Mountpoint" --inputbox "Local Mountpoint:" 0 0 "$o_local" 3>&1 1>&2 2>&3) || return
+		n_local="${n_local//[ #|]/}"
+
+		n_opts=$(whiptail --title "Edit Options" --inputbox "Extra Options:" 0 0 "$o_opts" 3>&1 1>&2 2>&3) || return
+		n_opts="${n_opts//[ #|]/}"
+
+		local new_data="${n_name}#${n_user}#${n_ip}#${n_port}#${n_remote}#${n_local}#${n_opts}"
+		local escaped_old=$(echo "$old_data" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+		sed -i "s|^${escaped_old}$|${new_data}|" "$PROFILES_FILE"
+
+		whiptail --title "Success" --msgbox "Profile updated successfully." 0 0
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: FUN_DELETE_PROFILE
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_DELETE_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then return; fi
+
+	local options=()
+	declare -A profile_map
+	local i=1
+
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		options+=("$i" "$(echo "$line" | cut -d'#' -f1)")
+		profile_map[$i]="$line"
+		((i++))
+	done <"$PROFILES_FILE"
+
+	local choice
+	choice=$(whiptail --title "Delete Profile" --menu "Select a profile to permanently remove:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -eq 0 ] && [ -n "$choice" ]; then
+		local to_del="${profile_map[$choice]}"
+		local p_name=$(echo "$to_del" | cut -d'#' -f1)
+
+		if whiptail --title "Confirmation Required" --yesno "Are you sure you want to delete profile '$p_name'?" 0 0; then
+			local escaped_to_del=$(echo "$to_del" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+			sed -i "\|^${escaped_to_del}$|d" "$PROFILES_FILE"
+			whiptail --title "Success" --msgbox "Profile has been removed." 0 0
+		fi
+	fi
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: FUN_SHOW_HELP
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_SHOW_HELP() {
+	local help_text="SSHFS MOUNT MANAGER - USAGE GUIDE
+
+1. Profiles: Define persistent connection parameters for remote servers.
+2. Mount: Connect to a remote directory via SSHFS using a saved profile.
+3. Unmount: Safely disconnect active SSHFS mounts.
+4. allow_other: Permits users other than the mounter to access the filesystem. 
+   Requires 'user_allow_other' in /etc/fuse.conf.
+
+System Requirements:
+- sshfs
+- fuse3 (provides fusermount3)
+- SSH access to target (key-based authentication highly recommended)
+
+Configuration Path:
+$CONFIG_DIR"
+
+	whiptail --title "Documentation" --scrolltext --msgbox "$help_text" 22 78
+}
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+#  SECTION: MAIN PROGRAM LOOP
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+FUN_CHECK_DEPENDENCIES
+
+while true; do
+	MAIN_CHOICE=$(
+		whiptail --title "SSHFS MOUNT MANAGER" --menu "Main Operations Menu" 0 0 7 \
+			"1" "Mount Remote Directory" \
+			"2" "Unmount Active Filesystem" \
+			"3" "Create New Profile" \
+			"4" "Edit Existing Profile" \
+			"5" "Delete Profile" \
+			"6" "Help / Documentation" \
+			"7" "Exit" 3>&1 1>&2 2>&3
+	)
+
+	if [ $? -ne 0 ]; then
+		exit 0
+	fi
+
+	case $MAIN_CHOICE in
+	1) FUN_LOAD_RUN_PROFILE ;;
+	2) FUN_UNMOUNT_ACTIVE ;;
+	3) FUN_CREATE_PROFILE ;;
+	4) FUN_EDIT_PROFILE ;;
+	5) FUN_DELETE_PROFILE ;;
+	6) FUN_SHOW_HELP ;;
+	7) exit 0 ;;
+	esac
+done

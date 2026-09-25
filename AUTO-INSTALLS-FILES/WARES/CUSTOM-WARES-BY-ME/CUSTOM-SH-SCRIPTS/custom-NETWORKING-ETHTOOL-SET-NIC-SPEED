@@ -1,0 +1,302 @@
+#!/bin/bash
+
+# ==============================================================================
+# Script Name: NIC [ETHERNET] SPEED CONFIGURATOR
+# Description: This script provides a Text-based User Interface (TUI) for
+#              managing Ethernet Network Interface Cards (NICs). It allows
+#              users to view NIC configuration and capabilities, and to
+#              manually set the speed and duplex mode of a selected NIC.
+#              It leverages 'whiptail' for the interactive menus, 'ip' for
+#              NIC discovery, and 'ethtool' for configuration and status.
+#
+# Key Features:
+# - Dynamic discovery of available Ethernet NICs.
+# - Dynamic discovery of supported link speeds for a selected NIC.
+# - Ability to set a specific NIC speed, forcing full duplex and disabling
+#   auto-negotiation.
+# - Comprehensive display of a NIC's ethtool information.
+# - Implements a robust "superior pattern" for whiptail menus using Bash's
+#   `readarray` and associative arrays, ensuring reliability against complex
+#   interface names and data.
+# - Includes verification of speed changes and offers to restart NetworkManager
+#   if speed change isn't immediately effective.
+# - Secure handling of temporary files using `mktemp`.
+#
+# Usage:
+#   Run the script from a terminal. It requires 'sudo' privileges for 'ethtool'
+#   and 'ip' commands.
+#   Example: sudo ./custom-NETWORKING-ETHTOOL-SET-NIC-SPEED
+#
+# Dependencies:
+# - bash (version 4.x or newer for associative arrays and readarray)
+# - whiptail (dialog utility)
+# - iproute2 (for 'ip' command)
+# - ethtool
+# - sudo
+#
+# ==============================================================================
+
+# check for root privileges
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[48;5;196m" "Error: This script must be run as root. Please use sudo." "\e[0m"
+	echo -e "\e[48;5;196m" "Trying to relaunch with sudo" "\e[0m"
+	sudo "$0"
+	if [ "$EUID" -ne 0 ]; then
+		exit 1
+	fi
+fi
+
+# Enable strict mode:
+# -e: Exit immediately if a command exits with a non-zero status.
+# -u: Treat unset variables as an error.
+# -o pipefail: The return value of a pipeline is the status of the last command
+#              to exit with a non-zero status, or zero if all commands exit
+#              successfully.
+# set -euo pipefail
+
+# Export NEWT_COLORS to customize the appearance of whiptail dialogs.
+# This makes the TUI more visually distinct and user-friendly.
+export NEWT_COLORS='
+root=white,brightmagenta
+border=yellow,black
+window=brightmagenta,brightblue
+shadow=green,yellow
+title=white,brightblue
+button=brightmagenta,black
+actbutton=black,lightgray
+checkbox=lightgray,black
+actcheckbox=brightgreen,green
+entry=black,white
+label=brightgreen,brightmagenta
+listbox=white,gray
+actlistbox=black,red
+textbox=black,yellow
+acttextbox=brightred,green
+helpline=lightgray,green
+roottext=green,lightgray
+emptyscale=green,brightmagenta
+fullscale=yellow,brightgreen
+disentry=brightblue,lightgray
+compactbutton=white,gray
+actsellistbox=black,yellow
+sellistbox=brightmagenta,lightgray'
+
+#
+# Function: _select_from_menu
+# Description: Implements the "superior pattern" for dynamic whiptail menus.
+#              It uses `readarray` to capture a data source and an associative array
+#              for safe, direct mapping from a menu tag to the original value.
+#              This approach is robust against special characters, spaces, and
+#              ensures reliable retrieval of the selected item's true value.
+#
+# @param $1 Menu title (string)
+# @param $2 Command string that generates a list of items, one per line.
+# @return The original value of the selected item on stdout, or nothing if
+#         the user cancels or an error occurs. Returns 0 on success, 1 on error/cancel.
+#
+_select_from_menu() {
+	local title="$1"
+	local data_source_cmd="$2"
+	local selected_item
+
+	local -a lines # Indexed array to store lines from the data source command.
+	# Use process substitution to safely read the command output into an array.
+	# The `-t` flag removes trailing newlines from each line, which is crucial
+	#	# for accurate parsing. `eval` is used to execute the dynamic command string.
+	if ! readarray -t lines < <(eval "$data_source_cmd"); then
+		whiptail --title "Execution Error" --msgbox "Failed to execute command to get menu items:\n\n$data_source_cmd" 0 0
+		return 1 # Indicate failure
+	fi
+
+	# If the command produced no output, inform the user and exit the function.
+	if [[ ${#lines[@]} -eq 0 ]]; then
+		whiptail --title "No Items Found" --msgbox "The command produced no items to select." 0 0
+		return 1 # Indicate failure
+	fi
+
+	local -a options=() # This will hold the (tag, item) pairs in the format whiptail expects.
+	local -A id_map=()  # This associative array maps the numeric tag back to the original value.
+	local i=1           # Counter for generating unique numeric tags.
+
+	# Iterate through each line from the data source to build whiptail options and the ID map.
+	for line in "${lines[@]}"; do
+		# Skip any blank lines that might come from the source command to avoid empty menu entries.
+		if [[ -z "$line" ]]; then
+			continue
+		fi
+
+		local tag="$i"        # The numeric tag displayed to the user.
+		local display="$line" # The actual text displayed for the menu item.
+
+		options+=("$tag" "$display") # Add to the array for whiptail.
+		id_map[$tag]="$line"         # Store the original value mapped to its tag.
+
+		((i++)) # Increment tag counter.
+	done
+
+	# After filtering, if no valid options remain, inform the user.
+	if [[ ${#options[@]} -eq 0 ]]; then
+		whiptail --title "No Items Found" --msgbox "No valid items to display in the menu." 0 0
+		return 1 # Indicate failure
+	fi
+
+	local choice # Variable to store the numeric tag chosen by the user.
+	# Display the whiptail menu. The menu height is dynamically set to the number of items.
+	# 3>&1 1>&2 2>&3 redirects whiptail's output (the choice) to stdout and errors to stderr.
+	if ! choice=$(whiptail --title "$title" --menu "Select an option:" 0 0 "${#id_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3); then
+		# If whiptail returns a non-zero exit code (e.g., user pressed Cancel or ESC),
+		# exit the function without returning a value.
+		return 0 # Indicate cancellation (not an error, but no selection made)
+	fi
+
+	# Retrieve the original value using the associative array. This is the "superior" part,
+	# as it's a direct, safe lookup without any fragile re-parsing.
+	selected_item="${id_map[$choice]}"
+	printf '%s' "$selected_item" # Print the selected item to stdout for the caller.
+	return 0                     # Indicate success
+}
+
+# Main application loop: This keeps the menu running until the user explicitly exits.
+while true; do
+	_MASTER_CHOICE=$(whiptail --fullbuttons --title "NIC [ETHERNET] SPEED CONFIGURATOR" --menu "Select an action:" 0 0 0 \
+		"1" "Set NIC [ETHERNET] SPEED" \
+		"2" "View NIC [ETHERNET] CONFIGURATION & CAPABILITIES" \
+		"3" "Help / About" \
+		"4" "Exit" 3>&1 1>&2 2>&3) || {
+		# If the user cancels the main menu, an empty choice is returned,
+		# or whiptail exits with non-zero, so we break the loop and exit the script.
+		echo "User cancelled. Exiting."
+		break
+	}
+
+	# Command to discover ethernet-like interfaces.
+	# It parses 'ip -o link show' to find lines indicating a MAC address ('link/ether')
+	# and extracts the interface name (the second field). This is more portable than
+	# hardcoding 'enp.*' and works across various Linux distributions and naming conventions.
+	NIC_DISCOVERY_CMD="ip -o link show | awk -F': ' '/link\/ether/ {print \$2}'"
+
+	case $_MASTER_CHOICE in
+	1) # ACTION: Set NIC Speed
+		_SELECTED_NIC=$(_select_from_menu "Select NIC [ETHERNET interface]" "$NIC_DISCOVERY_CMD")
+
+		# If no NIC was selected (e.g., user cancelled the sub-menu), return to the main menu.
+		if [[ -z "$_SELECTED_NIC" ]]; then
+			whiptail --title "Cancelled" --msgbox "No NIC selected. Returning to main menu." 0 0
+			continue
+		fi
+
+		# Command to get available speeds that explicitly support Full Duplex from ethtool.
+		# It extracts speeds like "100baseT/Full" or "1000baseX/Full", extracts the numeric
+		# part, sorts them numerically in reverse, and shows only unique values.
+		SPEED_DISCOVERY_CMD="ethtool '$_SELECTED_NIC' | grep -oE '[0-9]+base[^/ ]+/Full' | sed -E 's|base.*||' | sort -rnu"
+		_SELECTED_SPEED=$(_select_from_menu "Select Speed for [$_SELECTED_NIC]" "$SPEED_DISCOVERY_CMD")
+
+		# If no speed was selected, return to the main menu.
+		if [[ -z "$_SELECTED_SPEED" ]]; then
+			whiptail --title "Cancelled" --msgbox "No speed selected. Returning to main menu." 0 0
+			continue
+		fi
+
+		# Inform the user that settings are being applied.
+		whiptail --title "Applying Settings" --infobox "Setting speed to $_SELECTED_SPEED Mbps on $_SELECTED_NIC..." 0 0
+		# Apply the ethtool settings: disable auto-negotiation, set specific speed, and force full duplex.
+		if ! sudo ethtool -s "$_SELECTED_NIC" autoneg off speed "$_SELECTED_SPEED" duplex full; then
+			whiptail --title "Execution Failed" --msgbox "Error: 'ethtool' was unable to set the speed. This usually means the hardware or driver does not support forcing this specific speed/duplex mode." 0 0
+			continue
+		fi
+		sleep 0.2 # Small delay to allow ethtool command to complete.
+		# Bring the network link down and then up to ensure the new settings take effect.
+		# A longer delay (2s) is used because many switches have a 'link debounce'
+		# or 'hold-down' timer. If the link is down for too short a time, the
+		# switch may not realize the link needs to be renegotiated.
+		sudo ip link set "$_SELECTED_NIC" down
+		sleep 2.0
+		sudo ip link set "$_SELECTED_NIC" up
+		sleep 4 # Allow the interface to settle after being brought up.
+
+		# NOTE - IF THERES ISSUES WITH "$CURRENT_SPEED" != "$_SELECTED_SPEED" ... its most likely due to not enough timeout / sleep delay
+		# To  Allow the interface to settle after being brought up ^^^^^^  from previous commands: ip link set down / up
+
+		# Verify the change by re-reading the current speed with ethtool.
+		# We loop because hardware links can take several seconds to stabilize after a reset.
+		_RETRIES=0    # Initialize retry counter
+		MAX_RETRIES=8 # Maximum number of retry attempts
+		CURRENT_SPEED="unknown"
+
+		while [ $_RETRIES -lt $MAX_RETRIES ]; do
+			# Extract current speed, stripping all whitespace and non-numeric characters.
+			CURRENT_SPEED=$(sudo ethtool "$_SELECTED_NIC" | awk -F'Speed:' '{print $2}' | tr -dc '0-9')
+
+			if [[ "$CURRENT_SPEED" == "$_SELECTED_SPEED" ]]; then
+				break
+			fi
+
+			# Provide feedback to terminal if the script was launched from one.
+			echo "Verification attempt $((_RETRIES + 1))/$MAX_RETRIES: Current speed is '${CURRENT_SPEED:-unknown}', expected '$_SELECTED_SPEED'..." >&2
+			sleep 1
+			((_RETRIES += 1))
+		done
+
+		if [[ "$CURRENT_SPEED" == "$_SELECTED_SPEED" ]]; then
+			whiptail --title "Success" --msgbox "Successfully set speed for $_SELECTED_NIC to $CURRENT_SPEED Mbps." 0 0
+		else
+			# If the speed doesn't match, inform the user and suggest next steps.
+			whiptail --title "Verification Failed" --msgbox "Attempted to set speed to $_SELECTED_SPEED Mbps, but current speed is ${CURRENT_SPEED:-unknown} Mbps.\n\nThis can happen if the switch/peer doesn't support the forced speed, the cable is faulty, or the driver requires a restart." 0 0
+			# Offer to restart NetworkManager, as this often resolves issues with speed changes.
+			if whiptail --title "Restart NetworkManager?" --fullbuttons --defaultno --yesno "Would you like to restart NetworkManager now to apply changes?" 0 0; then
+				sudo systemctl restart NetworkManager
+				whiptail --title "NetworkManager Restarted" --msgbox "NetworkManager has been restarted. Please check the NIC speed again." 0 0
+			else
+				whiptail --title "Action Required" --msgbox "Please restart NetworkManager or replug the network cable manually to apply the speed change." 0 0
+			fi
+		fi
+		;;
+
+	2) # ACTION: View NIC Configuration
+		_SELECTED_NIC=$(_select_from_menu "Select NIC [ETHERNET interface] to view" "$NIC_DISCOVERY_CMD")
+
+		# If no NIC was selected, return to the main menu.
+		if [[ -z "$_SELECTED_NIC" ]]; then
+			whiptail --title "Cancelled" --msgbox "No NIC selected. Returning to main menu." 0 0
+			continue
+		fi
+
+		# Use 'mktemp' to create a secure, unique temporary file for ethtool output.
+		# This prevents race conditions and potential security vulnerabilities.
+		TMP_FILE=$(mktemp)
+		# Set a trap to ensure the temporary file is removed automatically
+		# when the script exits, or on specific signals (HUP, INT, QUIT, TERM).
+		trap 'rm -f "$TMP_FILE"' EXIT HUP INT QUIT TERM
+
+		# Redirect the ethtool output to the temporary file.
+		sudo ethtool "$_SELECTED_NIC" >"$TMP_FILE"
+
+		# Display the contents of the ethtool output in a scrollable whiptail textbox.
+		whiptail --title "Configuration for [$_SELECTED_NIC]" --scrolltext --textbox "$TMP_FILE" 0 0
+
+		# Clear the trap for this specific temporary file, as it's no longer needed
+		# and will be explicitly removed. This prevents accidental deletion of other
+		# temporary files if they were to be created later with their own traps.
+		trap - EXIT HUP INT QUIT TERM
+		rm -f "$TMP_FILE" # Explicitly remove the temporary file.
+		;;
+
+	3) # ACTION: Help / About
+		whiptail --title "Help / About" --msgbox "Script Name: NIC [ETHERNET] SPEED CONFIGURATOR\n\nDescription:\nThis script provides a TUI for managing Ethernet NICs. It allows users to view NIC configuration, capabilities, and manually set the speed and duplex mode.\n\nKey Features:\n- Dynamic discovery of Ethernet NICs.\n- Dynamic discovery of supported link speeds.\n- Set NIC speed, duplex, and auto-negotiation.\n- View detailed NIC information via ethtool.\n- Verification of speed changes.\n- Option to restart NetworkManager.\n\nUsage:\nRun with sudo privileges:\nsudo ./custom-NETWORKING-ETHTOOL-SET-NIC-SPEED\n\nDependencies:\n- bash (v4+)\n- whiptail\n- iproute2 (ip command)\n- ethtool\n- sudo" 0 0
+		;;
+
+	4) # ACTION: Exit the script
+		echo "Exiting."
+		break # Exit the main application loop.
+		;;
+
+	*) # Fallback for unexpected choices (should not be reached with fullbuttons)
+		whiptail --title "Error" --msgbox "Invalid choice. Exiting." 0 0
+		exit 1 # Exit the script with an error status.
+		;;
+	esac
+done
+
+# Unset the custom NEWT_COLORS environment variable to avoid affecting subsequent shell sessions.
+unset NEWT_COLORS
+exit 0 # Explicitly exit with a success status.
