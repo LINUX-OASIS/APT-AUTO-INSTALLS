@@ -1,0 +1,321 @@
+GO LEARNING REFERENCE (Modern Go, 2026)
+======================================
+
+GOAL
+----
+Build:
+- Standard-library-only Go applications
+- Dependency-free Go applications
+- Single-binary executables
+- Statically linked binaries (when using pure Go with CGO disabled)
+
+This is an excellent philosophy for Linux CLI/TUI utilities.
+
+------------------------------------------------------------
+TERMINOLOGY
+------------------------------------------------------------
+
+Standard Library
+    Packages that ship with Go itself.
+
+Examples:
+    os
+    io
+    fmt
+    path/filepath
+    strings
+    bytes
+    time
+    sync
+    context
+    net
+    net/http
+    encoding/json
+    crypto/*
+    archive/tar
+    compress/gzip
+    flag
+    log
+    os/exec
+
+No third-party downloads required.
+
+
+Standard-Library-Only
+    The project imports ONLY Go's standard library packages.
+
+
+Dependency-Free
+    No third-party Go modules.
+    Everything comes from Go itself.
+
+
+Static Typing
+    Variables have explicit types known at compile time.
+
+Example:
+    var age int
+    var name string
+    var enabled bool
+
+
+System Programming
+    Writing programs that interact directly with the operating system.
+
+Examples:
+    os.Open()
+    os.Stat()
+    os.Remove()
+    os.Mkdir()
+    os.Chmod()
+    filepath.WalkDir()
+    io.Copy()
+
+Instead of calling shell commands like:
+    cp
+    mv
+    rm
+    chmod
+    stat
+    find
+
+
+System Calls (Syscalls)
+    Linux provides kernel functions like:
+
+        open()
+        read()
+        write()
+        close()
+        stat()
+        unlink()
+        mkdir()
+
+Go's standard library wraps these syscalls.
+
+Example:
+
+    os.Open()   -> eventually calls open()
+    os.Remove() -> eventually calls unlink()
+
+You normally use the Go API rather than calling syscalls directly.
+
+
+Compiled Language
+    Go compiles source code into a native executable.
+
+No interpreter required.
+
+
+Single-Binary Application
+    Your application is distributed as one executable.
+
+No runtime.
+No virtual environment.
+No dependency folders.
+
+
+Self-Contained Binary
+    Copy the executable to another compatible machine and run it.
+
+No Go installation required.
+
+
+Statically Linked Binary
+    The executable contains its required code at link time.
+
+NOTE:
+Using only the standard library and disabling CGO commonly produces
+a fully static executable for typical CLI tools, but "standard library"
+and "statically linked" are separate concepts.
+
+------------------------------------------------------------
+MY PROJECT PHILOSOPHY
+------------------------------------------------------------
+
+"A dependency-free, standard-library-only Go CLI distributed as a
+single statically linked binary."
+
+or
+
+"A statically linked Go binary that uses only the Go standard library."
+
+------------------------------------------------------------
+BUILD COMMAND
+------------------------------------------------------------
+
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w"
+
+Meaning:
+
+CGO_ENABLED=0
+    Disable CGO.
+    Do not use C libraries when pure-Go implementations are available.
+    Improves portability.
+
+-trimpath
+    Removes local filesystem paths from the binary.
+    Makes builds cleaner and more reproducible.
+
+-ldflags="-s -w"
+
+    -s
+        Strip symbol table.
+
+    -w
+        Remove DWARF debugging information.
+
+Result:
+    Smaller executable.
+
+------------------------------------------------------------
+VERIFY THE BINARY
+------------------------------------------------------------
+
+file mytool
+
+ldd mytool
+
+If ldd outputs:
+
+    not a dynamic executable
+
+then the binary is statically linked.
+
+------------------------------------------------------------
+CROSS COMPILATION
+------------------------------------------------------------
+
+Linux AMD64
+
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+go build -trimpath -ldflags="-s -w"
+
+Windows AMD64
+
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+go build -trimpath -ldflags="-s -w"
+
+Linux ARM64
+
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+go build -trimpath -ldflags="-s -w"
+
+------------------------------------------------------------
+MODERN GO
+------------------------------------------------------------
+
+Prefer:
+
+    os.ReadFile()
+
+instead of
+
+    ioutil.ReadFile()
+
+Use:
+
+    any
+
+instead of
+
+    interface{}
+
+Use modules (go.mod).
+
+Use generics where they genuinely simplify code.
+
+Avoid tutorials older than Go 1.18 unless maintaining legacy code.
+
+------------------------------------------------------------
+BOOK RECOMMENDATION
+------------------------------------------------------------
+
+Book:
+
+    Learning Go
+    Author: Jon Bodner
+
+Reason:
+
+- Teaches idiomatic Go.
+- Focuses on the Go way of thinking.
+- Covers the modern package/module workflow.
+- The language fundamentals remain highly relevant.
+- The official Go documentation can fill in any newer APIs or additions.
+
+------------------------------------------------------------
+LEARNING STRATEGY
+------------------------------------------------------------
+
+1. Read Learning Go from beginning to end.
+
+2. Focus on understanding:
+    - packages
+    - structs
+    - interfaces
+    - slices
+    - maps
+    - functions
+    - error handling
+    - goroutines
+    - channels
+
+3. Write all new code using modern APIs.
+
+4. Prefer the standard library first.
+
+5. Add third-party packages only when they provide a clear benefit.
+
+------------------------------------------------------------
+WHY GO FITS MY STYLE
+------------------------------------------------------------
+
+Go is ideal for writing Linux utilities such as:
+
+- Disk managers
+- Btrfs tools
+- RAID helpers
+- NBD utilities
+- SSH tools
+- CLI applications
+- TUI applications
+- System administration utilities
+- Automation tools
+
+Think of Go as:
+
+"Bash with static typing, compiled binaries, concurrency,
+and a huge standard library."
+
+Instead of chaining shell commands:
+
+    find
+    grep
+    awk
+    sed
+    sort
+
+you'll increasingly use Go packages like:
+
+    filepath
+    strings
+    regexp
+    sort
+    io
+    os
+
+The result is faster, more portable, easier-to-test software.
+
+------------------------------------------------------------
+DEFAULT MINDSET
+------------------------------------------------------------
+
+Standard Library First.
+
+If the standard library already solves the problem well,
+use it.
+
+Reach for third-party dependencies only when they provide
+substantial value that would be difficult or impractical
+to implement yourself.

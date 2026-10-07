@@ -1,0 +1,244 @@
+#!/bin/bash
+
+# =============================================================================
+#
+# Bash Color & Style Reference Utility
+#
+# Purpose:
+#   This script serves as a comprehensive visual reference for ANSI escape
+#   codes in Bash. It demonstrates various methods for coloring and styling
+#   terminal text and, most importantly, prints the raw escape code for
+#   each example, allowing developers to easily copy and paste them into
+#   their own scripts.
+#
+# Sections:
+#   - Predefined color variables for common use.
+#   - Demonstration of the 256-color (8-bit) palette.
+#   - Demonstration of text styles (Bold, Italic, etc.).
+#   - Example of 24-bit "True Color" gradients.
+#   - A continuous 24-bit color ribbon.
+#   - Reference tables for common color codes.
+#
+# =============================================================================
+
+# General Note: In some terminal configurations or custom .bashrc profiles,
+# it's best practice to define colors in variables to prevent unexpected output.
+# For more information, see: https://www.shellhacks.com/bash-colors/
+
+# =====================================================
+# Bash Color Code Reference Script
+# =====================================================
+# Demonstrates ANSI escape codes for colors and styles.
+
+# --- Predefined Foreground Color Variables ---
+declare -r fLightRed="\e[91m"
+declare -r fLightGreen="\e[92m"
+declare -r fLightYellow="\e[93m"
+declare -r fLightBlue="\e[94m"
+declare -r fLightMagenta="\e[95m"
+declare -r fLightCyan="\e[96m"
+declare -r fRed="\e[31m"
+declare -r fGreen="\e[32m"
+declare -r fYellow="\e[33m"
+declare -r fBlue="\e[34m"
+declare -r fMagenta="\e[35m"
+declare -r fCyan="\e[36m"
+declare -r fOrange="\e[38;5;214m" # Example of a 256-color code
+
+# --- Style Code Variables ---
+declare -r fB="\e[1m" # Bold
+declare -r fI="\e[3m" # Italic
+declare -r fU="\e[4m" # Underline
+
+# --- Reset All Attributes ---
+declare -r fEND="\e[0m"
+
+# =====================================================
+# Functions
+# =====================================================
+
+# Displays the set of predefined color variables, showing the color,
+# the variable name, and its corresponding raw escape code.
+function display_colors() {
+    echo -e -n "${fLightRed}Light Red${fEND}"
+    echo " [[ VAR: fLightRed, CODE: \\e[91m ]]"
+    echo -e -n "${fLightGreen}Light Green${fEND}"
+    echo " [[ VAR: fLightGreen, CODE: \\e[92m ]]"
+    echo -e -n "${fLightYellow}Light Yellow${fEND}"
+    echo " [[ VAR: fLightYellow, CODE: \\e[93m ]]"
+    echo -e -n "${fRed}Red${fEND}"
+    echo " [[ VAR: fRed, CODE: \\e[31m ]]"
+    echo -e -n "${fGreen}Green${fEND}"
+    echo " [[ VAR: fGreen, CODE: \\e[32m ]]"
+    echo -e -n "${fYellow}Yellow${fEND}"
+    echo " [[ VAR: fYellow, CODE: \\e[33m ]]"
+    echo -e -n "${fBlue}Blue${fEND}"
+    echo " [[ VAR: fBlue, CODE: \\e[34m ]]"
+    echo -e -n "${fMagenta}Magenta${fEND}"
+    echo " [[ VAR: fMagenta, CODE: \\e[35m ]]"
+    echo -e -n "${fCyan}Cyan${fEND}"
+    echo " [[ VAR: fCyan, CODE: \\e[36m ]]"
+    echo -e -n "${fOrange}Orange${fEND}"
+    echo " [[ VAR: fOrange, CODE: \\e[38;5;214m ]]"
+}
+
+# Iterates through the full 256-color (8-bit) palette and prints a sample
+# of each color along with its raw escape code.
+# Takes a prefix argument: "38;5;" for foreground, "48;5;" for background.
+function display_256_colors() {
+    local prefix=$1
+    for var in {0..255}; do
+        echo -e -n "\\e[${prefix}${var}m  example text here  ${fEND}"
+        echo " [[ COLOR:: \\e[${prefix}${var}m ]]"
+    done
+}
+
+# Iterates through the 256-color palette, applying a specific text style.
+# Takes a style code (e.g., 1 for bold) and a style name as arguments.
+function display_styled_256_colors() {
+    local style_code=$1
+    local style_name=$2
+    echo -e "\nDisplaying 256 Colors with ${style_name} Text:"
+    echo "Syntax: \\e[${style_code};38;5;<0-255>m"
+    for i in {0..255}; do
+        echo -e -n "\\e[${style_code};38;5;${i}m  Styled Example  ${fEND}"
+        echo " [[ STYLE: ${style_name}, COLOR: ${i} :: \\e[${style_code};38;5;${i}m ]]"
+    done
+}
+
+# =====================================================
+# Script Execution
+# =====================================================
+echo "Displaying Predefined Colors:"
+display_colors
+
+echo -e "\nDisplaying 256 Foreground Colors:"
+printf 'Syntax: \\e[38;5;<0-255>m'
+display_256_colors "38;5;"
+
+echo -e "\nDisplaying 256 Background Colors:"
+printf 'Syntax: \\e[48;5;<0-255>m'
+display_256_colors "48;5;"
+
+# --- Display 256 Colors with Styles ---
+echo -e "\nDisplaying 256 Colors with Styles:"
+printf 'Syntax: \\e[<STYLE 1-9>;38;5;<0-255>m'
+echo -e "\n"
+
+display_styled_256_colors 1 "Bold"
+display_styled_256_colors 5 "Blinking"
+display_styled_256_colors 4 "Underline"
+
+# =====================================================
+# How to technically refer to these (what they are called)
+# =====================================================
+echo -e "\n TEMINOLOGY"
+echo "Formal: \"ANSI escape sequences (SGR codes)\""
+echo "Friendly / script comments: \"ANSI color codes\""
+echo "Friendly / script comments: \"ANSI color raw escape sequence codes\""
+echo "SGR = (Select Graphic Rendition)"
+echo -e "\n"
+
+# =====================================================
+# Style Attributes with Escape Codes
+# =====================================================
+echo -e "\nStyle Attributes with Escape Codes (Formatted Table):"
+printf "%35s %s\n" \
+    "$(echo -e '\e[1mBold\e[0m'):" "[[ CODE:: \\e[1m ]]" \
+    "$(echo -e '\e[3mItalic\e[0m'):" "[[ CODE:: \\e[3m ]]" \
+    "$(echo -e '\e[4mUnderline\e[0m'):" "[[ CODE:: \\e[4m ]]" \
+    "$(echo -e '\e[5mBlinking\e[0m'):" "[[ CODE:: \\e[5m ]]" \
+    "$(echo -e '\e[8mHidden/Invisible\e[0m'):" "[[ CODE:: \\e[8m ]]" \
+    "$(echo -e '\e[9mStrike-through\e[0m'):" "[[ CODE:: \\e[9m ]]" \
+    "Reset all attributes:" "[[ CODE:: \\e[0m ]]"
+
+# --- TABLE to demonstrate how to combine foreground with background / or to document to user what section corresponds to what for the raw bash escape sequence code HERE---
+# 🎀 ANSI Escape Sequence Breakdown 🎀
+
+printf "\n"
+printf "% -15s │ % -50s\n" "Part" "Meaning"
+printf "% -15s─┼─% -50s\n" "───────────────" "─────────────────────────────────────────────────────"
+printf "% -15s │ % -50s\n" "\\e[" "Escape sequence introducer"
+printf "% -15s │ % -50s\n" "4" "Text attribute: Underlined text"
+printf "% -15s │ % -50s\n" "" "Other examples: 0=reset, 1=bold, 5=blink, 7=inverse"
+printf "% -15s │ % -50s\n" "38;5;255" "Foreground color in 256-color mode"
+printf "% -15s │ % -50s\n" "" "38=set foreground color"
+printf "% -15s │ % -50s\n" "" "5=next number is a color index"
+printf "% -15s │ % -50s\n" "" "255=bright white (index 255)"
+printf "% -15s │ % -50s\n" "m" "End of SGR command"
+printf "% -15s │ % -50s\n" "\\e[0m" "Reset all attributes to default"
+printf "\n"
+
+# =====================================================
+# 24-bit True Color Demonstration
+# =====================================================
+# Modern terminals support 24-bit color (16+ million colors).
+# Syntax: \\e[38;2;R;G;Bm for foreground, \\e[48;2;R;G;Bm for background.
+
+# Displays a gradient of 24-bit colors to demonstrate the syntax.
+# It shows both a background and foreground example for each color.
+function display_true_color_gradient() {
+    echo -e "\nDisplaying a 24-bit True Color Gradient (with codes):"
+    for i in {0..255..16}; do
+        # This creates a simple gradient from green to red.
+        r=$((255 - i))
+        g=$i
+        b=0
+        echo -e -n "\\e[48;2;${r};${g};${b}m  \\e[0m \\e[38;2;${r};${g};${b}m#\\e[0m"
+        echo " [[ BG: \\e[48;2;${r};${g};${b}m, FG: \\e[38;2;${r};${g};${b}m ]]"
+    done
+    echo -e "\n"
+}
+
+# Displays a continuous ribbon of 24-bit color to showcase the smooth
+# transitions possible with true color support.
+function display_true_color_ribbon() {
+    echo -e "\nDisplaying a 24-bit True Color Ribbon:"
+    for i in {0..255}; do
+        # This math creates a flowing rainbow effect.
+        r=$(((i * 2) % 256))
+        g=$(((255 - i) % 256))
+        b=$(((i * 4) % 256))
+        echo -e -n "\\e[48;2;${r};${g};${b}m \\e[0m"
+    done
+    echo -e "\n"
+}
+
+display_true_color_gradient
+
+display_true_color_ribbon
+
+read -p "press ENTER to continue ::"
+
+#####################################################################################
+# REFERENCE TABLES
+#####################################################################################
+
+# ---
+# Standard and High-Intensity Colors ---
+# Color		Foreground Code	Background Code
+# Black		30		40
+# Red		31		41
+# Green		32		42
+# Yellow	33		43
+# Blue		34		44
+# Magenta	35		45
+# Cyan		36		46
+# Light Gray	37		47
+# Gray		90		100
+# Light Red	91		101
+# Light Green	92		102
+# Light Yellow	93		103
+# Light Blue	94		104
+# Light Magenta	95		105
+# Light Cyan	96		106
+# White		97		107
+
+# ---
+# Text Style Codes
+# Code	Description
+# 0	Reset/Normal
+# 1	Bold text
+# 2	Faint text
+# 3	Italics
+# 4	Underlined text

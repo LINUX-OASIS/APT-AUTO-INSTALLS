@@ -1,0 +1,26 @@
+#!/bin/bash
+RED="\e[31m"
+ENDCOLOR="\e[0m"
+
+echo -e "${RED}CHECKSUMS! CHECKSUMS! CHECKSUMS! CHECKSUMS!${ENDCOLOR}"
+echo -e "${RED}CHECKSUMS! CHECKSUMS! CHECKSUMS! CHECKSUMS!${ENDCOLOR}"
+echo ""
+echo ":: this program will perform checksums(md5sum,crc32,sha256sum) on a given file ::"
+echo ""
+echo "  specify the file to perform checksums on: absolute path is recommended:"
+read -p '  file path: ' FILE
+
+echo ""
+echo ":: md5sum ::"
+md5sum $FILE
+echo ""
+echo ""
+
+echo ":: crc32 ::"
+crc32 $FILE
+echo ""
+echo ""
+
+echo ":: sha256sum ::"
+sha256sum $FILE
+

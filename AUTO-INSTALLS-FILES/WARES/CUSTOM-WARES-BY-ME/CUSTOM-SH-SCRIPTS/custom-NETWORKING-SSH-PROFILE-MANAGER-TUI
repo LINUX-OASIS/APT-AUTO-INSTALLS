@@ -1,0 +1,1011 @@
+#!/bin/bash
+
+# ==============================================================================
+#
+#               SSH CONNECTION MANAGER (TUI)
+#
+#  A professional utility for managing SSH connection profiles, OpenSSH client
+#  aliases (~/.ssh/config), and automating passwordless Ed25519 authentication.
+#
+#  Author: LINUX-OASIS / Gemini CLI
+#  Version: 2.0 (SSH Config Alias & Technical Suite)
+#
+#  Architecture:
+#    - Superior Pattern: Atomic data acquisition via readarray + associative
+#      array mapping for robust TUI interaction.
+#    - Native OpenSSH Integration: Full CRUD lifecycle for ~/.ssh/config aliases
+#      (Creation, Edit in-place, Deletion, Formatted Viewing & Entry Inspection).
+#    - Self-Healing: Automatic dependency resolution (openssh, whiptail, gawk).
+#    - Security Enforced: Strict chmod 700 on ~/.ssh and chmod 600 on ~/.ssh/config.
+#    - Professional UI: High-contrast technical color palette (Newt).
+#
+# ==============================================================================
+
+# --- Display professional banner ---
+echo "░▐█▄▄▄▄▄▄▄▄▄█▄☆░███████████░▓▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓◤╬▀░▐▓▓▓▓▓▓▌▀█░░░█▀░▒░░"
+echo "SSH CONNECTION MANAGER (v2.0) - Technical & SSH Alias Suite"
+echo "Made By.............. LINUX-OASIS"
+
+# --- Root Enforcement ---
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[1;48;5;202m This script requires root privileges to manage profiles in /bin. \e[0m"
+	echo "Relaunching with sudo..."
+	sudo env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" "$0" "$@"
+	exit $?
+fi
+
+# --- Configuration & Environment ---
+CONFIG_DIR="/bin/CUSTOM-SSH-MANAGER"
+PROFILES_FILE="$CONFIG_DIR/profiles.conf"
+
+# Ensure configuration environment exists
+sudo mkdir -p "$CONFIG_DIR"
+sudo touch "$PROFILES_FILE"
+sudo chmod 777 "$CONFIG_DIR"
+sudo chmod 666 "$PROFILES_FILE"
+
+# Determine Original User's Home and SSH paths (robust fallback)
+REAL_USER=${SUDO_USER:-${USER:-$(logname 2>/dev/null || whoami)}}
+REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+SSH_DIR="$REAL_HOME/.ssh"
+SSH_KEY_PATH="$SSH_DIR/id_ed25519"
+SSH_CONFIG_FILE="$SSH_DIR/config"
+
+# Professional High-Contrast Theme (Cisco/Industrial standard)
+export NEWT_COLORS='
+root=white,black
+window=white,black
+border=white,black
+shadow=black,gray
+title=brightcyan,black
+button=black,yellow
+actbutton=white,brightcyan
+checkbox=brightcyan,black
+actcheckbox=black,brightcyan
+entry=black,brightcyan
+label=brightcyan,black
+listbox=white,black
+actlistbox=black,brightcyan
+textbox=white,black
+acttextbox=black,brightcyan
+'
+
+# --- Initialization & Dependency Resolution ---
+# Proactively installs missing dependencies to ensure a "self-healing" script.
+FUN_CHECK_DEPENDENCIES() {
+	local MISSING_DEPS=()
+	local PKG_MAP=(
+		"whiptail:whiptail"
+		"ssh:openssh-client"
+		"ssh-keygen:openssh-client"
+		"ssh-copy-id:openssh-client"
+		"column:bsdextrautils"
+		"awk:gawk"
+	)
+
+	for item in "${PKG_MAP[@]}"; do
+		local cmd="${item%%:*}"
+		local pkg="${item##*:}"
+		if ! command -v "$cmd" &>/dev/null; then
+			MISSING_DEPS+=("$pkg")
+		fi
+	done
+
+	if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+		echo "Installing missing dependencies: ${MISSING_DEPS[*]}..."
+		sudo apt update && sudo apt install -y "${MISSING_DEPS[@]}"
+	fi
+}
+
+# Ensure ~/.ssh and ~/.ssh/config exist with secure ownership & permissions (0700 / 0600)
+FUN_ENSURE_SSH_CONFIG() {
+	local user_group
+	user_group=$(id -gn "$REAL_USER" 2>/dev/null || id -g "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
+
+	if [ ! -d "$SSH_DIR" ]; then
+		mkdir -p "$SSH_DIR"
+		chmod 700 "$SSH_DIR"
+		chown "$REAL_USER:$user_group" "$SSH_DIR"
+	fi
+
+	if [ ! -f "$SSH_CONFIG_FILE" ]; then
+		touch "$SSH_CONFIG_FILE"
+		chmod 600 "$SSH_CONFIG_FILE"
+		chown "$REAL_USER:$user_group" "$SSH_CONFIG_FILE"
+	fi
+}
+
+# Check if a specific Host alias exists in ~/.ssh/config
+FUN_SSH_ALIAS_EXISTS() {
+	local target="$1"
+	[[ ! -f "$SSH_CONFIG_FILE" ]] && return 1
+	awk -v target="$target" '
+	BEGIN { found = 0 }
+	/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+		line = $0
+		sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+		n = split(line, hosts, /[ \t]+/)
+		for (i = 1; i <= n; i++) {
+			if (hosts[i] == target) {
+				found = 1
+				exit
+			}
+		}
+	}
+	END { exit(!found) }
+	' "$SSH_CONFIG_FILE"
+}
+
+# Enforce secure permissions and user ownership for ~/.ssh/config
+FUN_FIX_CONFIG_PERMS() {
+	local user_group
+	user_group=$(id -gn "$REAL_USER" 2>/dev/null || id -g "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
+	chmod 600 "$SSH_CONFIG_FILE"
+	chown "$REAL_USER:$user_group" "$SSH_CONFIG_FILE"
+}
+
+# ==============================================================================
+# SECTION 1: OpenSSH Client Aliases (~/.ssh/config) Management
+# ==============================================================================
+
+# Function: View All SSH Config Aliases in a formatted technical table
+FUN_VIEW_SSH_ALIASES() {
+	FUN_ENSURE_SSH_CONFIG
+
+	if [ ! -s "$SSH_CONFIG_FILE" ]; then
+		whiptail --scrolltext --title "SSH Config Aliases" --msgbox "No SSH aliases found in $SSH_CONFIG_FILE." 0 0
+		return
+	fi
+
+	local count
+	count=$(awk 'BEGIN{c=0} /^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/{c++} END{print c}' "$SSH_CONFIG_FILE")
+	if [ "$count" -eq 0 ]; then
+		whiptail --scrolltext --title "SSH Config Aliases" --msgbox "No 'Host' entries found in $SSH_CONFIG_FILE." 0 0
+		return
+	fi
+
+	clear
+	echo "=========================================================================================="
+	echo "                    OPENSSH CLIENT CONFIG ALIASES (~/.ssh/config)                         "
+	echo "=========================================================================================="
+	printf "%-18s %-20s %-14s %-6s %-22s %-6s\n" "ALIAS (Host)" "HOSTNAME" "USER" "PORT" "IDENTITY FILE" "ALIVE"
+	echo "------------------------------------------------------------------------------------------"
+	awk '
+	BEGIN {
+		in_host = 0; host = ""; hostname = ""; user = ""; port = ""; idfile = ""; interval = ""
+	}
+	function flush_entry() {
+		if (host != "") {
+			printf "%-18s %-20s %-14s %-6s %-22s %-6s\n", host, (hostname ? hostname : "-"), (user ? user : "-"), (port ? port : "22"), (idfile ? idfile : "-"), (interval ? interval "s" : "-")
+		}
+	}
+	/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+		flush_entry()
+		line = $0
+		sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+		sub(/[ \t]+$/, "", line)
+		host = line
+		hostname = ""; user = ""; port = ""; idfile = ""; interval = ""
+		in_host = 1
+		next
+	}
+	/^[ \t]*[Mm][Aa][Tt][Cc][Hh][ \t]+/ {
+		flush_entry(); host = ""; in_host = 0; next
+	}
+	in_host {
+		line = $0
+		sub(/^[ \t]+/, "", line)
+		if (line ~ /^[#;]/ || line == "") next
+		split(line, parts, /[ \t=]+/)
+		dir = tolower(parts[1])
+		val = substr(line, length(parts[1]) + 1)
+		sub(/^[ \t=]+/, "", val)
+		sub(/[ \t]+$/, "", val)
+
+		if (dir == "hostname") hostname = val
+		else if (dir == "user") user = val
+		else if (dir == "port") port = val
+		else if (dir == "identityfile") idfile = val
+		else if (dir == "serveraliveinterval") interval = val
+	}
+	END { flush_entry() }
+	' "$SSH_CONFIG_FILE"
+	echo "------------------------------------------------------------------------------------------"
+	echo -e "\e[1;33mMaster Machine Usage:\e[0m You can simply run: \e[1;32mssh <alias>\e[0m in any terminal."
+	echo "=========================================================================================="
+	echo ""
+	read -r -p "Press Enter to continue..."
+}
+
+# Function: Inspect specific alias configuration details
+FUN_INSPECT_SSH_ALIAS() {
+	FUN_ENSURE_SSH_CONFIG
+
+	local raw_aliases=()
+	readarray -t raw_aliases < <(awk '/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+		line = $0
+		sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+		sub(/[ \t]+$/, "", line)
+		print line
+	}' "$SSH_CONFIG_FILE" 2>/dev/null)
+
+	if [ ${#raw_aliases[@]} -eq 0 ]; then
+		whiptail --scrolltext --title "Information" --msgbox "No SSH aliases found in $SSH_CONFIG_FILE." 0 0
+		return
+	fi
+
+	local options=()
+	declare -A id_map
+	local i=1
+	for a in "${raw_aliases[@]}"; do
+		[[ -z "$a" ]] && continue
+		options+=("$i" "$a")
+		id_map[$i]="$a"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "Inspect SSH Alias" --menu "Select an alias to view details:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$choice" ]] && return
+
+	local sel_alias="${id_map[$choice]}"
+	local entry_details
+	entry_details=$(awk -v target="$sel_alias" '
+	BEGIN { in_target = 0 }
+	/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+		line = $0
+		sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+		n = split(line, hosts, /[ \t]+/)
+		match_found = 0
+		for (i = 1; i <= n; i++) {
+			if (hosts[i] == target) { match_found = 1; break }
+		}
+		if (match_found) { in_target = 1; print $0; next }
+		else { in_target = 0 }
+	}
+	/^[ \t]*[Mm][Aa][Tt][Cc][Hh][ \t]+/ { in_target = 0 }
+	in_target { print $0 }
+	' "$SSH_CONFIG_FILE")
+
+	whiptail --scrolltext --title "Configuration: $sel_alias" --msgbox "$entry_details" 0 0
+}
+
+# Function: View raw ~/.ssh/config file directly in terminal
+FUN_VIEW_RAW_SSH_CONFIG() {
+	FUN_ENSURE_SSH_CONFIG
+
+	clear
+	if [ -s "$SSH_CONFIG_FILE" ]; then
+		cat "$SSH_CONFIG_FILE"
+		[ -n "$(tail -c 1 "$SSH_CONFIG_FILE" 2>/dev/null)" ] && echo ""
+	else
+		echo "File $SSH_CONFIG_FILE is currently empty."
+	fi
+	echo ""
+	read -r -p "Press Enter to continue..."
+}
+
+# Function: Create a new SSH Config Alias (~/.ssh/config)
+FUN_CREATE_SSH_ALIAS() {
+	FUN_ENSURE_SSH_CONFIG
+
+	local A_NAME A_HOST A_USER A_PORT A_KEY A_ALIVE
+
+	A_NAME=$(whiptail --scrolltext --title "New SSH Alias (~/.ssh/config)" --inputbox "Enter unique alias name (e.g. lab, prod-srv):" 0 0 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$A_NAME" ]] && return
+	A_NAME="${A_NAME// /_}"
+
+	# Check uniqueness
+	if FUN_SSH_ALIAS_EXISTS "$A_NAME"; then
+		whiptail --scrolltext --title "Error" --msgbox "Alias '$A_NAME' already exists in ~/.ssh/config.\nPlease use the Edit function or choose a different name." 0 0
+		return
+	fi
+
+	A_HOST=$(whiptail --scrolltext --title "Remote Configuration" --inputbox "Enter target IP address or HostName (e.g. 100.x.y.z):" 0 0 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$A_HOST" ]] && return
+
+	A_USER=$(whiptail --scrolltext --title "Remote Configuration" --inputbox "Enter remote SSH username:" 0 0 "$REAL_USER" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$A_USER" ]] && return
+
+	A_PORT=$(whiptail --scrolltext --title "Remote Configuration" --inputbox "Enter SSH port:" 0 0 "22" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 ]] && return
+	A_PORT="${A_PORT:-22}"
+
+	local default_key="~/.ssh/id_ed25519"
+	A_KEY=$(whiptail --scrolltext --title "Identity Key Configuration" --inputbox "Enter IdentityFile (private key path):" 0 0 "$default_key" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 ]] && return
+	A_KEY="${A_KEY:-$default_key}"
+
+	A_ALIVE=$(whiptail --scrolltext --title "Keepalive Configuration" --inputbox "Enter ServerAliveInterval (seconds):" 0 0 "60" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 ]] && return
+	A_ALIVE="${A_ALIVE:-60}"
+
+	# Atomic Append to ~/.ssh/config
+	{
+		# Ensure separating newline if file not empty
+		if [ -s "$SSH_CONFIG_FILE" ]; then
+			local last_char
+			last_char=$(tail -c 1 "$SSH_CONFIG_FILE" 2>/dev/null)
+			[[ -n "$last_char" ]] && echo ""
+		fi
+		echo "Host $A_NAME"
+		echo "    HostName $A_HOST"
+		echo "    User $A_USER"
+		[[ -n "$A_PORT" && "$A_PORT" != "22" ]] && echo "    Port $A_PORT"
+		[[ -n "$A_KEY" ]] && echo "    IdentityFile $A_KEY"
+		[[ -n "$A_ALIVE" && "$A_ALIVE" -gt 0 ]] && echo "    ServerAliveInterval $A_ALIVE"
+	} >>"$SSH_CONFIG_FILE"
+
+	FUN_FIX_CONFIG_PERMS
+
+	whiptail --scrolltext --title "Success" --msgbox "SSH Alias '$A_NAME' saved to ~/.ssh/config!\n\nHost Entry Added:\n----------------------------------------\nHost $A_NAME\n    HostName $A_HOST\n    User $A_USER\n    IdentityFile $A_KEY\n    ServerAliveInterval $A_ALIVE\n----------------------------------------\n\nUsage: You can now simply run:\n  ssh $A_NAME\nfrom any shell terminal." 0 0
+}
+
+# Function: Edit an existing SSH Config Alias in-place
+FUN_EDIT_SSH_ALIAS() {
+	FUN_ENSURE_SSH_CONFIG
+
+	local raw_aliases=()
+	readarray -t raw_aliases < <(awk '/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+		line = $0
+		sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+		sub(/[ \t]+$/, "", line)
+		print line
+	}' "$SSH_CONFIG_FILE" 2>/dev/null)
+
+	if [ ${#raw_aliases[@]} -eq 0 ]; then
+		whiptail --scrolltext --title "Information" --msgbox "No SSH aliases found in $SSH_CONFIG_FILE to edit." 0 0
+		return
+	fi
+
+	local options=()
+	declare -A id_map
+	local i=1
+	for a in "${raw_aliases[@]}"; do
+		[[ -z "$a" ]] && continue
+		options+=("$i" "$a")
+		id_map[$i]="$a"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "Edit SSH Alias" --menu "Select an alias to modify:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$choice" ]] && return
+
+	local old_alias="${id_map[$choice]}"
+
+	# Extract existing values for this alias
+	local extracted
+	extracted=$(awk -v target="$old_alias" '
+	BEGIN {
+		in_host = 0; hostname = ""; user = ""; idfile = ""; port = ""; interval = ""
+	}
+	/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+		if (in_host) exit
+		line = $0
+		sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+		n = split(line, hosts, /[ \t]+/)
+		for (i = 1; i <= n; i++) {
+			if (hosts[i] == target) { in_host = 1; break }
+		}
+		next
+	}
+	/^[ \t]*[Mm][Aa][Tt][Cc][Hh][ \t]+/ { if (in_host) exit }
+	in_host {
+		line = $0
+		sub(/^[ \t]+/, "", line)
+		if (line ~ /^[#;]/ || line == "") next
+		split(line, parts, /[ \t=]+/)
+		dir = tolower(parts[1])
+		val = substr(line, length(parts[1]) + 1)
+		sub(/^[ \t=]+/, "", val)
+		sub(/[ \t]+$/, "", val)
+
+		if (dir == "hostname") hostname = val
+		else if (dir == "user") user = val
+		else if (dir == "identityfile") idfile = val
+		else if (dir == "port") port = val
+		else if (dir == "serveraliveinterval") interval = val
+	}
+	END {
+		print (hostname ? hostname : "") "#" (user ? user : "") "#" (idfile ? idfile : "") "#" (port ? port : "22") "#" (interval ? interval : "60")
+	}
+	' "$SSH_CONFIG_FILE")
+
+	local o_host o_user o_key o_port o_alive
+	IFS='#' read -r o_host o_user o_key o_port o_alive <<<"$extracted"
+
+	local n_alias n_host n_user n_port n_key n_alive
+	n_alias=$(whiptail --scrolltext --title "Edit Alias Name" --inputbox "Host Alias:" 0 50 "$old_alias" 3>&1 1>&2 2>&3) || return
+	[[ -z "$n_alias" ]] && return
+	n_alias="${n_alias// /_}"
+
+	if [[ "$n_alias" != "$old_alias" ]] && FUN_SSH_ALIAS_EXISTS "$n_alias"; then
+		whiptail --scrolltext --title "Error" --msgbox "Alias '$n_alias' already exists in ~/.ssh/config." 0 0
+		return
+	fi
+
+	n_host=$(whiptail --scrolltext --title "Edit HostName" --inputbox "Target HostName / IP:" 0 50 "${o_host:-}" 3>&1 1>&2 2>&3) || return
+	[[ -z "$n_host" ]] && return
+
+	n_user=$(whiptail --scrolltext --title "Edit Remote User" --inputbox "Username:" 0 50 "${o_user:-$REAL_USER}" 3>&1 1>&2 2>&3) || return
+	[[ -z "$n_user" ]] && return
+
+	n_port=$(whiptail --scrolltext --title "Edit Port" --inputbox "SSH Port:" 0 50 "${o_port:-22}" 3>&1 1>&2 2>&3) || return
+	n_port="${n_port:-22}"
+
+	n_key=$(whiptail --scrolltext --title "Edit Identity File" --inputbox "IdentityFile (Private Key):" 0 50 "${o_key:-~/.ssh/id_ed25519}" 3>&1 1>&2 2>&3) || return
+
+	n_alive=$(whiptail --scrolltext --title "Edit Keepalive" --inputbox "ServerAliveInterval (sec):" 0 50 "${o_alive:-60}" 3>&1 1>&2 2>&3) || return
+	n_alive="${n_alive:-60}"
+
+	# Generate new host entry in temp file
+	local tmp_entry tmp_new_conf
+	tmp_entry=$(mktemp)
+	tmp_new_conf=$(mktemp)
+
+	{
+		echo "Host $n_alias"
+		echo "    HostName $n_host"
+		echo "    User $n_user"
+		[[ -n "$n_port" && "$n_port" != "22" ]] && echo "    Port $n_port"
+		[[ -n "$n_key" ]] && echo "    IdentityFile $n_key"
+		[[ -n "$n_alive" && "$n_alive" -gt 0 ]] && echo "    ServerAliveInterval $n_alive"
+	} >"$tmp_entry"
+
+	# Perform in-place entry replacement via awk
+	awk -v target="$old_alias" -v rep_file="$tmp_entry" '
+	BEGIN { in_target = 0; inserted = 0 }
+	/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+		line = $0
+		sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+		n = split(line, hosts, /[ \t]+/)
+		match_found = 0
+		for (i = 1; i <= n; i++) {
+			if (hosts[i] == target) { match_found = 1; break }
+		}
+		if (match_found) {
+			in_target = 1
+			if (rep_file != "" && !inserted) {
+				while ((getline l < rep_file) > 0) { print l }
+				close(rep_file)
+				inserted = 1
+			}
+			next
+		} else {
+			in_target = 0
+		}
+	}
+	/^[ \t]*[Mm][Aa][Tt][Cc][Hh][ \t]+/ { in_target = 0 }
+	{ if (!in_target) print $0 }
+	' "$SSH_CONFIG_FILE" >"$tmp_new_conf"
+
+	# Backup original config and apply new configuration atomically
+	cp -p "$SSH_CONFIG_FILE" "${SSH_CONFIG_FILE}.bak"
+	cat "$tmp_new_conf" >"$SSH_CONFIG_FILE"
+	rm -f "$tmp_entry" "$tmp_new_conf"
+
+	FUN_FIX_CONFIG_PERMS
+	whiptail --scrolltext --title "Success" --msgbox "SSH Alias '$n_alias' successfully updated in ~/.ssh/config.\n(Backup saved to ~/.ssh/config.bak)" 0 0
+}
+
+# Function: Delete an existing SSH Config Alias
+FUN_DELETE_SSH_ALIAS() {
+	FUN_ENSURE_SSH_CONFIG
+
+	local raw_aliases=()
+	readarray -t raw_aliases < <(awk '/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+		line = $0
+		sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+		sub(/[ \t]+$/, "", line)
+		print line
+	}' "$SSH_CONFIG_FILE" 2>/dev/null)
+
+	if [ ${#raw_aliases[@]} -eq 0 ]; then
+		whiptail --scrolltext --title "Information" --msgbox "No SSH aliases found in $SSH_CONFIG_FILE to delete." 0 0
+		return
+	fi
+
+	local options=()
+	declare -A id_map
+	local i=1
+	for a in "${raw_aliases[@]}"; do
+		[[ -z "$a" ]] && continue
+		options+=("$i" "$a")
+		id_map[$i]="$a"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "Delete SSH Alias" --menu "Select an alias to permanently remove:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$choice" ]] && return
+
+	local sel_alias="${id_map[$choice]}"
+
+	if whiptail --scrolltext --title "Confirm Deletion" --yesno "Permanently remove alias '$sel_alias' from ~/.ssh/config?\n\nA backup copy will be saved to ~/.ssh/config.bak." 0 0; then
+		local tmp_new_conf
+		tmp_new_conf=$(mktemp)
+
+		awk -v target="$sel_alias" -v rep_file="" '
+		BEGIN { in_target = 0 }
+		/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+			line = $0
+			sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+			n = split(line, hosts, /[ \t]+/)
+			match_found = 0
+			for (i = 1; i <= n; i++) {
+				if (hosts[i] == target) { match_found = 1; break }
+			}
+			if (match_found) { in_target = 1; next }
+			else { in_target = 0 }
+		}
+		/^[ \t]*[Mm][Aa][Tt][Cc][Hh][ \t]+/ { in_target = 0 }
+		{ if (!in_target) print $0 }
+		' "$SSH_CONFIG_FILE" >"$tmp_new_conf"
+
+		cp -p "$SSH_CONFIG_FILE" "${SSH_CONFIG_FILE}.bak"
+		cat "$tmp_new_conf" >"$SSH_CONFIG_FILE"
+		rm -f "$tmp_new_conf"
+
+		FUN_FIX_CONFIG_PERMS
+		whiptail --scrolltext --title "Deleted" --msgbox "Alias '$sel_alias' has been removed from ~/.ssh/config." 0 0
+	fi
+}
+
+# Function: Connect to remote host using SSH Config Alias
+FUN_CONNECT_SSH_ALIAS() {
+	FUN_ENSURE_SSH_CONFIG
+
+	local raw_aliases=()
+	readarray -t raw_aliases < <(awk '/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+		line = $0
+		sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+		sub(/[ \t]+$/, "", line)
+		if (line != "*") print line
+	}' "$SSH_CONFIG_FILE" 2>/dev/null)
+
+	if [ ${#raw_aliases[@]} -eq 0 ]; then
+		whiptail --scrolltext --title "Information" --msgbox "No connectable SSH aliases found in $SSH_CONFIG_FILE.\nPlease create an alias first." 0 0
+		return
+	fi
+
+	local options=()
+	declare -A id_map
+	local i=1
+	for a in "${raw_aliases[@]}"; do
+		[[ -z "$a" ]] && continue
+		options+=("$i" "$a")
+		id_map[$i]="$a"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "Connect via SSH Alias" --menu "Select alias to connect (ssh <alias>):" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$choice" ]] && return
+
+	local sel_alias="${id_map[$choice]}"
+
+	clear
+	echo -e "\e[1;36m======================================================================\e[0m"
+	echo -e "\e[1;36m  Initiating SSH connection via OpenSSH Alias: ssh $sel_alias\e[0m"
+	echo -e "\e[1;36m======================================================================\e[0m\n"
+
+	# Execute as original user to leverage their ~/.ssh/config and ssh-agent
+	sudo -u "$REAL_USER" env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" ssh "$sel_alias"
+
+	echo -e "\e[1;48;5;17m\nConnection closed. Press Enter to return to menu.\e[0m"
+	read -r
+}
+
+# Function: Convert an internal custom profile to an OpenSSH ~/.ssh/config alias
+FUN_CONVERT_PROFILE_TO_ALIAS() {
+	FUN_ENSURE_SSH_CONFIG
+
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --scrolltext --title "Information" --msgbox "No custom profiles found to convert." 0 0
+		return
+	fi
+
+	local raw_profiles=()
+	readarray -t raw_profiles <"$PROFILES_FILE"
+	local options=()
+	declare -A id_map
+	local i=1
+	for line in "${raw_profiles[@]}"; do
+		[[ -z "$line" ]] && continue
+		local name=$(echo "$line" | cut -d'#' -f1)
+		local user=$(echo "$line" | cut -d'#' -f2)
+		local host=$(echo "$line" | cut -d'#' -f3)
+		options+=("$i" "$name ($user@$host)")
+		id_map[$i]="$line"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "Convert Profile to SSH Alias" --menu "Select a profile to convert into ~/.ssh/config:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$choice" ]] && return
+
+	local data="${id_map[$choice]}"
+	local p_name p_user p_host
+	IFS='#' read -r p_name p_user p_host <<<"$data"
+
+	local alias_name="${p_name// /_}"
+	if FUN_SSH_ALIAS_EXISTS "$alias_name"; then
+		whiptail --scrolltext --title "Error" --msgbox "Alias '$alias_name' already exists in ~/.ssh/config." 0 0
+		return
+	fi
+
+	{
+		if [ -s "$SSH_CONFIG_FILE" ]; then
+			local last_char
+			last_char=$(tail -c 1 "$SSH_CONFIG_FILE" 2>/dev/null)
+			[[ -n "$last_char" ]] && echo ""
+		fi
+		echo "Host $alias_name"
+		echo "    HostName $p_host"
+		echo "    User $p_user"
+		echo "    IdentityFile ~/.ssh/id_ed25519"
+		echo "    ServerAliveInterval 60"
+	} >>"$SSH_CONFIG_FILE"
+
+	FUN_FIX_CONFIG_PERMS
+	whiptail --scrolltext --title "Success" --msgbox "Profile '$p_name' converted and saved to ~/.ssh/config!\n\nYou can now connect directly via:\n  ssh $alias_name" 0 0
+}
+
+# Submenu: Dedicated SSH Config Aliases Management Hub
+FUN_MENU_SSH_ALIASES() {
+	while true; do
+		local ALIAS_CHOICE
+		ALIAS_CHOICE=$(whiptail --backtitle "SSH CONFIG ALIASES (~/.ssh/config)" --scrolltext --title "SSH CONFIG ALIASES (~/.ssh/config)" --menu "Select Alias Action" 0 0 0 \
+			"1" "View All SSH Aliases (Overview Table)" \
+			"2" "Inspect Alias Details" \
+			"3" "Create New SSH Alias" \
+			"4" "Edit Existing SSH Alias" \
+			"5" "Delete SSH Alias" \
+			"6" "Connect via SSH Alias (ssh <alias>)" \
+			"7" "Convert Custom Profile to SSH Alias" \
+			"8" "View Raw ~/.ssh/config File" \
+			"9" "Return to Main Menu" 3>&1 1>&2 2>&3)
+
+		[[ $? -ne 0 ]] && break
+
+		case "$ALIAS_CHOICE" in
+		1) FUN_VIEW_SSH_ALIASES ;;
+		2) FUN_INSPECT_SSH_ALIAS ;;
+		3) FUN_CREATE_SSH_ALIAS ;;
+		4) FUN_EDIT_SSH_ALIAS ;;
+		5) FUN_DELETE_SSH_ALIAS ;;
+		6) FUN_CONNECT_SSH_ALIAS ;;
+		7) FUN_CONVERT_PROFILE_TO_ALIAS ;;
+		8) FUN_VIEW_RAW_SSH_CONFIG ;;
+		9) break ;;
+		esac
+	done
+}
+
+# ==============================================================================
+# SECTION 2: Custom Profile Management (/bin/CUSTOM-SSH-MANAGER/profiles.conf)
+# ==============================================================================
+
+# Function: Create a new SSH profile
+FUN_CREATE_PROFILE() {
+	local P_NAME P_USER P_HOST
+
+	P_NAME=$(whiptail --scrolltext --title "New SSH Profile" --inputbox "Enter unique profile name (e.g. WebServer-Prod):" 0 0 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$P_NAME" ]] && return
+
+	# Sanitization
+	P_NAME="${P_NAME// /_}"
+	P_NAME="${P_NAME//#/}"
+
+	P_USER=$(whiptail --scrolltext --title "Remote Configuration" --inputbox "Enter remote username:" 0 0 "$REAL_USER" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$P_USER" ]] && return
+	P_USER="${P_USER//#/}"
+
+	P_HOST=$(whiptail --scrolltext --title "Remote Configuration" --inputbox "Enter target IP address or hostname:" 0 0 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$P_HOST" ]] && return
+	P_HOST="${P_HOST//#/}"
+
+	# Persistence: NAME#USER#HOST
+	echo "${P_NAME}#${P_USER}#${P_HOST}" >>"$PROFILES_FILE"
+	whiptail --scrolltext --title "Success" --msgbox "Profile '${P_NAME}' saved." 0 0
+}
+
+# Function: Select and connect to a remote host (Superior Pattern)
+FUN_CONNECT_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --scrolltext --title "Information" --msgbox "No profiles found." 0 0
+		return
+	fi
+
+	local raw_profiles=()
+	readarray -t raw_profiles <"$PROFILES_FILE"
+
+	local options=()
+	declare -A id_map
+	local i=1
+
+	for line in "${raw_profiles[@]}"; do
+		[[ -z "$line" ]] && continue
+		local name=$(echo "$line" | cut -d'#' -f1)
+		local user=$(echo "$line" | cut -d'#' -f2)
+		local host=$(echo "$line" | cut -d'#' -f3)
+		options+=("$i" "$name ($user@$host)")
+		id_map[$i]="$line"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "SSH Connection" --menu "Select a profile to connect:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	# Step 6 & 7: Retrieval & Resolution
+	if [[ $? -eq 0 && -n "$choice" ]]; then
+		local data="${id_map[$choice]}"
+		local m_user=$(echo "$data" | cut -d'#' -f2)
+		local m_host=$(echo "$data" | cut -d'#' -f3)
+
+		clear
+		echo "Initiating SSH connection to $m_user@$m_host..."
+		# Execute as original user to use their keys and config
+		sudo -u "$REAL_USER" env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" ssh "$m_user@$m_host"
+
+		echo -e "\e[1;48;5;17m\nConnection closed. Press Enter to return to menu.\e[0m"
+		read -r
+	fi
+}
+
+# Function: Setup passwordless SSH (Keygen + Copy-ID)
+FUN_SETUP_PASSWORDLESS() {
+	FUN_ENSURE_SSH_CONFIG
+
+	if [ ! -f "$SSH_KEY_PATH" ]; then
+		if whiptail --scrolltext --title "Key Generation" --yesno "No Ed25519 key found for $REAL_USER at $SSH_KEY_PATH.\nGenerate a 256-bit Ed25519 key now?" 0 0; then
+			sudo -u "$REAL_USER" ssh-keygen -t ed25519 -N "" -f "$SSH_KEY_PATH" -C "ssh-manager-key"
+		else
+			return
+		fi
+	fi
+
+	# Selection of Target: Profile, SSH Alias, or Manual
+	local TARGET_CHOICE
+	TARGET_CHOICE=$(whiptail --scrolltext --title "Passwordless Target Selection" --menu "Choose target source for public key deployment:" 0 0 0 \
+		"1" "Target from Saved Custom Profiles" \
+		"2" "Target from SSH Config Aliases (~/.ssh/config)" \
+		"3" "Manual Remote User and Host" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$TARGET_CHOICE" ]] && return
+
+	local TARGET_SPEC=""
+
+	case "$TARGET_CHOICE" in
+	1)
+		if [ ! -s "$PROFILES_FILE" ]; then
+			whiptail --scrolltext --title "Information" --msgbox "No saved custom profiles found." 0 0
+			return
+		fi
+		local raw_profiles=()
+		readarray -t raw_profiles <"$PROFILES_FILE"
+		local options=()
+		declare -A id_map
+		local i=1
+		for line in "${raw_profiles[@]}"; do
+			[[ -z "$line" ]] && continue
+			local name=$(echo "$line" | cut -d'#' -f1)
+			local user=$(echo "$line" | cut -d'#' -f2)
+			local host=$(echo "$line" | cut -d'#' -f3)
+			options+=("$i" "$name ($user@$host)")
+			id_map[$i]="$line"
+			((i++))
+		done
+		local choice
+		choice=$(whiptail --scrolltext --title "Select Target Profile" --menu "Choose target profile:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+		[[ $? -ne 0 || -z "$choice" ]] && return
+		local data="${id_map[$choice]}"
+		local p_user=$(echo "$data" | cut -d'#' -f2)
+		local p_host=$(echo "$data" | cut -d'#' -f3)
+		TARGET_SPEC="$p_user@$p_host"
+		;;
+	2)
+		local raw_aliases=()
+		readarray -t raw_aliases < <(awk '/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/ {
+			line = $0
+			sub(/^[ \t]*[Hh][Oo][Ss][Tt][ \t]+/, "", line)
+			sub(/[ \t]+$/, "", line)
+			if (line != "*") print line
+		}' "$SSH_CONFIG_FILE" 2>/dev/null)
+
+		if [ ${#raw_aliases[@]} -eq 0 ]; then
+			whiptail --scrolltext --title "Information" --msgbox "No SSH aliases found in ~/.ssh/config." 0 0
+			return
+		fi
+		local options=()
+		declare -A id_map
+		local i=1
+		for a in "${raw_aliases[@]}"; do
+			[[ -z "$a" ]] && continue
+			options+=("$i" "$a")
+			id_map[$i]="$a"
+			((i++))
+		done
+		local choice
+		choice=$(whiptail --scrolltext --title "Select Target SSH Alias" --menu "Choose SSH alias:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+		[[ $? -ne 0 || -z "$choice" ]] && return
+		TARGET_SPEC="${id_map[$choice]}"
+		;;
+	3)
+		local t_user t_host
+		t_user=$(whiptail --scrolltext --title "Manual Setup" --inputbox "Enter remote username:" 0 0 "$REAL_USER" 3>&1 1>&2 2>&3) || return
+		t_host=$(whiptail --scrolltext --title "Manual Setup" --inputbox "Enter remote host IP/Hostname:" 0 0 3>&1 1>&2 2>&3) || return
+		TARGET_SPEC="$t_user@$t_host"
+		;;
+	esac
+
+	clear
+	echo "======================================================================"
+	echo " Distributing public key (${SSH_KEY_PATH}.pub) to $TARGET_SPEC..."
+	echo "======================================================================"
+	if sudo -u "$REAL_USER" env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" ssh-copy-id -i "${SSH_KEY_PATH}.pub" "$TARGET_SPEC"; then
+		whiptail --scrolltext --title "Success" --msgbox "Passwordless authentication enabled for [ $TARGET_SPEC ]" 0 0
+	else
+		whiptail --scrolltext --title "Error" --msgbox "Failed to copy SSH key to $TARGET_SPEC.\nEnsure remote host is reachable and SSH service is running." 0 0
+	fi
+}
+
+# Function: Sequential Profile Modification
+FUN_EDIT_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --scrolltext --title "Information" --msgbox "No profiles found to edit." 0 0
+		return
+	fi
+
+	local raw_profiles=()
+	readarray -t raw_profiles <"$PROFILES_FILE"
+	local options=()
+	declare -A id_map
+	local i=1
+	for line in "${raw_profiles[@]}"; do
+		[[ -z "$line" ]] && continue
+		options+=("$i" "$(echo "$line" | cut -d'#' -f1)")
+		id_map[$i]="$line"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "Edit Profile" --menu "Select a profile to modify:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+	[[ $? -ne 0 || -z "$choice" ]] && return
+
+	local old_data="${id_map[$choice]}"
+	local o_name o_user o_host
+	IFS='#' read -r o_name o_user o_host <<<"$old_data"
+
+	local n_name n_user n_host
+	n_name=$(whiptail --scrolltext --title "Edit Name" --inputbox "Profile Alias:" 0 50 "$o_name" 3>&1 1>&2 2>&3) || return
+	n_user=$(whiptail --scrolltext --title "Edit User" --inputbox "Username:" 0 50 "$o_user" 3>&1 1>&2 2>&3) || return
+	n_host=$(whiptail --scrolltext --title "Edit Host" --inputbox "IP / Hostname:" 0 50 "$o_host" 3>&1 1>&2 2>&3) || return
+
+	n_name="${n_name// /_}"
+	n_name="${n_name//#/}"
+	n_user="${n_user//#/}"
+	n_host="${n_host//#/}"
+
+	local new_data="${n_name}#${n_user}#${n_host}"
+	local escaped_old=$(echo "$old_data" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+	sed -i "s|^${escaped_old}$|${new_data}|" "$PROFILES_FILE"
+
+	whiptail --scrolltext --title "Success" --msgbox "Profile updated." 0 0
+}
+
+# Function: Delete an existing profile
+FUN_DELETE_PROFILE() {
+	if [ ! -s "$PROFILES_FILE" ]; then
+		whiptail --scrolltext --title "Information" --msgbox "No profiles found to delete." 0 0
+		return
+	fi
+
+	local raw_profiles=()
+	readarray -t raw_profiles <"$PROFILES_FILE"
+	local options=()
+	declare -A id_map
+	local i=1
+	for line in "${raw_profiles[@]}"; do
+		[[ -z "$line" ]] && continue
+		local name=$(echo "$line" | cut -d'#' -f1)
+		options+=("$i" "$name")
+		id_map[$i]="$line"
+		((i++))
+	done
+
+	local choice
+	choice=$(whiptail --scrolltext --title "Delete Profile" --menu "Select a profile to permanently remove:" 0 0 0 "${options[@]}" 3>&1 1>&2 2>&3)
+
+	if [[ $? -eq 0 && -n "$choice" ]]; then
+		local data="${id_map[$choice]}"
+		local name=$(echo "$data" | cut -d'#' -f1)
+		if whiptail --scrolltext --title "Confirm Deletion" --yesno "Delete profile '$name'?" 0 0; then
+			local escaped_data=$(echo "$data" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+			sed -i "\|^${escaped_data}$|d" "$PROFILES_FILE"
+		fi
+	fi
+}
+
+# Function: Display technical help and usage
+FUN_SHOW_HELP() {
+	local help_text
+	read -r -d '' help_text <<'EOF'
+SSH CONNECTION & ALIAS MANAGER - Technical Suite Documentation
+
+1. OPENSSH CLIENT ALIASES (~/.ssh/config):
+   - Simplify connections: Instead of typing:
+       ssh username@100.x.y.z -i ~/.ssh/id_ed25519 -p 22
+     You can simply type:
+       ssh lab
+   - Structure in ~/.ssh/config:
+       Host lab
+           HostName 100.x.y.z
+           User username
+           IdentityFile ~/.ssh/id_ed25519
+           ServerAliveInterval 60
+   - Full CRUD: Create, Edit in-place, Delete, View Table / Entries.
+   - Profile Converter: Instant 1-click conversion from custom profiles to OpenSSH aliases.
+
+2. CUSTOM PROFILES (/bin/CUSTOM-SSH-MANAGER/profiles.conf):
+   - Internal delimited format: NAME#USER#HOST
+   - Connect, edit, delete, and list profiles directly in TUI.
+
+3. PASSWORDLESS AUTHENTICATION:
+   - Keygen: Generates 256-bit Ed25519 key (Curve25519).
+   - Distribution: Uses 'ssh-copy-id' to deploy public key to Saved Profiles,
+     SSH Config Aliases, or manual targets.
+
+4. ARCHITECTURE & SECURITY:
+   - Pattern: Superior Pattern (readarray + associative mapping).
+   - Permissions: Automatically enforces chmod 700 on ~/.ssh and chmod 600
+     on ~/.ssh/config owned by the originating user.
+EOF
+	whiptail --scrolltext --title "About / Technical Documentation" --msgbox "$help_text" 0 0
+}
+
+# --- Main Menu Loop ---
+FUN_CHECK_DEPENDENCIES
+
+while true; do
+	MAIN_CHOICE=$(whiptail --scrolltext --title "SSH CONNECTION & PROFILE MANAGER" --menu "Select Action" 0 0 0 \
+		"1" "Connect to Remote Host (Custom Profile)" \
+		"2" "Create New Custom Profile" \
+		"3" "Edit Custom Profile" \
+		"4" "Delete Custom Profile" \
+		"5" "Setup Passwordless Auth (Keygen/Copy-ID)" \
+		"6" "List Saved Custom Profiles" \
+		"7" "SSH Config Aliases Management (~/.ssh/config) ->" \
+		"8" "Connect via SSH Config Alias (ssh <alias>)" \
+		"9" "About / Technical Documentation" \
+		"10" "Exit" 3>&1 1>&2 2>&3)
+
+	[[ $? -ne 0 ]] && break
+
+	case "$MAIN_CHOICE" in
+	1) FUN_CONNECT_PROFILE ;;
+	2) FUN_CREATE_PROFILE ;;
+	3) FUN_EDIT_PROFILE ;;
+	4) FUN_DELETE_PROFILE ;;
+	5) FUN_SETUP_PASSWORDLESS ;;
+	6)
+		if [ -s "$PROFILES_FILE" ]; then
+			clear
+			printf "\n%-20s %-15s %-s\n" "NAME" "USER" "HOST"
+			echo "------------------------------------------------"
+			column -t -s '#' "$PROFILES_FILE"
+			echo "------------------------------------------------"
+			read -r -p "Press Enter to continue..."
+		else
+			whiptail --scrolltext --msgbox "No custom profiles saved." 0 0
+		fi
+		;;
+	7) FUN_MENU_SSH_ALIASES ;;
+	8) FUN_CONNECT_SSH_ALIAS ;;
+	9) FUN_SHOW_HELP ;;
+	10) break ;;
+	esac
+done
+
+# --- Final Exit ---
+echo -e "\nSession terminated. Goodbye.\n"

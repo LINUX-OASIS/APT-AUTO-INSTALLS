@@ -1,0 +1,626 @@
+#!/bin/bash
+
+# ===================================================================================
+#
+# Self-Contained Bash Spinner Reference
+#
+# Goal: Each function in this script is 100% self-contained, with no external
+# dependencies on variables or other functions. This allows you to copy a
+# single spinner function and paste it directly into your own script.
+#
+# ===================================================================================
+
+# --- TRUE COLOR TEST ---
+# This test checks if the terminal supports 24-bit true color, which some
+# of the more advanced spinners require. If the text below is bright orange,
+# your terminal is compatible.
+echo "TRUE COLOR TEST: If you see bright orange text, your terminal supports 24-bit true color."
+echo -e "\033[38;2;255;100;0mThis text should be bright orange.\033[0m"
+
+# ===================================================================================
+# --- HOW TO USE A SPINNER IN YOUR SCRIPT ---
+#
+# Using a spinner from this file is a simple two-step process:
+#
+# 1. COPY A SPINNER FUNCTION
+#    Scroll down to the "SPINNER IMPLEMENTATIONS" section below, find a spinner
+#    you like, and copy its entire function block into your own script.
+#    Each function is 100% self-contained and ready to be pasted.
+#
+# 2. WRAP YOUR COMMAND WITH THE SPINNER LOGIC
+#    To display a spinner while a command runs, you must start it in the
+#    background right before your command and stop it right after. The templates
+#    below show exactly how to do this.
+#
+# --- Template 1: Basic Usage ---
+#
+#   # First, paste the function you chose into your script.
+#   fun_spinner_simple() {
+#       # ... (function code from below) ...
+#   }
+#
+#   _task_that_takes_time() {
+#       # This is your long-running command.
+#       sleep 5
+#   }
+#
+#   # Now, wrap the command with the spinner logic.
+#   echo "Starting task..."
+#   tput civis # Hide the cursor
+#
+#   # Start the spinner in the background.
+#   fun_spinner_simple "Reticulating splines..." &
+#   SPINNER_PID=$!
+#
+#   # Set a trap to kill spinner and restore cursor if script is interrupted.
+#   trap 'kill $SPINNER_PID; tput cnorm; exit' INT TERM
+#
+#   # Run your actual command.
+#   _task_that_takes_time
+#
+#   # Stop the spinner.
+#   kill $SPINNER_PID
+#   tput cnorm # Restore the cursor
+#   trap - INT TERM # Clear the trap
+#
+#   printf "\rTask complete.                        \n"
+#
+# --- Template 2: Colored Spinner with Arguments ---
+#
+#   # First, paste the colored spinner function.
+#   fun_spinner_braille_colored() {
+#       # ... (function code from below) ...
+#   }
+#
+#   # For convenience, you can define your colors as variables.
+#   CYAN='\033[0;36m'
+#
+#   echo "Connecting to server..."
+#   tput civis
+#
+#   # Start the spinner, passing the message AND the color code as arguments.
+#   fun_spinner_braille_colored "Connecting..." "$CYAN" &
+#   SPINNER_PID=$!
+#
+#   # The trap and kill logic remains exactly the same.
+#   trap 'kill $SPINNER_PID; tput cnorm; exit' INT TERM
+#   sleep 3
+#   kill $SPINNER_PID
+#   tput cnorm
+#   trap - INT TERM
+#   printf "\rConnection established.             \n"
+#
+# ===================================================================================
+
+# ===================================================================================
+# --- SPINNER IMPLEMENTATIONS ---
+# Each function below is self-contained.
+# ===================================================================================
+
+# --- Spinner 1: Simple Line Spinner ---
+# The most basic and common spinner. No color dependencies.
+fun_spinner_simple() {
+	local message="${1:-Working...}"
+	local spin_chars='-\|/'
+	local i=0
+	while :; do
+		i=$(((i + 1) % ${#spin_chars}))
+		# The '\r' carriage return moves the cursor to the line's start without
+		# creating a new line, allowing the next character to overwrite the previous one.
+		printf "\r[%s] %s" "${spin_chars:$i:1}" "$message"
+		sleep 0.1
+	done
+}
+
+# --- Spinner 2: Growing Dots ---
+# A simple "Loading..." animation with an increasing number of dots.
+fun_spinner_dots() {
+	local message="${1:-Working...}"
+	while :; do
+		# The spaces at the end ensure the previous line is fully overwritten.
+		printf "\r${message}   " && sleep 0.3
+		printf "\r${message}.  " && sleep 0.3
+		printf "\r${message}.. " && sleep 0.3
+		printf "\r${message}..." && sleep 0.3
+	done
+}
+
+# --- Spinner 3: Smooth Braille Spinner ---
+# Uses Unicode braille characters for a very fluid animation.
+# NOTE: Requires a terminal with good Unicode font support.
+fun_spinner_braille() {
+	local message="${1:-Processing...}"
+	local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+	local i=0
+	while :; do
+		i=$(((i + 1) % ${#spin_chars}))
+		printf "\r[%s] %s" "${spin_chars:$i:1}" "$message"
+		sleep 0.08 # A faster sleep time makes the animation smoother.
+	done
+}
+
+# --- Spinner 4: Kawaii Braille Spinner ---
+# A colorful, multi-character braille spinner.
+fun_spinner_kawaii_braille() {
+	local message="${1:-Processing...}"
+	# Define colors and spinner characters inside the function.
+	local spin_chars=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+	local colors=('\e[91m' '\e[92m' '\e[93m' '\e[94m' '\e[95m' '\e[96m') # Red, Green, Yellow, Blue, Magenta, Cyan
+	local reset='\e[0m'
+	local i=0 c=0
+
+	# This local trap ensures the cursor is restored if the script is killed.
+	trap 'tput cnorm; printf "\n"; exit' INT TERM
+
+	tput civis # Hide cursor
+	while :; do
+		i=$(((i + 1) % ${#spin_chars[@]}))
+		c=$(((c + 1) % ${#colors[@]}))
+		printf "\r${colors[$c]}[%s]${reset} %s " "${spin_chars[$i]}" "$message"
+		sleep 0.08
+	done
+}
+
+# --- Spinner 5: Reusable Colored Spinner ---
+# Accepts a custom message and a direct ANSI color code as an argument.
+# Example call: fun_spinner_colored "Compiling..." "\033[0;32m" # Green
+fun_spinner_colored() {
+	local message="${1:-Working...}"
+	local color="${2:-\033[0;37m}" # Default to regular white if no color is passed.
+	# Define necessary variables locally.
+	local reset='\033[0m'
+	local spin_chars='-\|/'
+	local i=0
+
+	while :; do
+		i=$(((i + 1) % 4))
+		printf "\r[${color}%s${reset}] ${message}" "${spin_chars:$i:1}"
+		sleep 0.1
+	done
+}
+
+# --- Spinner 6: Reusable Colored Braille Spinner ---
+# Combines the smooth braille animation with a customizable color.
+# Example call: fun_spinner_braille_colored "Thinking..." "\033[0;36m" # Cyan
+fun_spinner_braille_colored() {
+	local message="${1:-Thinking...}"
+	local color="${2:-\033[0;37m}" # Default to regular white.
+	local reset='\033[0m'
+	local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+	local i=0
+
+	while :; do
+		i=$(((i + 1) % ${#spin_chars}))
+		printf "\r[${color}%s${reset}] ${message}" "${spin_chars:$i:1}"
+		sleep 0.08
+	done
+}
+
+# --- Spinner 7: Braille Spinner with Background Color ---
+# A spinner that has a colored background. Good for high visibility.
+# Example call: fun_spinner_braille_bg "Saving..." "\033[43m" # Yellow Background
+fun_spinner_braille_bg() {
+	local message="${1:-Saving...}"
+	local bg_color="${2:-\033[44m}" # Default to blue background.
+	# Define text colors locally.
+	local white='\033[1;37m'
+	local reset='\033[0m'
+	local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+	local i=0
+
+	while :; do
+		i=$(((i + 1) % ${#spin_chars}))
+		# Combine the background color with bright white text for readability.
+		printf "\r${bg_color}${white} %s ${reset} ${message}" "${spin_chars:$i:1}"
+		sleep 0.08
+	done
+}
+
+# --- Spinner 8: Pulsing Orb Spinner ---
+# A softly glowing orb using 24-bit RGB colors.
+# NOTE: Requires a terminal that supports true color (24-bit).
+# Example call: fun_spinner_pulsing_orb "Pulsing..." "pink"
+fun_spinner_pulsing_orb() {
+	local message="${1:-Pulsing...}"
+	local color_name="${2:-white}"
+	local reset="\033[0m"
+	local b orb
+
+	# Using a file descriptor for stdout can sometimes help with buffering issues.
+	exec 3>&1
+	while :; do
+		# Brighten
+		for ((frame = 1; frame <= 10; frame++)); do
+			b=$((frame * 25))
+			case "$color_name" in
+			blue) orb="\033[38;2;0;0;${b}m●${reset}" ;;
+			pink) orb="\033[38;2;${b};0;${b}m●${reset}" ;;
+			cyan) orb="\033[38;2;0;${b};${b}m●${reset}" ;;
+			green) orb="\033[38;2;0;${b};0m●${reset}" ;;
+			*) orb="\033[38;2;${b};${b};${b}m●${reset}" ;;
+			esac
+			echo -ne "\r${orb} ${message}   " >&3
+			sleep 0.05
+		done
+		# Dim
+		for ((frame = 10; frame >= 1; frame--)); do
+			b=$((frame * 25))
+			case "$color_name" in
+			blue) orb="\033[38;2;0;0;${b}m●${reset}" ;;
+			pink) orb="\033[38;2;${b};0;${b}m●${reset}" ;;
+			cyan) orb="\033[38;2;0;${b};${b}m●${reset}" ;;
+			green) orb="\033[38;2;0;${b};0m●${reset}" ;;
+			*) orb="\033[38;2;${b};${b};${b}m●${reset}" ;;
+			esac
+			echo -ne "\r${orb} ${message}   " >&3
+			sleep 0.05
+		done
+	done
+}
+
+# --- Spinner 9: Aurora Spirit Orb ---
+# An adaptive, multicolor, breathing orb that reacts to terminal width.
+# This spinner is a full-line effect and does not display a message.
+# NOTE: Requires a terminal that supports true color (24-bit) and awk.
+fun_spinner_aurora_orb() {
+	# This spinner prints a title and animates on the line below.
+	echo -e "${1:-Aurora Spirit Orb}"
+
+	# The awk script for HSL to RGB conversion is embedded here as a local variable.
+	local awk_script='
+    function hue2rgb(p, q, t) {
+        if (t < 0) t += 1; if (t > 1) t -= 1
+        if (t < 1/6) return p + (q - p) * 6 * t
+        if (t < 1/2) return q
+        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6
+        return p
+    }
+    BEGIN {
+        h = (h % 360) / 360; s /= 100; l /= 100
+        if (s == 0) { r = g = b = l }
+        else {
+            q = l < 0.5 ? l * (1 + s) : l + s - l * s
+            p = 2 * l - q
+            r = hue2rgb(p, q, h + 1/3); g = hue2rgb(p, q, h); b = hue2rgb(p, q, h - 1/3)
+        }
+        printf "%d %d %d", int(r*255), int(g*255), int(b*255)
+    }'
+
+	local cols center max_radius speed_factor t_ms phase brightness radius hue r g b orb
+	local reset="\033[0m"
+
+	exec 3>&1 # Use file descriptor 3 for unbuffered output
+	while :; do
+		cols=$(tput cols 2>/dev/null)
+		[[ "$cols" =~ ^[1-9][0-9]*$ ]] || cols=80
+		center=$((cols / 2))
+
+		max_radius=$((cols / 10))
+		[ "$max_radius" -lt 2 ] && max_radius=2
+		speed_factor=$(awk -v c="$cols" 'BEGIN { print (c < 80 ? 0.3 : (800 / c)) }')
+
+		t_ms=$(date +%s%3N 2>/dev/null || date +%s000)
+		phase=$(awk -v f="$speed_factor" -v t="$t_ms" 'BEGIN { print sin(t*f/1000) }')
+
+		brightness=$(awk -v p="$phase" 'BEGIN { print int((p+1)*50 + 50) }')
+		radius=$(awk -v p="$phase" -v m="$max_radius" 'BEGIN { print int((p+1)/2*m + 1) }')
+
+		hue=$(((t_ms / 50) % 360))
+		# Call awk with the embedded script
+		read r g b <<<"$(awk -v h="$hue" -v s="100" -v l="$brightness" "$awk_script")"
+
+		orb=$(printf "%*s●" $((center - radius)) "")
+		local orb_line="\r\033[38;2;${r};${g};${b}m${orb}${reset}"
+
+		echo -ne "${orb_line}" >&3
+		sleep 0.05
+	done
+}
+
+# --- Spinner 10: Loading Bar ---
+# A classic loading bar that fills and empties. Can be colorized.
+# Example call: fun_spinner_loading_bar "Fetching resources..." "\033[0;32m" # Green
+fun_spinner_loading_bar() {
+	local message="${1:-Loading...}"
+	local color="${2:-\033[0;32m}" # Default to Green
+	local reset='\033[0m'
+	local width=20
+	local char="="
+	local pad=" "
+
+	while :; do
+		# Loop to fill the bar
+		for ((i = 0; i <= width; i++)); do
+			# Build the bar string
+			bar=""
+			for ((j = 0; j < width; j++)); do
+				if [ $j -lt $i ]; then bar="${bar}${char}"; else bar="${bar}${pad}"; fi
+			done
+			printf "\r${color}[%-*s]${reset} %s" "$width" "$bar" "$message"
+			sleep 0.02
+		done
+
+		# Loop to empty the bar
+		for ((i = width; i >= 0; i--)); do
+			bar=""
+			for ((j = 0; j < width; j++)); do
+				if [ $j -lt $i ]; then bar="${bar}${char}"; else bar="${bar}${pad}"; fi
+			done
+			printf "\r${color}[%-*s]${reset} %s" "$width" "$bar" "$message"
+			sleep 0.02
+		done
+	done
+}
+
+# --- Spinner 11: Ping-Pong Ball ---
+
+# An ASCII "bouncing ball" animation.
+
+fun_spinner_ping_pong() {
+
+	local message="${1:-Pinging...}"
+
+	local width=20
+
+	local ball="o"
+
+	while :; do
+
+		# Move from left to right
+
+		for ((i = 0; i < width; i++)); do
+
+			left_padding=$i
+
+			right_padding=$((width - 1 - i))
+
+			printf "\r[%*s%s%*s] %s" "$left_padding" "" "$ball" "$right_padding" "" "$message"
+
+			sleep 0.03
+
+		done
+
+		# Move from right to left
+
+		for ((i = width - 1; i >= 0; i--)); do
+
+			left_padding=$i
+
+			right_padding=$((width - 1 - i))
+
+			printf "\r[%*s%s%*s] %s" "$left_padding" "" "$ball" "$right_padding" "" "$message"
+
+			sleep 0.03
+
+		done
+
+	done
+
+}
+
+# --- Spinner 12: Rainbow Loading Bar ---
+
+# A loading bar that cycles through a rainbow of colors.
+
+fun_spinner_rainbow_bar() {
+
+	local message="${1:-Loading...}"
+
+	local colors=('\e[91m' '\e[92m' '\e[93m' '\e[94m' '\e[95m' '\e[96m')
+
+	local reset='\e[0m'
+
+	local width=20
+
+	local char="="
+
+	local pad=" "
+
+	local c=0 # Color index
+
+	while :; do
+
+		# Select the next color
+
+		local current_color="${colors[$c]}"
+
+		c=$(((c + 1) % ${#colors[@]}))
+
+		# Loop to fill the bar
+
+		for ((i = 0; i <= width; i++)); do
+
+			bar=""
+
+			for ((j = 0; j < width; j++)); do
+
+				if [ $j -lt $i ]; then bar="${bar}${char}"; else bar="${bar}${pad}"; fi
+
+			done
+
+			printf "\r${current_color}[%-*s]${reset} %s" "$width" "$bar" "$message"
+
+			sleep 0.02
+
+		done
+
+		# Loop to empty the bar
+
+		for ((i = width; i >= 0; i--)); do
+
+			bar=""
+
+			for ((j = 0; j < width; j++)); do
+
+				if [ $j -lt $i ]; then bar="${bar}${char}"; else bar="${bar}${pad}"; fi
+
+			done
+
+			printf "\r${current_color}[%-*s]${reset} %s" "$width" "$bar" "$message"
+
+			sleep 0.02
+
+		done
+
+	done
+
+}
+
+# --- Spinner 13: Spectrum Analyzer ---
+# A multi-line, 7-column equalizer animation with shifting color gradients.
+# Recreates a retro "spectrum" effect.
+fun_spinner_spectrum() {
+	local message="${1:-Analyzing...}"
+	local rows=5
+	local cols=7
+	local width=$cols
+
+	# Heights array (starting values)
+	local h=(1 2 3 4 3 2 1)
+
+	# Gradients (R1 G1 B1  R2 G2 B2) - distinct themes
+	# 0: Yellow->Red
+	# 1: Cyan->Green
+	# 2: Pink->Purple
+	# 3: Purple->Cyan
+	local themes=(
+		"255 255 0 255 0 0"
+		"0 255 255 0 255 0"
+		"255 100 150 150 0 255"
+		"150 0 255 0 255 255"
+	)
+	local current_theme=0
+
+	local reset="\033[0m"
+	local hide_cursor="\033[?25l"
+
+	echo -ne "$hide_cursor"
+
+	# Pre-allocate the 5 lines so we don't overwrite existing text immediately
+	for ((i = 0; i < rows; i++)); do echo; done
+
+	while :; do
+		# 1. Update Heights (Random walk)
+		for ((c = 0; c < cols; c++)); do
+			local r=$((RANDOM % 3 - 1)) # -1, 0, 1
+			h[$c]=$((h[c] + r))
+			# Clamp height between 1 and rows
+			if [[ ${h[$c]} -gt $rows ]]; then h[$c]=$rows; fi
+			if [[ ${h[$c]} -lt 1 ]]; then h[$c]=1; fi
+		done
+
+		# 2. Cycle theme based on time
+		local ticks
+		ticks=$(date +%s)
+		current_theme=$(((ticks / 2) % ${#themes[@]}))
+		read r1 g1 b1 r2 g2 b2 <<<"${themes[$current_theme]}"
+
+		# 3. Build Frame
+		# Move cursor up to start of the block
+		printf "\033[%dA" "$rows"
+
+		for ((r = rows; r >= 1; r--)); do
+			# Calculate gradient color for this row
+			# Top row (rows) gets color 1, Bottom row (1) gets color 2
+			local frac=$(((r - 1) * 1000 / (rows - 1)))
+			if [[ $rows -eq 1 ]]; then frac=0; fi
+
+			# Linear interpolation
+			local red=$((r2 + (r1 - r2) * frac / 1000))
+			local grn=$((g2 + (g1 - g2) * frac / 1000))
+			local blu=$((b2 + (b1 - b2) * frac / 1000))
+
+			local color_code="\033[38;2;${red};${grn};${blu}m"
+
+			printf "\r    %b" "$color_code"
+
+			for ((c = 0; c < cols; c++)); do
+				if [[ ${h[$c]} -ge $r ]]; then
+					printf "█"
+				else
+					printf " "
+				fi
+			done
+			printf "%b" "$reset"
+
+			# Display the message next to the middle row (row 3)
+			if [[ $r -eq 3 ]]; then
+				printf " %s" "$message"
+			fi
+
+			printf "\033[K\n" # Clear rest of line and newline
+		done
+
+		sleep 0.1
+	done
+}
+
+# ===================================================================================
+
+# --- DEMONSTRATION LOGIC ---
+
+# This main function demonstrates how to use each spinner.
+# It follows the canonical start/stop pattern explained at the top of this script.
+# ===================================================================================
+main() {
+	# Helper function to run a demo for a given spinner.
+	run_demo() {
+		local spinner_func="$1"
+		local title="$2"
+		shift 2
+		local spinner_args=("$@")
+
+		echo -e "\n--- Demo: $title ---"
+		tput civis
+
+		# Start the spinner in the background, passing its arguments.
+		"$spinner_func" "${spinner_args[@]}" &
+		SPINNER_PID=$!
+		trap 'kill $SPINNER_PID &>/dev/null; tput cnorm; exit' INT TERM
+
+		sleep 4
+
+		kill $SPINNER_PID &>/dev/null
+		tput cnorm
+		trap - INT TERM
+
+		# Special cleanup for complex spinners
+		if [[ "$spinner_func" == "fun_spinner_aurora_orb" ]]; then
+			printf "\r\033[K\033[A\033[K\rTask complete.\n"
+		elif [[ "$spinner_func" == "fun_spinner_spectrum" ]]; then
+			# Move up 5 lines and clear them to remove the block
+			printf "\033[5A"
+			for ((k = 0; k < 5; k++)); do printf "\033[K\n"; done
+			printf "\033[5A" # Move back up to print the completion message
+			printf "\rTask complete.\n"
+		else
+			printf "\rTask complete.               \n"
+		fi
+	}
+
+	echo -e "\nRunning all spinner demonstrations..."
+	echo "==================================="
+
+	run_demo fun_spinner_simple "Simple Line Spinner" "Processing files..."
+	run_demo fun_spinner_dots "Growing Dots Spinner" "Loading data..."
+	run_demo fun_spinner_braille "Smooth Braille Spinner" "Thinking..."
+	run_demo fun_spinner_kawaii_braille "Kawaii Braille Spinner" "Doing something cute..."
+	run_demo fun_spinner_colored "Colored Spinner (Green)" "Uploading..." "\033[0;32m"
+	run_demo fun_spinner_colored "Colored Spinner (Red)" "Error checking..." "\033[0;31m"
+	run_demo fun_spinner_braille_colored "Colored Braille (Cyan)" "Connecting..." "\033[0;36m"
+	run_demo fun_spinner_braille_bg "Braille with BG (Yellow)" "Compiling..." "\033[43m"
+	run_demo fun_spinner_pulsing_orb "Pulsing Orb (White)" "Pulsing..." "white"
+	run_demo fun_spinner_pulsing_orb "Pulsing Orb (Blue)" "Pulsing..." "blue"
+	run_demo fun_spinner_aurora_orb "Aurora Spirit Orb" "Look at the pretty colors"
+	run_demo fun_spinner_loading_bar "Loading Bar" "Fetching data..." "\033[0;32m"
+	run_demo fun_spinner_ping_pong "Ping-Pong Ball" "Pinging servers..."
+	run_demo fun_spinner_rainbow_bar "Rainbow Bar" "Doing colorful work..."
+	run_demo fun_spinner_spectrum "Spectrum Analyzer" "Analyzing audio..."
+
+	echo -e "\n==================================="
+	echo "All demonstrations complete."
+}
+
+# --- Script Entry Point ---
+# The script will run the demo automatically when executed.
+main

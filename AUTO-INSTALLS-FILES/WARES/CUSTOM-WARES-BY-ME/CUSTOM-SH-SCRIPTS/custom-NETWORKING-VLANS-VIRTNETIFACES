@@ -1,0 +1,840 @@
+#!/bin/bash
+# MADE BY: LINUX-OASIS
+# BASH program to automate the creation of a VLAN/ Virtual Wifi interface or Virtual Ethernet network interface on Linux
+# Allows simultaneous use of a Wi-Fi adapter in different modes
+
+# Check and install dependencies if not already installed
+for PACKAGE in iw ethtool; do
+	if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+		echo "Dependency $PACKAGE is NOT installed .. installing"
+		sudo apt update
+		sudo apt install -y $PACKAGE
+
+		if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+			echo "Possibly didn't install dependency $PACKAGE .. exiting"
+			exit
+		fi
+	fi
+done
+
+# Define custom colors for whiptail dialogs
+NEWT_COLORS='
+root=magenta,lightgray
+border=black,white
+window=white,blue
+shadow=brown,brightblue
+title=white,gray
+button=lightgray,black
+actbutton=black,brightblue
+checkbox=brightblue,green
+actcheckbox=blue,white
+entry=black,brightblue
+label=black,brightmagenta
+listbox=black,white
+actlistbox=white,brightmagenta
+textbox=black,yellow
+acttextbox=magenta,brightmagenta
+helpline=red,lightgray
+roottext=blue,white
+emptyscale=blue,yellow
+fullscale=brightgreen,green
+disentry=magenta,brightmagenta
+compactbutton=lightgray,blue
+actsellistbox=white,gray
+sellistbox=lightgray,brown'
+export NEWT_COLORS
+
+# window = is the color of the menu box
+# title = is the color of the title
+# backtitle = is the color of the title bar
+# root = is the color of the text and background in the root menu
+# border = is the color of the border around the menu
+# actlistbox = is the color of the actively selected item ... after selecting and in the ok/cancel option
+# actsellistbox = is the color of the menu items window
+
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+
+function FUN_SHOW_ABOUT {
+	whiptail --title "About" --msgbox "This script helps automate network interface management on Linux.\n\n\
+MADE BY: LINUX-OASIS\n\n\
+Features:\n\
+- Create/Delete Virtual Wireless & Ethernet NICs (VLAN, MACVLAN, Bridge)\n\
+- Rename network interfaces\n\
+- Check hardware capabilities\n\
+- View NetworkManager status\n\n\
+This script makes changes to your network configuration and requires sudo privileges for most operations. Use with caution." 0 0
+}
+
+# Function to create a virtual network interface
+function FUN_CREATE_VIRTUAL_NIC {
+
+	# Use readarray to populate an array of interfaces
+	local interfaces=()
+	readarray -t interfaces < <(ls /sys/class/net)
+
+	if [ ${#interfaces[@]} -eq 0 ]; then
+		echo "ERROR: No network interfaces found."
+		return
+	fi
+
+	# Prepare menu options and an associative array for mapping
+	local options=()
+	declare -A iface_map
+	local i=1
+	for iface in "${interfaces[@]}"; do
+		if [[ -n "$iface" ]]; then
+			options+=("$i" "$iface")
+			iface_map[$i]="$iface"
+			((i++))
+		fi
+	done
+
+	# Prompt user to select a physical NIC
+	local choice
+	choice=$(whiptail --fullbuttons --backtitle "Physical NIC Selection" \
+		--title "Select NIC" \
+		--menu "Choose a physical NIC to create a virtual interface under:" \
+		0 0 "${#iface_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3)
+
+	# Exit if user cancels
+	if [ $? -ne 0 ] || [ -z "$choice" ]; then
+		echo "USER HAS ABORTED.... EXITING"
+		return
+	fi
+
+	# Get the logical name of the selected NIC from the map
+	_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME="${iface_map[$choice]}"
+
+	# Determine if the selected NIC is wireless or wired
+	if [ -d "/sys/class/net/${_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME}/wireless" ]; then
+		_NIC_MAIN_CHOICE_SELECTION_DEVICE_TYPE="Wireless"
+	else
+		_NIC_MAIN_CHOICE_SELECTION_DEVICE_TYPE="Ethernet"
+	fi
+
+	# Handle wireless NIC selection
+	if [[ $_NIC_MAIN_CHOICE_SELECTION_DEVICE_TYPE == "Wireless" ]] &&
+		[[ -d "/sys/class/net/${_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME}/wireless" ]]; then
+
+		# Prompt for a name for the new virtual wireless interface
+		_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_=$(whiptail --backtitle "Virtual Wireless Interface" \
+			--title "Name Virtual Interface" \
+			--inputbox "Enter the name for the new virtual wireless interface:" \
+			0 0 3>&1 1>&2 2>&3)
+
+		if [ -z "$_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_" ]; then
+			echo "ERROR: Interface name cannot be empty. Exiting."
+			return 1
+		fi
+
+		# Sanitize and check for duplicate interface name
+		_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_SANITIZED=$(echo "$_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_" |
+			tr -d '[:space:]') # Remove all spaces from the name
+		if [[ -L "/sys/class/net/$_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_SANITIZED" ]]; then
+			echo "ERROR: Interface name is already in use or invalid. Exiting."
+			return 1
+		fi
+
+		# Prompt for the mode of the new interface
+		_NEW_VIRTUAL_WIRELESS_INTERFACE_MODE=$(whiptail --backtitle "Virtual Wireless Interface Mode" \
+			--title "Select Interface Mode" \
+			--menu "Choose the mode for the new interface:" \
+			0 0 3 \
+			"1" "managed" \
+			"2" "monitor" \
+			"3" "__ap" 3>&1 1>&2 2>&3)
+
+		# Validate and set the selected mode
+		case $_NEW_VIRTUAL_WIRELESS_INTERFACE_MODE in
+		1) _NEW_VIRTUAL_WIRELESS_INTERFACE_MODE="managed" ;;
+		2) _NEW_VIRTUAL_WIRELESS_INTERFACE_MODE="monitor" ;;
+		3) _NEW_VIRTUAL_WIRELESS_INTERFACE_MODE="__ap" ;;
+		*)
+			echo "ERROR: Invalid mode selected. Exiting."
+			return 1
+			;;
+		esac
+
+		# Configure the new virtual wireless interface
+		sudo ip link set "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" down
+		sudo systemctl stop NetworkManager
+		if ! sudo iw dev "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" \
+			interface add "$_NEW_VIRTUAL_WIRELESS_INTERFACE_NAME_SANITIZED" type $_NEW_VIRTUAL_WIRELESS_INTERFACE_MODE; then
+			echo "ERROR: Failed to create virtual wireless interface. Exiting."
+			return 1
+		fi
+		sudo ip link set "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" up
+		sudo systemctl restart NetworkManager
+
+	# Handle wired NIC selection
+	elif [[ $_NIC_MAIN_CHOICE_SELECTION_DEVICE_TYPE == "Ethernet" ]]; then
+		_VIRTUAL_ETHERNET_TYPE=$(whiptail --fullbuttons --backtitle "Virtual Ethernet Interface Type" \
+			--title "Select Virtual Interface Type" \
+			--menu "Choose the type of virtual interface to create on $_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME:" \
+			0 0 3 \
+			"1" "VLAN (Virtual LAN - 802.1q)" \
+			"2" "MACVLAN (MAC-based Virtualization)" \
+			"3" "Bridge (Software Switch)" 3>&1 1>&2 2>&3)
+
+		# Exit if user cancels
+		if [ -z "$_VIRTUAL_ETHERNET_TYPE" ]; then
+			echo "USER HAS ABORTED.... EXITING"
+			return
+		fi
+
+		# Prompt for new interface name
+		_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_=$(whiptail --backtitle "Virtual Ethernet Interface" \
+			--title "Name Virtual Interface" \
+			--inputbox "Enter the name for the new virtual ethernet interface:" \
+			0 0 3>&1 1>&2 2>&3)
+
+		if [ -z "$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_" ]; then
+			echo "ERROR: Interface name cannot be empty. Exiting."
+			return 1
+		fi
+
+		_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED=$(echo "$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_" | tr -d '[:space:]')
+		if [[ -L "/sys/class/net/$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED" ]]; then
+			echo "ERROR: Interface name is already in use or invalid. Exiting."
+			return 1
+		fi
+
+		case $_VIRTUAL_ETHERNET_TYPE in
+		1) # VLAN Logic
+			_VLAN_ID=$(whiptail --backtitle "VLAN Configuration" \
+				--title "VLAN ID" \
+				--inputbox "Enter the VLAN ID (1-4094):" \
+				0 0 3>&1 1>&2 2>&3)
+
+			if ! [[ "$_VLAN_ID" -ge 1 && "$_VLAN_ID" -le 4094 ]]; then
+				echo "ERROR: Invalid VLAN ID. Must be between 1 and 4094. Exiting."
+				return 1
+			fi
+
+			echo "Creating VLAN interface $_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED on $_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME with ID $_VLAN_ID..."
+			sudo ip link add link "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" name "$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED" type vlan id "$_VLAN_ID"
+			sudo ip link set "$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED" up
+			echo "VLAN interface created successfully."
+			;;
+		2) # MACVLAN Logic
+			_MACVLAN_MODE=$(whiptail --backtitle "MACVLAN Mode" \
+				--title "Select MACVLAN Mode" \
+				--menu "Choose the mode for the new MACVLAN interface:" \
+				0 0 4 \
+				"1" "private (isolates from other MACVLANs)" \
+				"2" "vepa (requires switch support)" \
+				"3" "bridge (connects all MACVLANs)" \
+				"4" "passthru (single MAC, requires promiscuous mode)" 3>&1 1>&2 2>&3)
+
+			case $_MACVLAN_MODE in
+			1) _MACVLAN_MODE_NAME="private" ;;
+			2) _MACVLAN_MODE_NAME="vepa" ;;
+			3) _MACVLAN_MODE_NAME="bridge" ;;
+			4) _MACVLAN_MODE_NAME="passthru" ;;
+			*)
+				echo "ERROR: Invalid mode selected. Exiting."
+				return 1
+				;;
+			esac
+
+			echo "Creating MACVLAN interface $_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED in $_MACVLAN_MODE_NAME mode..."
+			sudo ip link add link "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" name "$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED" type macvlan mode "$_MACVLAN_MODE_NAME"
+			sudo ip link set "$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED" up
+			echo "MACVLAN interface created successfully."
+			;;
+		3) # Bridge Logic
+			_BRIDGE_TYPE=$(whiptail --backtitle "Bridge Type" --title "Select Bridge Type" --menu "Choose the type of bridge to create:" 0 0 2 "1" "Temporary (via ip link)" "2" "Persistent (via NetworkManager)" 3>&1 1>&2 2>&3)
+
+			if [ -z "$_BRIDGE_TYPE" ]; then
+				echo "USER HAS ABORTED.... EXITING"
+				return
+			fi
+
+			case $_BRIDGE_TYPE in
+			1) # Temporary Bridge
+				echo "Creating Temporary Bridge interface $_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED and enslaving $_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME..."
+				sudo ip link add name "$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED" type bridge
+				sudo ip link set "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" master "$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED"
+				sudo ip link set "$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED" up
+				echo "Temporary Bridge interface created and physical NIC enslaved successfully."
+				;;
+			2) # Persistent Bridge
+				echo "Creating Persistent Bridge interface $_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED..."
+				local bridge_name="$_NEW_VIRTUAL_ETHERNET_INTERFACE_NAME_SANITIZED"
+				local slave_iface="$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME"
+
+				# 1. Create the bridge connection profile
+				sudo nmcli connection add type bridge ifname "$bridge_name" con-name "$bridge_name" ipv4.method auto ipv6.method ignore
+				if [ $? -ne 0 ]; then
+					echo "ERROR: Failed to create bridge connection profile. Exiting."
+					return 1
+				fi
+
+				# 2. Add the physical NIC as a slave
+				sudo nmcli connection add type ethernet ifname "$slave_iface" master "$bridge_name" con-name "bridge-slave-$slave_iface"
+				if [ $? -ne 0 ]; then
+					echo "ERROR: Failed to add slave interface to bridge. Exiting."
+					# Clean up the created bridge connection
+					sudo nmcli connection delete "$bridge_name"
+					return 1
+				fi
+
+				# 3. Find and deactivate the old connection for the slave interface
+				local old_connection
+				old_connection=$(nmcli -t -f NAME,DEVICE connection show --active | grep -w "$slave_iface" | cut -d: -f1)
+				if [ -n "$old_connection" ]; then
+					echo "Deactivating old connection '$old_connection' for $slave_iface..."
+					sudo nmcli connection down "$old_connection"
+				fi
+
+				# 4. Bring up the new bridge connection
+				echo "Activating bridge connection '$bridge_name'..."
+				sudo nmcli connection up "$bridge_name"
+				if [ $? -ne 0 ]; then
+					echo "ERROR: Failed to bring up the bridge connection."
+					echo "You may need to manually troubleshoot using 'nmcli connection show' and 'ip addr'."
+					# Attempt to clean up
+					sudo nmcli connection delete "bridge-slave-$slave_iface"
+					sudo nmcli connection delete "$bridge_name"
+					return 1
+				fi
+
+				echo "Persistent bridge created and activated successfully."
+				whiptail --title "Verification" --msgbox "Bridge '$bridge_name' is active. Host and VMs can now connect to it. The physical interface '$slave_iface' is now a slave and should not have an IP address." 0 0
+				;;
+			*)
+				echo "ERROR: Invalid bridge type selected. Exiting."
+				return 1
+				;;
+			esac
+			;;
+		*)
+			echo "ERROR: Invalid type selected. Exiting."
+			return 1
+			;;
+		esac
+
+		# Restart network manager to apply changes
+		echo "Restarting NetworkManager to apply changes..."
+		sudo systemctl restart NetworkManager
+		echo "NetworkManager restarted."
+
+	else
+		echo "ERROR: Selected NIC is neither Wireless nor Ethernet. Exiting."
+		return 1
+	fi
+}
+
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+
+# Prompts the user to select and delete a virtual network interface.
+# It handles both wireless and wired/VLAN interfaces by using the appropriate command ('iw' or 'ip').
+# Function to delete a virtual network interface
+function FUN_DELETE_VIRTUAL_NIC {
+
+	# Use readarray to populate an array of interfaces
+	local interfaces=()
+	readarray -t interfaces < <(ls /sys/class/net)
+
+	if [ ${#interfaces[@]} -eq 0 ]; then
+		echo "ERROR: No network interfaces found."
+		return 1
+	fi
+
+	# Prepare menu options and an associative array for mapping
+	local options=()
+	declare -A iface_map
+	local i=1
+	for iface in "${interfaces[@]}"; do
+		if [[ -n "$iface" ]]; then
+			options+=("$i" "$iface")
+			iface_map[$i]="$iface"
+			((i++))
+		fi
+	done
+
+	# Display a menu prompting the user to select an interface to delete.
+	local choice
+	choice=$(whiptail --fullbuttons --backtitle "Select [PHYSICAL/VIRTUAL NIC] To Delete:" \
+		--title "Select NIC to Delete" \
+		--menu "Choose a network interface to delete:" \
+		0 0 "${#iface_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3)
+
+	# Exit if the user pressed Cancel or Esc in the menu.
+	if [ $? -ne 0 ] || [ -z "$choice" ]; then
+		echo "USER HAS ABORTED.... EXITING"
+		return
+	fi
+
+	# Get the logical name of the selected interface from the map.
+	_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME="${iface_map[$choice]}"
+
+	# Ask for a final confirmation before proceeding with the deletion.
+
+	if (whiptail --title "Confirmation" --yesno "Are you sure you want to delete the interface: ${_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME}?" 0 0 3>&1 1>&2 2>&3); then
+
+		local iface_name="$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME"
+
+		# Check if it is a bridge interface
+
+		if [ -d "/sys/class/net/$iface_name/bridge" ]; then
+
+			# Check if it is managed by NetworkManager
+
+			if nmcli -t c show | grep -q "^$iface_name:"; then
+
+				echo "Detected persistent NetworkManager bridge. Deleting..."
+
+				# Find the slave interface attached to the bridge
+
+				local slave_iface
+
+				slave_iface=$(ip -br link show master "$iface_name" | awk '{print $1}')
+
+				# Delete the bridge and slave connections
+
+				sudo nmcli connection delete "$iface_name"
+
+				if [ -n "$slave_iface" ]; then
+
+					sudo nmcli connection delete "bridge-slave-$slave_iface"
+
+					echo "Attempting to reactivate $slave_iface..."
+
+					sudo nmcli device connect "$slave_iface"
+
+				fi
+
+				echo "Persistent bridge '$iface_name' and its slave connections have been deleted."
+
+			else
+
+				echo "Detected temporary bridge. Deleting..."
+
+				sudo ip link delete "$iface_name" type bridge
+
+				echo "Temporary bridge '$iface_name' deleted."
+
+			fi
+
+		# Check if it is a wireless interface
+
+		elif [ -d "/sys/class/net/$iface_name/wireless" ]; then
+
+			echo "Deleting wireless interface..."
+
+			sudo iw dev "$iface_name" del
+
+			echo "Wireless interface '$iface_name' deleted."
+
+		# Handle other virtual interfaces (VLAN, MACVLAN, etc.)
+
+		else
+
+			echo "Deleting virtual interface..."
+
+			sudo ip link delete "$iface_name"
+
+			echo "Virtual interface '$iface_name' deleted."
+
+		fi
+
+		# Restart NetworkManager to apply changes
+
+		echo "Restarting NetworkManager to reflect changes..."
+
+		sudo systemctl restart NetworkManager
+
+		echo "NetworkManager restarted."
+
+	else
+
+		# If the user cancels the confirmation dialog.
+
+		echo "Deletion cancelled by user."
+
+	fi
+}
+
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+# °º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸°º¤ø,¸¸,ø¤º°`°º¤ø,¸,ø¤°º¤ø,¸¸,ø¤º°`°º¤ø,¸
+
+# Allows the user to select a network interface and rename it.
+function FUN_CHANGE_NAME_NIC {
+
+	# Use readarray to populate an array of interfaces
+	local interfaces=()
+	readarray -t interfaces < <(ls /sys/class/net)
+
+	if [ ${#interfaces[@]} -eq 0 ]; then
+		echo "ERROR: No network interfaces found."
+		return 1
+	fi
+
+	# Prepare menu options and an associative array for mapping
+	local options=()
+	declare -A iface_map
+	local i=1
+	for iface in "${interfaces[@]}"; do
+		if [[ -n "$iface" ]]; then
+			options+=("$i" "$iface")
+			iface_map[$i]="$iface"
+			((i++))
+		fi
+	done
+
+	# Display a menu for the user to select a network interface to rename.
+	local choice
+	choice=$(whiptail --fullbuttons --backtitle "Select [NIC] To [CHANGE NAME] :" \
+		--title "Select [NIC] To [CHANGE NAME] :" \
+		--menu "SELECT [NIC] TO CHANGE NAME:" 0 0 "${#iface_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3)
+
+	# Exit if the user cancels the selection or presses Esc.
+	if [ $? -ne 0 ] || [ -z "$choice" ]; then
+		echo "USER HAS ABORTED.... EXITING"
+		return 1
+	fi
+
+	# Extract the actual interface name from the user's selection.
+	_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME="${iface_map[$choice]}"
+
+	# Prompt the user to enter a new name for the selected interface.
+	_NEW_NIC_NAME=$(whiptail --backtitle "Change NIC Name" \
+		--title "Change NIC Name" \
+		--inputbox "Enter the new name for the NIC:" 0 0 3>&1 1>&2 2>&3)
+
+	# Exit if no name is entered.
+	if [ -z "$_NEW_NIC_NAME" ]; then
+		echo "ERROR: The new NIC name cannot be empty!!!!"
+		echo "USER HAS ABORTED.... EXITING"
+		return 1
+	fi
+
+	# Sanitize the input by removing extra spaces.
+	_NEW_NIC_NAME_SANITIZED=$(echo "$_NEW_NIC_NAME" | tr -d '[:space:]')
+
+	# Ensure the new name is not already in use to prevent conflicts.
+	if [[ -L "/sys/class/net/$_NEW_NIC_NAME_SANITIZED" ]]; then
+		echo "ERROR: The new NIC name '$_NEW_NIC_NAME_SANITIZED' is already in use!!!!"
+		echo "OR POSSIBLY ANOTHER ISSUE HAS OCCURRED.... EXITING"
+		return 1
+	fi
+
+	# --- Rename the selected network interface ---
+	echo "Renaming '$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME' to '$_NEW_NIC_NAME_SANITIZED'..."
+	sudo ip link set "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" down 2>/dev/null                # Bring the interface down
+	sudo ip link set "$_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME" name "$_NEW_NIC_NAME_SANITIZED" # Rename the interface
+	sudo ip link set "$_NEW_NIC_NAME_SANITIZED" up 2>/dev/null                                         # Bring the renamed interface back up
+
+	# Verify that the rename operation was successful.
+	if [[ -e "/sys/class/net/$_NEW_NIC_NAME_SANITIZED" ]] && [[ ! -e "/sys/class/net/${_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME}" ]]; then
+		echo -e "NIC name changed successfully from [[ \033[1;31;37;44m $_NIC_MAIN_CHOICE_SELECTION_DEVICE_LOGICAL_NAME \033[0m ]] to [[ \033[1;31;37;44m $_NEW_NIC_NAME_SANITIZED \033[0m ]]"
+
+		# Restart NetworkManager to apply changes
+		echo "Restarting NetworkManager to recognize the new interface name..."
+		sudo systemctl restart NetworkManager
+		echo "NetworkManager restarted."
+	else
+		echo "ERROR: Could not rename the interface. Please check permissions or system state."
+		return 1
+	fi
+
+}
+
+# Function to check and display the capabilities of a wireless network interface.
+function FUN_CHECK_WIFI_CAPABILITIES {
+
+	# Check for the 'iw' command, which is essential for this function.
+	if ! command -v iw &>/dev/null; then
+		whiptail --msgbox "The 'iw' command is required but not found. Please install it to continue." 0 0
+		return
+	fi
+
+	# Use 'iw dev' to find all wireless interfaces and load them into an array.
+	local wifi_interfaces=()
+	readarray -t wifi_interfaces < <(iw dev | grep Interface | awk '{print $2}')
+
+	# If no wireless interfaces are found, inform the user and exit the function.
+	if [ ${#wifi_interfaces[@]} -eq 0 ]; then
+		whiptail --msgbox "No wireless interfaces were found on this system." 0 0
+		return
+	fi
+
+	# Prepare menu options and an associative array for mapping
+	local options=()
+	declare -A iface_map
+	local i=1
+	for iface in "${wifi_interfaces[@]}"; do
+		if [[ -n "$iface" ]]; then
+			options+=("$i" "$iface")
+			iface_map[$i]="$iface"
+			((i++))
+		fi
+	done
+
+	# Prompt the user to select a wireless interface.
+	local choice
+	choice=$(whiptail --title "Select Wireless NIC" --menu "Choose a wireless interface to inspect:" 0 0 "${#iface_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3)
+
+	# Exit the function if the user cancels.
+	if [ $? -ne 0 ] || [ -z "$choice" ]; then
+		echo "User cancelled selection."
+		return
+	fi
+
+	# Get the interface name from the map
+	local selected_iface="${iface_map[$choice]}"
+
+	# Determine the physical device name (e.g., 'phy0') from the interface name.
+	# This is a more reliable method than reading from /sys.
+	local phy_device
+	phy_device=$(iw dev "$selected_iface" info | grep wiphy | awk '{print "phy"$2}')
+
+	if [ -z "$phy_device" ]; then
+		whiptail --msgbox "Error: Could not determine the physical device (phy) for '$selected_iface'." 0 0
+		return
+	fi
+
+	# Get the full capabilities output from 'iw'. This requires sudo.
+	whiptail --infobox "Querying capabilities for $selected_iface..." 0 0
+	local capabilities_output
+	capabilities_output=$(sudo iw phy "$phy_device" info)
+
+	# Extract the 'software interface modes' and 'valid interface combinations' sections.
+	# We use awk to print the block of text starting with the pattern until the next major section.
+	local modes_info
+	modes_info=$(echo "$capabilities_output" | awk '/software interface modes/, /HT Capability overrides:/ {if (!/HT Capability overrides:/) print}')
+	# Extract the 'Frequencies' (channels) section.
+	# We print the block of text starting with 'Frequencies:' until 'Supported Ciphers'.
+	local channels_info
+	channels_info=$(echo "$capabilities_output" | awk '/Frequencies:/, /Supported Ciphers/ {if (!/Supported Ciphers/) print}')
+
+	# We will write the final report to a temporary file to reliably display it with whiptail.
+	local temp_file
+	temp_file=$(mktemp)
+
+	# Ensure the temporary file is deleted when the script exits, even if it errors.
+	trap 'rm -f -- "$temp_file"' EXIT
+
+	# Prepare the final text for display.
+	# We use printf instead of echo for more reliable handling of special characters.
+	printf "Capabilities for: %s (physical device: %s)\n\n" "$selected_iface" "$phy_device" >"$temp_file"
+	printf "========================================\n" >>"$temp_file"
+	printf "SUPPORTED MODES & COMBINATIONS\n" >>"$temp_file"
+	printf "========================================\n" >>"$temp_file"
+	printf "%s\n\n" "$modes_info" >>"$temp_file"
+	printf "========================================\n" >>"$temp_file"
+	printf "AVAILABLE CHANNELS & FREQUENCIES\n" >>"$temp_file"
+	printf "========================================\n" >>"$temp_file"
+	printf "%s\n" "$channels_info" >>"$temp_file"
+
+	# Use a whiptail textbox to display the contents of the temporary file.
+	# The --scrolltext option is important for long outputs.
+	whiptail --title "Wireless Capabilities" --textbox "$temp_file" 0 0 --scrolltext
+
+	# Clean up the trap and the file immediately.
+	rm -f -- "$temp_file"
+	trap - EXIT
+}
+
+function FUN_CHECK_ETHERNET_CAPABILITIES {
+
+	# Generate a list of Ethernet (non-wireless) interfaces
+	local eth_interfaces=()
+	readarray -t all_interfaces < <(ls /sys/class/net)
+	for iface in "${all_interfaces[@]}"; do
+		if [ ! -d "/sys/class/net/$iface/wireless" ]; then
+			eth_interfaces+=("$iface")
+		fi
+	done
+
+	if [ ${#eth_interfaces[@]} -eq 0 ]; then
+		whiptail --msgbox "No Ethernet interfaces were found." 0 0
+		return
+	fi
+
+	# Prepare menu options and an associative array for mapping
+	local options=()
+	declare -A iface_map
+	local i=1
+	for iface in "${eth_interfaces[@]}"; do
+		if [[ -n "$iface" ]]; then
+			options+=("$i" "$iface")
+			iface_map[$i]="$iface"
+			((i++))
+		fi
+	done
+
+	# Prompt user to select an Ethernet NIC
+	local choice
+	choice=$(whiptail --fullbuttons --title "Select NIC [ETHERNET interface]" \
+		--menu "Select an Ethernet interface to view its capabilities:" \
+		0 0 "${#iface_map[@]}" "${options[@]}" 3>&1 1>&2 2>&3)
+
+	# Exit if user cancels
+	if [ $? -ne 0 ] || [ -z "$choice" ]; then
+		echo "USER ABORTED / CANCELLED."
+		return
+	fi
+
+	local selected_iface="${iface_map[$choice]}"
+
+	# Get ethtool output and display it
+	local temp_file
+	temp_file=$(mktemp)
+	trap 'rm -f -- "$temp_file"' EXIT
+
+	sudo ethtool "$selected_iface" >"$temp_file"
+
+	whiptail --scrolltext --textbox "$temp_file" 0 0
+
+	echo -e "\n ::::::: RAN ::: sudo ethtool $selected_iface"
+
+	rm -f -- "$temp_file"
+	trap - EXIT
+}
+
+function FUN_NETWORK_MANAGER_STATUS {
+
+	# clear screen for better readability
+	clear
+	# Check NetworkManager status of devices (nmcli device status / nmcli connection show)
+	echo -e "\e[48;5;147m" "========================================================================" "\e[0m"
+
+	echo -e "\e[1;48;5;53m" "NetworkManager Status / Connections" "\e[0m" "RUN COMMAND: \033[1;31;37;44m nmcli device status \033[0m"
+	# echo -e "RUN COMMAND: \033[1;31;37;44m nmcli device status \033[0m"
+	echo -e "\n"
+
+	nmcli device status
+	echo -e "\n"
+
+	echo -e "\e[48;5;147m" "========================================================================" "\e[0m"
+	echo -e "\e[1;48;5;53m" "NetworkManager Status / Connections" "\e[0m" "RUN COMMAND: \033[1;31;37;44m nmcli connection show \033[0m"
+	echo -e "\n"
+
+	# we run the command with PAGER='' to avoid paging issues / requiring to ctrl+c to exit the command (nmcli uses pager by default)
+	export PAGER=''
+	nmcli connection show
+
+	echo -e "\n"
+
+	echo -e "\e[48;5;147m" "========================================================================" "\e[0m"
+
+	# press ENTER to continue...
+	echo -n "Press [ ENTER ] to continue..."
+	read -s -r
+
+}
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) MAIN MENU (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+
+while true; do
+	# Display the main menu to the user, allowing them to select an action.
+	# The user's choice (e.g., "1", "2", "3") is captured in the _MASTER_CHOICE_TODO variable.
+	_MASTER_CHOICE_TODO=$(
+		whiptail --fullbuttons --backtitle "Virtual Network Interface Card (NIC) or a Virtual Local Area Network (VLAN)" --title "NETWORKING [VIRTUAL NIC(s) / VLAN(s)]" \
+			--menu "NETWORKING [VIRTUAL NIC(s) / VLAN(s)]" 0 0 7 \
+			"1" "[CREATE] a Virtual Network Interface Card (NIC) / (VLAN)" \
+			"2" "[DELETE] a Network Interface Card (NIC) / (VLAN)" \
+			"3" "[CHANGE NAME] of NIC/VLAN" \
+			"4" "[CHECK] Wireless NIC Capabilities" \
+			"5" "[CHECK] ETHERNET NIC CAPABILITIES & CONFIGURATION" \
+			"6" "[CHECK] NetworkManager Status / Connections" \
+			"7" "[ABOUT / HELP / INFO]" 3>&1 1>&2 2>&3
+	)
+
+	# Main control flow based on the user's selection from the whiptail menu.
+	if [ -z "$_MASTER_CHOICE_TODO" ]; then
+		# If the user cancels or presses Esc, the variable will be empty.
+		echo "USER ABORTED.... EXITING"
+		exit
+
+	elif [ "$_MASTER_CHOICE_TODO" -eq 1 ]; then
+		# Call the function to create a new virtual NIC.
+		FUN_CREATE_VIRTUAL_NIC
+
+	elif [ "$_MASTER_CHOICE_TODO" -eq 2 ]; then
+		# Call the function to delete an existing virtual NIC.
+		FUN_DELETE_VIRTUAL_NIC
+
+	elif [ "$_MASTER_CHOICE_TODO" -eq 3 ]; then
+		# Call the function to rename a NIC.
+		FUN_CHANGE_NAME_NIC
+
+	elif [ "$_MASTER_CHOICE_TODO" -eq 4 ]; then
+		# Call the function to check wireless capabilities.
+		FUN_CHECK_WIFI_CAPABILITIES
+
+	elif [ "$_MASTER_CHOICE_TODO" -eq 5 ]; then
+		# Call the function to check ethernet capabilities.
+		FUN_CHECK_ETHERNET_CAPABILITIES
+
+	elif [ "$_MASTER_CHOICE_TODO" -eq 6 ]; then
+		# nmcli device status / nmcli connection show
+		FUN_NETWORK_MANAGER_STATUS
+
+	elif [ "$_MASTER_CHOICE_TODO" -eq 7 ]; then
+		# Show about/help info
+		FUN_SHOW_ABOUT
+
+	else
+		# Handle any unexpected or invalid input.
+		echo "ERROR: Invalid Choice"
+		echo "USER [ABORTED] OR POSSIBLY ANOTHER ISSUE HAS OCCURRED.... EXITING"
+		exit
+	fi
+
+done
+
+unset NEWT_COLORS
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-) END OF SCRIPT (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)(-(-_(-_-)_-)-)
+# (-(-_(-_-)_-)-)(-(-_(-_-)_-)-)

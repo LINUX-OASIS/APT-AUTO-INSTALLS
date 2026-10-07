@@ -1,0 +1,427 @@
+#!/bin/bash
+# =========================================================================================
+# Script: UUID and Label Changer
+# Description: Safely change the UUID or LABEL of ext4, btrfs, and FAT32 partitions.
+# Requirements: whiptail, uuidgen, dpkg, apt, e2fsck, tune2fs, btrfs-progs, mtools (for FAT32), dosfstools
+# Author: LINUX-OASIS
+# =========================================================================================
+
+# -----------------------------------------
+# 1. Ensure required utilities are installed
+# -----------------------------------------
+check_dependencies() {
+	local REQUIRED_PKGS=("btrfs-progs" "whiptail" "mtools" "uuid-runtime" "dosfstools")
+	for pkg in "${REQUIRED_PKGS[@]}"; do
+		# Check if the package is installed via dpkg
+		if ! dpkg -l "$pkg" &>/dev/null; then
+			echo "Installing missing dependency: $pkg"
+			# Update repository metadata and install the package quietly
+			sudo apt update && sudo apt install -y "$pkg"
+			# Verify installation succeeded, else exit with error
+			if ! dpkg -l "$pkg" &>/dev/null; then
+				echo "ERROR: Failed to install $pkg. Exiting."
+				exit 1
+			fi
+		fi
+	done
+}
+
+# Call dependency checker
+check_dependencies
+
+# -----------------------------------------
+# 2. Prompt for repeating hex character
+# -----------------------------------------
+select_repeating_hex() {
+	# Build menu choices for whiptail: displayed label and return value
+	local choices=(
+		0 0 1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 9 9 A A B B C C D D E E F F
+	)
+	# Show menu to user and capture chosen hex digit (0–F)
+	REPEATED_HEX=$(whiptail --title "Select Repeating Hex" \
+		--menu "Choose a hex digit to repeat in the new UUID:" 0 0 6 "${choices[@]}" 3>&1 1>&2 2>&3)
+	# If user pressed Cancel or Esc, abort the script
+	[[ -z $REPEATED_HEX ]] && echo "Operation cancelled by user." && exit 1
+
+	REPEATED_HEX=$(echo "$REPEATED_HEX" | tr -d '[:space:]') # Ensure no spaces
+
+	# Construct the repeated-hex UUID segments:
+	#   - 8 chars, 4 chars, 4 chars, 4 chars, 12 chars
+
+	# printf Format string %*s expects two arguments:
+	# The width (an integer)
+	# The string to print.
+	# printf '%*s' N '' #> generates a string of N spaces.  the '' is an empty string. not strictly necessary, but to avoid linter warnings, we passed the empty string. for maximum correctness.
+	# tr ' ' "$REPEATED_HEX" replaces spaces with the selected hex digit
+	# The segments are concatenated with hyphens to form a valid UUID format
+	# Example: if user selects 'A', the UUID will look like:
+	# AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA
+	REPEAT_UUID="$(printf '%*s' 8 '' | tr ' ' "$REPEATED_HEX")-\
+$(printf '%*s' 4 '' | tr ' ' "$REPEATED_HEX")-\
+$(printf '%*s' 4 '' | tr ' ' "$REPEATED_HEX")-\
+$(printf '%*s' 4 '' | tr ' ' "$REPEATED_HEX")-\
+$(printf '%*s' 12 '' | tr ' ' "$REPEATED_HEX")"
+}
+
+# -----------------------------------------
+# 3. List partitions and prompt selection
+# -----------------------------------------
+select_partition() {
+	local listfile=/tmp/partitions.lst
+	local line tag desc
+	local counter=0
+
+	# # 1) Gather matching partitions into a temporary file
+	# handles formatted printing and empty colums are replaced with "-" to avoid left shifting
+	# E.G.
+	# nvme0n1p1 ext4 INT-VTOY-EXT4 382d1e46-037a-4e7a-ab9e-5a501eb80258 50G
+	# nvme0n1p2 vfat VTOYEFI 2205-E719 32M
+	# nvme0n1p3 vfat - 0B8E-5998 1.1G
+	# nvme0n1p4 btrfs - 52439bcf-c120-4b55-9d03-8c2f465d1e2d 69.9G
+	# nvme0n1p5 ext4 INT-T470-WORKER 9a5ccb40-9952-4801-87d6-5d3f5ae81736 141.8G
+	# nvme0n1p6 vfat - 2BCE-3095 1G
+	# nvme0n1p7 btrfs INT-2nd-MAIN-OS 76e42067-e83e-4ff4-a713-0fc0d0345ad7 35G
+	# nvme0n1p9 vfat INT-REFIND F24A-B89C 64M
+
+	# NOTE: Awk script is written in multi-line form for POSIX compliance.
+	# If the code started immediately after the opening quote (e.g., awk 'BEGIN {...}'),
+	# the shell would expect the closing quote on the same line. Adding a newline would
+	# break the command. Placing the script body on a new line makes it a valid
+	# multi-line string.
+	# Alternative: collapse everything into a single-line awk command.
+
+	lsblk -P -o NAME,FSTYPE,LABEL,UUID,SIZE |
+		awk -F '"' '
+    $4=="ext4" || $4=="vfat" || $4=="btrfs" {
+        name   = $2  ? $2  : "-"
+        fstype = $4  ? $4  : "-"
+        label  = $6  ? $6  : "-"
+        uuid   = $8  ? $8  : "-"
+        size   = $10 ? $10 : "-"
+        printf "%-12s %-8s %-20s %-36s %-8s\n", name, fstype, label, uuid, size
+    }' >"$listfile"
+
+	# 2) Build a proper tag/description array for whiptail
+	options=() # reset array
+	while IFS= read -r line; do
+		# Extract the "number" and the rest of the line
+		# - 'nl' here would just enumerate; instead, we use a simple counter
+		((counter++))
+		tag=$counter
+		desc="$line"
+		options+=("$tag" "$desc")
+	done <"$listfile"
+
+	# 3) Display the menu: each element in ${options[@]} is a tag/desc pair
+	choice=$(whiptail --title "Select Partition" \
+		--menu "Pick a partition to modify:" 0 0 15 \
+		"${options[@]}" 3>&1 1>&2 2>&3)
+
+	# 4) Abort if user cancelled
+	[[ -z $choice ]] && echo "Selection aborted." && exit 1
+
+	# 5) Look up the chosen line in the listfile by line number
+	#    and extract the device name (first whitespace-separated word)
+	line=$(sed -n "${choice}p" "$listfile")
+	basename=${line%% *}    # strip everything after the first space
+	device="/dev/$basename" # prefix to form /dev/sdXN
+
+}
+
+# -----------------------------------------
+# 4. Ensure partition is unmounted before changes
+# -----------------------------------------
+ensure_unmounted() {
+	# Check for any mountpoint associated with the selected device
+	mountpoint=$(lsblk -o MOUNTPOINT -n "$device" | tr -d '[:space:]')
+	if [[ -n $mountpoint ]]; then
+		# If mounted, ask user whether to unmount
+		if whiptail --yesno "$device is mounted at $mountpoint. Unmount?" 0 0; then
+			sudo umount "$device" || {
+				echo "ERROR: Unmount failed. Exiting."
+				exit 1
+			}
+		else
+			echo "Cannot proceed while mounted. Exiting."
+			exit 1
+		fi
+
+	fi
+}
+
+# -----------------------------------------
+# 5. Modify partition: choose ext4/btrfs/vfat path
+# -----------------------------------------
+modify_partition() {
+	# Determine filesystem type of the selected device (strip whitespace)
+	local fstype=$(lsblk -no FSTYPE "$device" | tr -d '[:space:]')
+
+	case "$fstype" in
+	ext4)
+		modify_ext4 # ext4 label change routine
+		;;
+	btrfs)
+		modify_btrfs # btrfs label change routine
+		;;
+	vfat)
+		# Double-check FS version: only FAT32 supported
+		local fsver
+		fsver=$(lsblk -no FSVER "$device" | tr -d '[:space:]')
+		if [[ $fsver != FAT32 ]]; then
+			echo "ERROR: Not a FAT32 filesystem. Exiting."
+			exit 1
+		fi
+		modify_fat32 # FAT32 label rewrite routine
+		;;
+	*)
+		echo "ERROR: Unsupported filesystem $fstype. Exiting."
+		exit 1
+		;;
+	esac
+}
+
+# -----------------------------------------
+# 5a. ext4 label change
+# -----------------------------------------
+modify_ext4() {
+	# Run a forced filesystem check to ensure consistency
+	sudo e2fsck -y -f "$device"
+
+	# Prompt for new label (max 16 characters for ext4)
+	newlabel=$(whiptail --inputbox \
+		"Enter new LABEL for $device (max 16 chars):" 0 0 3>&1 1>&2 2>&3)
+	[[ -z $newlabel ]] && echo "No label entered. Exiting." && exit 1
+
+	# Truncate label if it exceeds the 16-character limit
+	newlabel=${newlabel:0:16}
+
+	# Apply the label change using tune2fs
+	sudo tune2fs -L "$newlabel" "$device"
+}
+
+# -----------------------------------------
+# 5b. btrfs label change
+# -----------------------------------------
+modify_btrfs() {
+	# Perform a read-only check for safety before modifying
+	sudo btrfs check --readonly "$device"
+
+	# Prompt for new label (max 255 characters for btrfs)
+	newlabel=$(whiptail --inputbox \
+		"Enter new LABEL for $device (max 255 chars):" 0 0 3>&1 1>&2 2>&3)
+	[[ -z $newlabel ]] && echo "No label entered. Exiting." && exit 1
+
+	# Truncate label if it exceeds the 255-character limit
+	newlabel=${newlabel:0:255}
+
+	# Apply the label change using btrfs filesystem label
+	sudo btrfs filesystem label "$device" "$newlabel"
+}
+
+# -----------------------------------------
+# 5c. FAT32 label restore (trigger metadata rewrite)
+# -----------------------------------------
+modify_fat32() {
+	# Display current label, then rewrite it to force an update
+	sudo mlabel -n -i "$device" # show existing label
+	# Prompt for new label (max 11 characters for fat32)
+	newlabel=$(whiptail --inputbox \
+		"Enter new LABEL for $device (max 11 chars):" 0 0 3>&1 1>&2 2>&3)
+
+	if [[ -z $newlabel ]]; then
+		echo "No label entered. Exiting."
+		exit 1
+	fi
+
+	# Truncate label if it exceeds the 11-character limit
+	newlabel=${newlabel:0:11}
+
+	# Trim spaces
+	newlabel="$(echo "$newlabel" | tr -d '[:space:]')"
+	sudo mlabel -i "$device" ::"$newlabel"
+
+}
+
+# -----------------------------------------
+# 6. Change UUID for ext4, btrfs, or fat32
+# -----------------------------------------
+change_uuid() {
+	# Pre-flight consistency check based on filesystem type
+	# Determine the filesystem type for the selected device.
+
+	local fstype=$(lsblk -no FSTYPE "$device" | tr -d '[:space:]')
+
+	# For vfat filesystems, an additional check is performed to ensure it's FAT32.
+	# This script specifically supports FAT32 and not other FAT versions.
+	if [[ $fstype == vfat ]]; then
+		local fsver
+		fsver=$(lsblk -no FSVER "$device" | tr -d '[:space:]')
+		if [[ $fsver != FAT32 ]]; then
+			echo "ERROR: The filesystem is not FAT32. Exiting."
+			exit 1
+		fi
+		# Explicitly set fstype for clarity in the case statement.
+		fstype=vfat
+	fi
+
+	# A case statement handles the UUID change based on the filesystem type.
+	case "$fstype" in
+	ext4 | btrfs)
+		# For ext4 and btrfs, a pre-flight consistency check is performed.
+		echo -e "\e[3;100m" "Pre-flight consistency check for filesystem type: $fstype" "\e[0m"
+		if [[ $fstype == ext4 ]]; then
+			# e2fsck checks for and fixes filesystem errors.
+			sudo e2fsck -y -f "$device"
+		elif [[ $fstype == btrfs ]]; then
+			# btrfs check is run in read-only mode for safety.
+			sudo btrfs check --readonly "$device"
+		fi
+
+		# Choose new UUID: repeating pattern or fully random
+		# The new UUID is determined based on the user's choice (repeating or random).
+		# The 'mode' variable is set in the main loop (1 for repeat, 2 for random).
+		local newuuid
+		if [[ $mode -eq 1 ]]; then
+			# If mode is 1, call the function to select a repeating hex character.
+			select_repeating_hex
+			newuuid=$REPEAT_UUID
+		else
+			# Otherwise, generate a new random UUID.
+			newuuid=$(uuidgen | tr '[:lower:]' '[:upper:]')
+		fi
+
+		# Apply the new UUID
+		# The new UUID is applied using the appropriate tool for the filesystem.
+		if [[ $fstype == ext4 ]]; then
+			sudo tune2fs -U "$newuuid" "$device"
+		else
+			yes | sudo btrfstune -U "$newuuid" "$device"
+		fi
+		;;
+	vfat)
+		# For FAT32, the "UUID" is actually a Volume ID, which is an 8-digit hex number.
+		local serial_hex
+		if [[ $mode -eq 1 ]]; then
+			# If mode is 1, generate a repeating 8-digit hex string.
+			select_repeating_hex
+			serial_hex=$(printf '%*s' 8 '' | tr ' ' "$REPEATED_HEX")
+		else
+			# Otherwise, generate a random 8-digit hex string (4 bytes from /dev/urandom).
+			serial_hex=$(xxd -l4 -p /dev/urandom | tr '[:lower:]' '[:upper:]')
+		fi
+
+		# Inform the user what Volume ID is being set.
+		echo "Setting FAT32 Volume ID to $serial_hex"
+
+		# The `fatlabel` utility from `dosfstools` is used to set the Volume ID.
+		# The ID must be prefixed with "0x" for the command. E.G.: [0x<8 hex characters>]
+		# The volume ID is a 32-bit number in hexadecimal.
+		sudo fatlabel "$device" -i "0x$serial_hex" || {
+			echo "ERROR: Failed to set Volume ID for FAT32 partition. Exiting."
+			exit 1
+		}
+		;;
+	*)
+		# If the filesystem is not ext4, btrfs, or vfat (FAT32), it's unsupported.
+		echo "ERROR: Unsupported filesystem $fstype. Exiting."
+		exit 1
+		;;
+	esac
+}
+# -----------------------------------------
+# 7. Display all matching partitions
+# -----------------------------------------
+show_all() {
+	local listfile=/tmp/all_partitions.lst
+	# List all ext4/btrfs/vfat partitions and save to a file
+
+	# NOTE: Awk script is written in multi-line form for POSIX compliance.
+	# If the code started immediately after the opening quote (e.g., awk 'BEGIN {...}'),
+	# the shell would expect the closing quote on the same line. Adding a newline would
+	# break the command. Placing the script body on a new line makes it a valid
+	# multi-line string.
+	# Alternative: collapse everything into a single-line awk command.
+
+	lsblk -P -o NAME,FSTYPE,LABEL,UUID,SIZE |
+		awk -F '"' '
+    $4=="ext4" || $4=="vfat" || $4=="btrfs" {
+        name   = $2  ? $2  : "-"
+        fstype = $4  ? $4  : "-"
+        label  = $6  ? $6  : "-"
+        uuid   = $8  ? $8  : "-"
+        size   = $10 ? $10 : "-"
+        printf "%-12s %-8s %-20s %-36s %-8s\n", name, fstype, label, uuid, size
+    }' >"$listfile"
+
+	# Display the file content in a scrollable textbox
+	whiptail --scrolltext --title "All Filesystems" --textbox "$listfile" 0 0
+}
+
+# -----------------------------------------
+# 8. Show Help/About Information
+# -----------------------------------------
+show_help() {
+	whiptail --scrolltext --title "About This Script" --msgbox \
+		"**UUID and Label Changer**
+
+**Author:** LINUX-OASIS
+
+This script provides a safe and interactive way to change the UUID (Universally Unique Identifier) and LABEL of your disk partitions.
+
+**Supported Filesystems:**
+- ext4
+- btrfs
+- vfat (FAT32)
+
+**Main Menu Options:**
+- **Repeat-char UUID:** Creates a new UUID from a single repeating hexadecimal digit (e.g., AAAAAAAA-...). Useful for easily identifiable partitions.
+- **Random UUID:** Generates a standard, fully random UUID.
+- **Change LABEL:** Modifies the partition's LABEL, which is a user-friendly name.
+- **Show all partitions:** Displays a list of all supported partitions, along with their current UUIDs and LABELs.
+
+**IMPORTANT:**
+Changing a UUID or LABEL can affect how your operating system boots or mounts filesystems if the old identifiers are used in files like '/etc/fstab'. Always double-check your system configuration after making changes. The script ensures partitions are unmounted before modification to prevent data corruption." 0 0
+}
+
+# -----------------------------------------
+# 9. Main interactive menu loop
+# -----------------------------------------
+while true; do
+	# Present top-level actions to the user
+	choice=$(whiptail --title "UUID/LABEL Changer" --menu \
+		"Select an action:" 0 0 6 \
+		1 "Repeat-char UUID" \
+		2 "Random UUID" \
+		3 "Change LABEL" \
+		4 "Show all partitions" \
+		5 "Help / About" \
+		6 "Exit" 3>&1 1>&2 2>&3)
+
+	# If user cancels, exit cleanly
+	[[ -z $choice ]] && echo "User aborted. Exiting." && exit 0
+
+	# Execute workflows based on selection
+	if [[ $choice -le 2 ]]; then
+		mode=$choice     # set mode for UUID selection method
+		select_partition # choose which partition to target
+		ensure_unmounted # unmount if necessary
+		change_uuid      # apply UUID change
+		echo "Forcing kernel to re-read partition data..."
+		sudo partprobe
+		show_all # show updated partition info
+	elif [[ $choice -eq 3 ]]; then
+		select_partition # choose partition
+		ensure_unmounted # unmount if needed
+		modify_partition # apply label change
+		echo "Forcing kernel to re-read partition data..."
+		sudo partprobe
+		show_all # show updated partition info
+	elif [[ $choice -eq 4 ]]; then
+		show_all # display all partitions
+	elif [[ $choice -eq 5 ]]; then
+		show_help # display help/about info
+	else
+		echo "Goodbye!"
+		exit 0
+	fi
+done

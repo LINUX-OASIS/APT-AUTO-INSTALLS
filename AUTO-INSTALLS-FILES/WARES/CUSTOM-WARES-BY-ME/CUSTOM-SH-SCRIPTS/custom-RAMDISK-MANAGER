@@ -1,0 +1,227 @@
+#!/bin/bash
+
+# =============================================================================
+#
+#          RAM DISK & TMPFS MANAGER TUI
+#
+# A high-performance utility to create, manage, and automate RAM disks.
+# Features: Create tmpfs, Resize /dev/shm, Sync dirs to RAM, Systemd automation.
+#
+# Author: Gemini (Emulating LINUX-OASIS Style)
+#
+# =============================================================================
+
+# --- 1. Root Privilege Check ---
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[1;48;5;196m" "Error: This script must be run as root. Please use sudo." "\e[0m"
+	echo -e "\e[1;48;5;196m" "Trying to relaunch with sudo..." "\e[0m"
+	sudo "$0" "$@"
+	exit $?
+fi
+
+# --- 2. Dependency Check ---
+for PACKAGE in whiptail rsync coreutils systemd; do
+	if ! apt list --installed "$PACKAGE" &>/dev/null; then
+		echo "Dependency '$PACKAGE' is missing. Attempting install..."
+		sudo apt update && sudo apt install -y "$PACKAGE"
+	fi
+done
+
+# --- 3. Aesthetics (NEWT_COLORS) ---
+# "Warp Speed" Theme: Magenta, Yellow, and Cyan
+export NEWT_COLORS='\nroot=white,magenta\nborder=yellow,magenta\nwindow=white,black\nshadow=black,gray\ntitle=yellow,black\nbutton=black,yellow\nactbutton=white,magenta\ncheckbox=yellow,black\nactcheckbox=white,magenta\nentry=black,yellow\nlabel=yellow,black\nlistbox=white,black\nactlistbox=black,yellow\ntextbox=white,black\nacttextbox=black,yellow\nhelpline=white,magenta\nroottext=yellow,black\nemptyscale=black,yellow\nfullscale=white,magenta\ndisentry=gray,black\ncompactbutton=white,gray\nactsellistbox=white,yellow\nsellistbox=white,black\n'
+
+# --- 4. Helper Functions ---
+
+# Get current tmpfs mounts for selection
+_get_tmpfs_mounts() {
+	df -t tmpfs --output=target | tail -n +2
+}
+
+# --- 5. Core Functions ---
+
+FUN_CREATE_RAM_DISK() {
+	# 1. Type Selection
+	local RAM_TYPE
+	RAM_TYPE=$(whiptail --title "RAM Disk Type" --menu "Choose how to allocate RAM:" 0 0 2 \
+		"1" "Create New tmpfs Mount (Custom Path)" \
+		"2" "Resize existing /dev/shm (Shared Memory)" 3>&1 1>&2 2>&3)
+
+	if [ -z "$RAM_TYPE" ]; then return; fi
+
+	local MOUNT_PATH
+	if [ "$RAM_TYPE" == "1" ]; then
+		MOUNT_PATH=$(whiptail --inputbox "Enter absolute path for the RAM Disk:" 0 0 "/mnt/ramdisk" 3>&1 1>&2 2>&3)
+		if [ -z "$MOUNT_PATH" ]; then return; fi
+		sudo mkdir -p "$MOUNT_PATH"
+	else
+		MOUNT_PATH="/dev/shm"
+	fi
+
+	# 2. Size Input
+	local SIZE_VAL
+	SIZE_VAL=$(whiptail --inputbox "Enter size (e.g., 512M, 2G, 10%):" 0 0 "1G" 3>&1 1>&2 2>&3)
+	if [ -z "$SIZE_VAL" ]; then return; fi
+
+	# 3. Execution
+	if [ "$RAM_TYPE" == "1" ]; then
+		if sudo mount -t tmpfs -o size="$SIZE_VAL" tmpfs "$MOUNT_PATH"; then
+			whiptail --msgbox "Successfully mounted $SIZE_VAL to $MOUNT_PATH" 0 0
+		else
+			whiptail --msgbox "Failed to mount tmpfs. Check kernel logs." 0 0
+		fi
+	else
+		if sudo mount -o remount,size="$SIZE_VAL" /dev/shm; then
+			whiptail --msgbox "Successfully resized /dev/shm to $SIZE_VAL" 0 0
+		else
+			whiptail --msgbox "Failed to resize /dev/shm." 0 0
+		fi
+	fi
+}
+
+FUN_SYNC_TO_RAM() {
+	# 1. Select Source Directory
+	local SRC_DIR
+	SRC_DIR=$(whiptail --inputbox "Enter SOURCE directory path (Physical Disk):" 0 0 "$PWD" 3>&1 1>&2 2>&3)
+	if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
+		whiptail --msgbox "Invalid source directory." 0 0
+		return
+	fi
+
+	# 2. Select Target RAM Disk (Superior Pattern)
+	readarray -t mounts < <(_get_tmpfs_mounts)
+	local options=()
+	declare -A mount_map
+	local i=1
+	for m in "${mounts[@]}"; do
+		options+=("$i" "$m")
+		mount_map[$i]="$m"
+		((i++))
+	done
+
+	local CHOICE_IDX
+	CHOICE_IDX=$(whiptail --title "Select Target RAM Disk" --menu "Choose a tmpfs destination:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+	if [ -z "$CHOICE_IDX" ]; then return; fi
+	local DEST_RAM="${mount_map[$CHOICE_IDX]}"
+
+	# 3. Perform Sync
+	whiptail --infobox "Syncing $SRC_DIR to $DEST_RAM... Please wait." 0 0
+	if sudo rsync -av --info=progress2 "$SRC_DIR/" "$DEST_RAM/"; then
+		whiptail --msgbox "Sync Complete! Data is now in RAM." 0 0
+	else
+		whiptail --msgbox "Error during sync." 0 0
+	fi
+}
+
+FUN_SETUP_AUTOMOUNT() {
+	# 1. Gather Details
+	local MOUNT_PATH
+	MOUNT_PATH=$(whiptail --inputbox "Enter path to automount at boot:" 0 0 "/mnt/ramdisk" 3>&1 1>&2 2>&3)
+	if [ -z "$MOUNT_PATH" ]; then return; fi
+
+	local SIZE_VAL
+	SIZE_VAL=$(whiptail --inputbox "Enter size for boot-time allocation (e.g., 2G):" 0 0 "1G" 3>&1 1>&2 2>&3)
+	if [ -z "$SIZE_VAL" ]; then return; fi
+
+	# 2. Create Service File
+	local ESCAPED_PATH=$(systemd-escape -p "$MOUNT_PATH")
+	local SERVICE_NAME="custom-ramdisk-${ESCAPED_PATH}.service"
+	local SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}"
+
+	cat <<EOF | sudo tee "$SERVICE_FILE" >/dev/null
+[Unit]
+Description=Custom RAM Disk for $MOUNT_PATH
+Before=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/mkdir -p $MOUNT_PATH
+ExecStart=/usr/bin/mount -t tmpfs -o size=$SIZE_VAL tmpfs $MOUNT_PATH
+ExecStop=/usr/bin/umount $MOUNT_PATH
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	sudo systemctl daemon-reload
+	sudo systemctl enable "$SERVICE_NAME"
+
+	if whiptail --yesno "Service created and enabled. Start it now?" 0 0; then
+		sudo systemctl start "$SERVICE_NAME"
+		whiptail --msgbox "RAM Disk active and persistent." 0 0
+	fi
+}
+
+FUN_REMOVE_AUTOMOUNT() {
+	local services
+	mapfile -t services < <(ls /etc/systemd/system/custom-ramdisk-*.service 2>/dev/null)
+
+	if [ ${#services[@]} -eq 0 ]; then
+		whiptail --msgbox "No custom RAM disk services found." 0 0
+		return
+	fi
+
+	local options=()
+	for s in "${services[@]}"; do
+		options+=("$(basename "$s")" "" "OFF")
+	done
+
+	local TO_REMOVE
+	TO_REMOVE=$(whiptail --separate-output --checklist "Select services to remove:" 0 0 10 "${options[@]}" 3>&1 1>&2 2>&3)
+	if [ -z "$TO_REMOVE" ]; then return; fi
+
+	for s in $TO_REMOVE; do
+		sudo systemctl stop "$s"
+		sudo systemctl disable "$s"
+		sudo rm "/etc/systemd/system/$s"
+	done
+	sudo systemctl daemon-reload
+	whiptail --msgbox "Services removed." 0 0
+}
+
+FUN_SHOW_ABOUT() {
+	whiptail --title "About RAM Disk Manager" --msgbox \
+		"RAM DISK & TMPFS MANAGER
+
+A tool to manage ultra-fast volatile storage.
+
+Modes:
+- Create tmpfs: Manual high-speed mount.
+- Resize /dev/shm: Adjust existing shared memory.
+- Sync: Transfer heavy folders (caches, builds) to RAM.
+- Automount: Persist RAM disks across reboots via Systemd.
+
+Author: LINUX-OASIS Style Automation
+" 0 0
+}
+
+# --- 6. Main Loop ---
+
+while true; do
+	MAIN_CHOICE=$(whiptail --title "⚡ RAM DISK MANAGER ⚡" --menu "Select Operation:" 0 0 7 \
+		"1" "[CREATE] New RAM Disk / Resize /dev/shm" \
+		"2" "[SYNC] Physical Directory -> RAM Disk" \
+		"3" "[AUTO] Setup Automount at Boot (Systemd)" \
+		"4" "[CLEAN] Remove Automount Service" \
+		"5" "[STATUS] List Current tmpfs Mounts" \
+		"6" "Help / About" \
+		"7" "Exit" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then exit 0; fi
+
+	case "$MAIN_CHOICE" in
+	1) FUN_CREATE_RAM_DISK ;;
+	2) FUN_SYNC_TO_RAM ;;
+	3) FUN_SETUP_AUTOMOUNT ;;
+	4) FUN_REMOVE_AUTOMOUNT ;;
+	5)
+		TMP_FILE=$(mktemp)
+		df -h -t tmpfs >"$TMP_FILE"
+		whiptail --title "Active tmpfs Devices" --textbox "$TMP_FILE" 0 0
+		rm "$TMP_FILE"
+		;;
+	6) FUN_SHOW_ABOUT ;;
+	7) exit 0 ;;
+	esac
+done

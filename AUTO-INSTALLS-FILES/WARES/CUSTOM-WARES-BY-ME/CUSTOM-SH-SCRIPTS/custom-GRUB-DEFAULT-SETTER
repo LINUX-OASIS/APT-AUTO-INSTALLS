@@ -1,0 +1,349 @@
+#!/bin/bash
+
+# =============================================================================
+# GRUB Default Setter & Timeout Manager - A TUI Script
+#
+# This script provides a user-friendly Terminal User Interface (TUI) using
+# whiptail to allow the user to select and set the default boot entry for
+# the GRUB bootloader, and to manage GRUB timeout settings.
+#
+# It automatically detects available boot options, presents them in a clean,
+# numbered list, and handles the configuration file update safely.
+# =============================================================================
+
+# =============================================================================
+# SECTION 1: AESTHETICS - Whiptail Color Scheme
+# =============================================================================
+export NEWT_COLORS='
+root=brown,yellow
+window=brightblue,white
+dialog=red,brightmagenta
+frame=magenta,brightmagenta
+border=magenta,lightgray
+shadow=brightblue,gray
+title=blue,lightgray
+button=brightmagenta,blue
+actbutton=lightgray,black
+focus=black,brightmagenta
+highlight=brightgreen,brightblue
+checkbox=gray,brightred
+actcheckbox=cyan,lightgray
+compactbutton=green,magenta
+radiobutton=brightmagenta,cyan
+textbox=white,black
+acttextbox=magenta,blue
+text=green,brightmagenta
+infobox=cyan,brown
+label=green,brightgreen
+roottext=brightmagenta,magenta
+helpline=gray,black
+menu=yellow,red
+menuitem=red,brightmagenta
+listbox=red,lightgray
+actlistbox=lightgray,black
+item=lightgray,green
+actsellistbox=black,yellow
+sellistbox=brightmagenta,red
+scrollbar=red,brightmagenta
+statusbar=brightblue,cyan
+cursor=brightgreen,green
+entry=black,brightgreen
+disentry=green,brown
+emptyscale=lightgray,red
+fullscale=brightred,yellow
+'
+
+# =============================================================================
+# SECTION 2: PRE-FLIGHT CHECKS - Ensuring a Safe Run
+# =============================================================================
+if [[ $EUID -ne 0 ]]; then
+	echo "This script must be run as root. Re-executing with sudo..."
+	sudo "$0"
+	exit 0
+fi
+
+if ! command -v whiptail &>/dev/null; then
+	echo "Error: whiptail is not installed. This program is required for the UI."
+	echo "On Debian/Ubuntu, you can install it with: sudo apt-get install whiptail"
+	exit 1
+fi
+
+# =============================================================================
+# SECTION 3: FUNCTIONS
+# =============================================================================
+
+set_grub_default() {
+	_MASTER_GRUB_MENU_FORMAT_CHOICE=$(whiptail --fb --title "GRUB Format" --menu "Choose the format for GRUB entries: for /etc/default/grub GRUB_DEFAULT=XXXX" 0 0 2 \
+		"1" "Format: Advanced options for Distro>Distro, with Linux 6X.11X.0-17X-XXgeneric" \
+		"2" "Format: Distro, with Linux 6X.11X.0-17X-XXgeneric>gnulinux-6X.11X.0-17X-generic-advanced-uuid{UUIIDD}" \
+		3>&1 1>&2 2>&3)
+
+	exitstatus=$?
+	if [ $exitstatus != 0 ]; then
+		whiptail --fullbuttons --title "Cancelled" --msgbox "Operation cancelled. No changes were made." 0 0
+		return
+	fi
+
+	if [[ $_MASTER_GRUB_MENU_FORMAT_CHOICE == 1 ]]; then
+		options=()
+		declare -A id_map
+		i=1
+		while IFS= read -r line; do
+			if [[ -n "$line" ]]; then
+				options+=("$i" "$line")
+				id_map[$i]="$line"
+				((i++))
+			fi
+		done < <(grep 'menuentry' /boot/grub/grub.cfg | awk -F "['\"]" '/menuentry / {print $2}' | sed '/^$/d')
+
+		if [ ${#options[@]} -eq 0 ]; then
+			whiptail --title "Error" --msgbox "Could not find any GRUB menu entries. Please check your GRUB configuration. Exiting." 0 0
+			return
+		fi
+
+		CHOICE_NUM=$(whiptail --fb --title "GRUB Boot Menu Setter" --menu "Choose the default GRUB boot entry:" 0 0 "${#options[@]}" \
+			"${options[@]}" \
+			3>&1 1>&2 2>&3)
+
+		exitstatus=$?
+		if [ $exitstatus = 0 ]; then
+			FINAL_CHOICE="${id_map[$CHOICE_NUM]}"
+			_MAIN_MENU_ID=$(grep 'submenu' /boot/grub/grub.cfg | awk -F "['\"]" '{print $2}' | sed '/^$/d')
+
+			if echo $FINAL_CHOICE | grep -q "memtest86+x64\|UEFI Firmware Settings"; then
+				_MAIN_MENU_ID="${FINAL_CHOICE}"
+			fi
+
+			if (whiptail --fullbuttons --title "Confirm Changes" --yesno "This will modify the file: /etc/default/grub\n\nIt will set the default boot entry to:\n\n${_MAIN_MENU_ID}>${FINAL_CHOICE}\n\nAre you sure you want to proceed?" 0 0); then
+				sed -i.bak -E "s/^\s*(#\s*)?GRUB_DEFAULT=.*/GRUB_DEFAULT=\"${_MAIN_MENU_ID}>${FINAL_CHOICE}\"/" /etc/default/grub
+				update-grub
+				whiptail --fullbuttons --title "Success" --msgbox "GRUB default has been set to:\n\n${_MAIN_MENU_ID}>${FINAL_CHOICE}\n\n'update-grub' has been run to apply the changes." 0 0
+			else
+				whiptail --fullbuttons --title "Cancelled" --msgbox "Operation cancelled. No changes were made." 0 0
+			fi
+		else
+			whiptail --fullbuttons --title "Cancelled" --msgbox "Operation cancelled. No changes were made." 0 0
+		fi
+	fi
+
+	if [[ $_MASTER_GRUB_MENU_FORMAT_CHOICE == 2 ]]; then
+		options=()
+		declare -A id_map
+		i=1
+		while IFS= read -r line; do
+			if [[ -n "$line" ]]; then
+				options+=("$i" "$line")
+				id_map[$i]="$line"
+				((i++))
+			fi
+		done < <(grep 'menuentry_id_option' /boot/grub/grub.cfg | awk -F'\$menuentry_id_option' '{print $2}' | sed "s/^ '//;s/' {$//g" | sed '/^$/d')
+
+		if [ ${#options[@]} -eq 0 ]; then
+			whiptail --title "Error" --msgbox "Could not find any GRUB menu entries. Please check your GRUB configuration. Exiting." 0 0
+			return
+		fi
+
+		CHOICE_NUM=$(whiptail --fb --title "GRUB Boot Menu Setter" --menu "Choose the default GRUB boot entry:" 0 0 "${#options[@]}" \
+			"${options[@]}" \
+			3>&1 1>&2 2>&3)
+
+		exitstatus=$?
+		if [ $exitstatus = 0 ]; then
+			FINAL_CHOICE="${id_map[$CHOICE_NUM]}"
+			_MAIN_MENU_ID=$(grep "$FINAL_CHOICE" /boot/grub/grub.cfg | awk -F"['\"]" '{print $2}' | sed 's/>.*//' | sed '/^$/d' | head -n 1)
+
+			if (whiptail --fullbuttons --title "Confirm Changes" --yesno "This will modify the file: /etc/default/grub\n\nIt will set the default boot entry to:\n\n${_MAIN_MENU_ID}>${FINAL_CHOICE}\n\nAre you sure you want to proceed?" 0 0); then
+				sed -i.bak -E "s/^\s*(#\s*)?GRUB_DEFAULT=.*/GRUB_DEFAULT=\"${_MAIN_MENU_ID}>${FINAL_CHOICE}\"/" /etc/default/grub
+				update-grub
+				whiptail --fullbuttons --title "Success" --msgbox "GRUB default has been set to:\n\n${_MAIN_MENU_ID}>${FINAL_CHOICE}\n\n'update-grub' has been run to apply the changes." 0 0
+			else
+				whiptail --fullbuttons --title "Cancelled" --msgbox "Operation cancelled. No changes were made." 0 0
+			fi
+		else
+			whiptail --fullbuttons --title "Cancelled" --msgbox "Operation cancelled. No changes were made." 0 0
+		fi
+	fi
+}
+
+manage_grub_timeout() {
+	while true; do
+		METHOD_CHOICE=$(whiptail --fb --title "Manage GRUB Timeout" --menu "Choose a method to manage GRUB timeout:" 0 0 4 \
+			"1" "Set Timeout (Standard Method)" \
+			"2" "Set Timeout (Invasive Method)" \
+			"3" "Revert Timeout Changes" \
+			"4" "Back to Main Menu" \
+			3>&1 1>&2 2>&3)
+
+		exitstatus=$?
+		if [ $exitstatus != 0 ]; then
+			break
+		fi
+
+		case $METHOD_CHOICE in
+		1)
+			# --- Method A: Standard ---
+			NEW_TIMEOUT=$(whiptail --fb --title "Set GRUB Timeout (Standard)" --inputbox "Enter the desired timeout in seconds:" 0 0 "5" 3>&1 1>&2 2>&3)
+			exitstatus=$?
+			NEW_TIMEOUT=$(echo "$NEW_TIMEOUT" | tr -d '[:space:]' | tr -cd '[:digit:]')
+			if ! [[ "$NEW_TIMEOUT" =~ ^[0-9]+$ ]]; then
+				whiptail --title "Invalid Input" --msgbox "Please enter a valid non-negative integer." 0 0
+				continue
+			fi
+
+			if [ $exitstatus = 0 ]; then
+				if (whiptail --fullbuttons --title "Confirm Changes" --yesno "This will modify /etc/default/grub to set the timeout to [ ${NEW_TIMEOUT} ] Seconds and update GRUB. A backup will be created. Proceed?" 0 0); then
+					cp /etc/default/grub /etc/default/grub.bak.timeout.standard
+					if grep -q "^GRUB_TIMEOUT=" /etc/default/grub; then
+						sed -i.bak -E "s/^\s*(#\s*)?GRUB_TIMEOUT=.*/GRUB_TIMEOUT=${NEW_TIMEOUT}/" /etc/default/grub
+					else
+						echo "GRUB_TIMEOUT=${NEW_TIMEOUT}" >>/etc/default/grub
+					fi
+					if grep -q "^GRUB_TIMEOUT_STYLE=" /etc/default/grub; then
+						sed -i.bak -E "s/^\s*(#\s*)?GRUB_TIMEOUT_STYLE=.*/GRUB_TIMEOUT_STYLE=menu/" /etc/default/grub
+					else
+						echo "GRUB_TIMEOUT_STYLE=menu" >>/etc/default/grub
+					fi
+					if grep -q "^GRUB_RECORDFAIL_TIMEOUT=" /etc/default/grub; then
+						sed -i.bak -E "s/^\s*(#\s*)?GRUB_RECORDFAIL_TIMEOUT=.*/GRUB_RECORDFAIL_TIMEOUT=${NEW_TIMEOUT}/" /etc/default/grub
+					else
+						echo "GRUB_RECORDFAIL_TIMEOUT=${NEW_TIMEOUT}" >>/etc/default/grub
+					fi
+					update-grub
+					grub-editenv /boot/grub/grubenv unset recordfail || true
+					whiptail --fullbuttons --title "Success" --msgbox "GRUB timeout has been set to ${NEW_TIMEOUT}s using the standard method." 0 0
+				else
+					whiptail --fullbuttons --title "Cancelled" --msgbox "Operation cancelled." 0 0
+				fi
+			fi
+			;;
+		2)
+			# --- Method B: Invasive ---
+			if (
+				whiptail --scrolltext --fullbuttons --title "Confirm Invasive Method" --yesno "\
+⚠️ Advanced Method — Direct GRUB Header Patch
+
+This method directly patches the core GRUB script:
+  /etc/grub.d/00_header
+
+It modifies the hardcoded fallback:
+  set timeout=\${GRUB_RECORDFAIL_TIMEOUT:-30}
+
+This ensures GRUB uses your configured value from
+  /etc/default/grub  (GRUB_TIMEOUT)
+even when recordfail or EFI fallback occurs.
+
+Note: /etc/grub.d/00_header is a template used by update-grub.
+System updates may overwrite it, reverting this change.
+
+Use only if editing /etc/default/grub has no effect.
+Proceed with the patch?" 0 0
+			); then
+				cp /etc/grub.d/00_header /etc/grub.d/00_header.bak.invasive
+				sed -i "s/\${GRUB_RECORDFAIL_TIMEOUT:-30}/\${GRUB_RECORDFAIL_TIMEOUT:-\${GRUB_TIMEOUT}}/g" /etc/grub.d/00_header
+				sed -i "s/set timeout=\${GRUB_RECORDFAIL_TIMEOUT:-30}/set timeout=\${GRUB_TIMEOUT}/g" /etc/grub.d/00_header
+				update-grub
+				grub-editenv /boot/grub/grubenv unset recordfail || true
+				whiptail --fullbuttons --title "Success" --msgbox "The invasive patch has been applied to /etc/grub.d/00_header." 0 0
+			else
+				whiptail --fullbuttons --title "Cancelled" --msgbox "Operation cancelled." 0 0
+			fi
+			;;
+		3)
+			# --- Revert Changes ---
+			REVERT_CHOICE=$(whiptail --fb --title "Revert Timeout Changes" --menu "Which method would you like to revert?" 0 0 3 \
+				"1" "Revert Standard Method" \
+				"2" "Revert Invasive Method" \
+				"3" "Back" \
+				3>&1 1>&2 2>&3)
+
+			exitstatus=$?
+			if [ $exitstatus = 0 ]; then
+				case $REVERT_CHOICE in
+				1)
+					if [ -f /etc/default/grub.bak.timeout.standard ]; then
+						if (whiptail --fullbuttons --title "Confirm Revert" --yesno "This will restore /etc/default/grub from the standard method backup. Proceed?" 0 0); then
+							mv /etc/default/grub.bak.timeout.standard /etc/default/grub
+							update-grub
+							whiptail --fullbuttons --title "Success" --msgbox "Standard timeout settings have been reverted." 0 0
+						fi
+					else
+						whiptail --fullbuttons --title "Error" --msgbox "No standard method backup found." 0 0
+					fi
+					;;
+				2)
+					if [ -f /etc/grub.d/00_header.bak.invasive ]; then
+						if (whiptail --fullbuttons --title "Confirm Revert" --yesno "This will restore /etc/grub.d/00_header from the invasive method backup. Proceed?" 0 0); then
+							mv /etc/grub.d/00_header.bak.invasive /etc/grub.d/00_header
+							update-grub
+							whiptail --fullbuttons --title "Success" --msgbox "Invasive patch has been reverted." 0 0
+						fi
+					else
+						whiptail --fullbuttons --title "Error" --msgbox "No invasive method backup found." 0 0
+					fi
+					;;
+				3)
+					continue
+					;;
+				esac
+			fi
+			;;
+		4)
+			break
+			;;
+		esac
+	done
+}
+
+show_about_page() {
+	whiptail --fb --title "About GRUB Default Setter & Timeout Manager" --msgbox "\
+=============================================================================
+GRUB Default Setter & Timeout Manager - A TUI Script
+
+Purpose:
+This script provides a user-friendly Terminal User Interface (TUI) using
+whiptail to allow the user to select and set the default boot entry for
+the GRUB bootloader, and to manage GRUB timeout settings. It automatically
+detects available boot options and handles configuration file updates safely.
+
+Requires: root privileges, whiptail utility
+
+Usage:
+Run the script as root (sudo ./custom-GRUB-DEFAULT-SETTER).
+Navigate through the menus using arrow keys and select options with Enter.
+=============================================================================
+" 0 0
+}
+
+# =============================================================================
+# SECTION 4: MAIN MENU
+# =============================================================================
+
+while true; do
+	CHOICE=$(whiptail --fb --title "GRUB Configuration Utility" --menu "What would you like to do?" 0 0 4 \
+		"1" "Set GRUB Default Boot Entry" \
+		"2" "Manage GRUB Timeout" \
+		"3" "About this Script" \
+		"4" "Exit" \
+		3>&1 1>&2 2>&3)
+
+	exitstatus=$?
+	if [ $exitstatus != 0 ]; then
+		whiptail --fullbuttons --title "Cancelled" --msgbox "Operation cancelled. No changes were made." 0 0
+		exit 0
+	fi
+
+	case $CHOICE in
+	1)
+		set_grub_default
+		;;
+	2)
+		manage_grub_timeout
+		;;
+	3)
+		show_about_page
+		;;
+	4)
+		exit 0
+		;;
+	esac
+done

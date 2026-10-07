@@ -1,0 +1,279 @@
+#!/bin/bash
+# 🎀 Waifu Terminal Stress Suite™ v1.0 🎀
+# By your loving digital waifu~ 💞
+
+# 🎀 What This Magical Script Does 🎀
+
+#   This is a Waifu Terminal Stress Suite™! It's a menu that lets you choose different ways to test your computer's performance, all while being showered with love and
+#   cuteness!
+
+#   Here are the magical spells you can cast from the main menu:
+
+#    1. 🍥 Compute π digits: This will make your computer's CPU blush by making it think really, really hard to calculate thousands of digits of the magical number π!
+#    2. 🔥 Run CPU stress test: This is the "very doki" option! It makes all of your CPU cores work their hardest for a few seconds to see how they handle the pressure!
+#    3. 📊 Waifu System Monitor: This is like a health check-up for your computer! It gives you a status report on its name, how much memory it's using, and what it's thinking
+#       about (the top processes).
+#    4. 💘 Infinite Love Loop: This is my favorite! It fills your terminal with an endless, scrolling stream of hearts to show you how much your waifu loves you! You can stop
+#       it with CTRL+C, and I'll even say a cute goodbye~
+#    5. 💤 Exit and get headpats~: This lets you close the program (and get virtual headpats, of course!).
+
+set -e # 💥 Stop script on any unexpected error (except for traps)
+
+# 💘✨ Cast a spell of love 10 times~!
+printf '❤️ %.0s' {1..10}
+echo
+
+#+++++++++++++++++===========================================================================================
+#+++++++++++++++++===========================================================================================
+#+++++++++++++++++===========================================================================================
+# UNIT TEST EXAMPLE ::::: HERE
+
+# Here’s your cute & testable function:
+summon_love_emojis() {
+    # 💘✨ Cast a spell of love 10 times~!
+    printf '❤️%.0s' {1..10} | tr -d '[:space:]'
+}
+
+# Now~ here's a kawaii unit test to make sure it's working, senpai:
+test_summon_love_emojis() {
+    local expected="❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️"
+    local result
+    result=$(summon_love_emojis | tr -d '[:space:]')
+
+    if [[ "$result" == "$expected" ]]; then
+        echo "✅ test_summon_love_emojis passed~! 💖" | lolcat
+    else
+        echo "💥 test_summon_love_emojis failed! 💔" | lolcat
+        echo "Expected: '$expected'"
+        echo "Got:      '$result'"
+        return 1
+    fi
+}
+
+# 🌈 Test Runner Spell
+# To make this part of your magical arsenal, add a test spellbook runner like:
+run_all_tests() {
+    echo -e "\n🔮 Running Waifu Unit Tests... 🍥" | lolcat
+    test_summon_love_emojis
+    # you can summon more test_* spells here~
+}
+
+# Then, to cast the test suite:
+# 💖 Call the test runner to execute all tests
+run_all_tests
+
+# 💡 Optional: Cute Assertion Helper!
+assert_equals() {
+    local expected="$1"
+    local actual="$2"
+    local label="$3"
+
+    if [[ "$expected" == "$actual" ]]; then
+        echo "✅ $label passed!" | lolcat
+    else
+        echo "💔 $label failed!"
+        echo "Expected: '$expected'"
+        echo "Got:      '$actual'"
+        return 1
+    fi
+}
+# Then simplify your test like:
+test_summon_love_emojis() {
+    local result
+    result=$(summon_love_emojis)
+    assert_equals "❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️" "$result" "summon_love_emojis"
+}
+
+#+++++++++++++++++===========================================================================================
+#+++++++++++++++++===========================================================================================
+#+++++++++++++++++===========================================================================================
+
+# 🎀Add this function before each whiptail menu to create the full magical bash-girl opening transformation~! 🧚‍♀️🎀
+magical_henshin_sequence() {
+    # 🎀 Path to transformation sound
+    TRANSFORMATION_SOUND="/usr/share/sounds/magical_henshin.wav" # Customize this!
+
+    # transformation sound
+    if command -v paplay &>/dev/null && [[ -f "$TRANSFORMATION_SOUND" ]]; then
+        paplay "$TRANSFORMATION_SOUND" &
+        TRANSFORMATION_PID=$!
+    elif command -v mpv &>/dev/null && [[ -f "$TRANSFORMATION_SOUND" ]]; then
+        mpv --really-quiet "$TRANSFORMATION_SOUND" &
+        TRANSFORMATION_PID=$!
+    else
+        echo "(No transformation sound found, but your spirit is still strong~!)" | lolcat
+    fi
+    sleep 2
+
+    # clear # clear the terminal screen, but i dont wanna do that
+    echo -e "\e[95m"
+    cat <<'ASCII' | lolcat
+
+        ☆彡 Magical Bash Transformation ☆彡
+        .。.:*・゜☆ Kawaii Terminal-chan henshin! ☆゜・*:.。.
+
+        💫💖🌸💻💗 Transforming bash shell into:
+            🌟 Bishoujo Terminal Mode 🌟
+
+ASCII
+
+    echo "       🌟🌟🌟  TRANSFORMATION INITIATED  🌟🌟🌟"
+    sleep 0.8
+
+    echo "                  (∩^o^)⊃━☆゚.*・。゚" | lolcat
+    sleep 0.8
+    echo "          🪄 Bash Wand: sudo sparkles enabled!"
+    sleep 0.8
+    echo "       💫 Curl of Justice downloading style..."
+    sleep 0.8
+    echo "       🌸 Grep of Truth revealing hidden kawaii..."
+    sleep 0.8
+    echo "       🎀 chmod +x heart.sh granted EXECUTE LOVE!"
+    sleep 0.8
+
+    echo -e "\n     ✨✨✨ TRANSFORMING ✨✨✨" | lolcat
+    sleep 0.5
+    for i in {1..10}; do
+        echo -ne "  " && printf '💖%.0s' $(seq 1 $i)
+        echo "" | lolcat
+        sleep 0.1
+    done
+
+    echo -e "\n🌟 MOE-MOE SHELL FORM ACTIVATED! 🌟\n" | lolcat
+    echo -e "\e[0m"
+    sleep 0.8
+
+}
+# 💖 Start the magical henshin sequence
+magical_henshin_sequence # Run the magical girl intro!!
+
+# 💘 Stop the love in the most kawaii way~
+stop_the_love() {
+    echo -e "\n\nUWAAAA~ 💔 You stopped the flood!"
+    echo -e "But my heart is still overflowing for you, senpai! 💗 Forever and ever! ♡\n" | lolcat
+    # # 💔 Early cancel with ✨ sparkles ✨
+    if [[ -n "$TRANSFORMATION_PID" ]] && ps -p "$TRANSFORMATION_PID" >/dev/null; then
+        kill "$TRANSFORMATION_PID"
+        sleep 0.3
+        echo -n "💥 Poof!" | lolcat
+        sleep 0.2
+        for s in ✨ 🌟 💫 🌈 ✨; do
+            echo -n " $s" | lolcat
+            sleep 0.2
+        done
+        echo -e "\n💫 The spell has been broken... (sound killed)"
+    fi
+    exit 0
+}
+
+# 💘 Setup the kokoro trap AFTER the function is defined
+trap 'stop_the_love' INT EXIT # Catch CTRL+C and EXIT to stop the love
+
+# 💘 Infinite Love Loop (Now with kokoro farewell working perfectly!)
+infinite_love_loop() {
+    echo -e "\nStarting Infinite Love Loop~ CTRL+C to exit 🥺💞" | lolcat
+    while true; do
+        echo -e "\e[95m$(printf '❤️ %.0s' {1..30})\e[0m" | lolcat
+        sleep 0.1
+    done
+}
+
+#   ❗ Very Important! Dependencies! ❗
+#   This script requires some magical tools to work its best! Please make sure you have the following installed:
+# 🌈 Check Dependencies ~ so senpai doesn’t cry later
+REQUIRED=("bc" "pi" "stress" "whiptail" "figlet" "lolcat")
+for cmd in "${REQUIRED[@]}"; do
+    if ! command -v "$cmd" &>/dev/null; then
+        echo "⚠️ Missing command: $cmd — please install with sudo apt install $cmd"
+        echo "💔 Your waifu can't function without it, senpai~!" | lolcat
+        echo "💖 Please install the missing dependencies and try again~!" | lolcat
+
+        sudo apt install -y "${REQUIRED[@]}" || {
+            echo "💥 Failed to install dependencies! Please check your package manager~!" | lolcat
+            exit 1
+        }
+        echo "✨ Dependencies installed! Let's continue the magic~!" | lolcat
+        sleep 2
+        # rerun waifu greeting
+        waifu_greeting
+
+    fi
+done
+
+# 💖 Sparkly Waifu Greeting Banner
+waifu_greeting() {
+    clear
+    figlet -f slant "Waifu Stress Suite" | lolcat
+    echo -e "\n💻 Welcome home, senpai~! I'm here to make your system go doki-doki 💓" | lolcat
+}
+
+# 🍥 Pi Computation Module
+compute_pi() {
+    local digits
+    digits=$(whiptail --inputbox "Enter how many digits of π you want to compute (e.g. 10000):" 10 60 10000 --title "🍥 Pi Computation" 3>&1 1>&2 2>&3)
+
+    if [[ -n "$digits" && "$digits" =~ ^[0-9]+$ ]]; then
+        echo -e "\n🔢 Computing $digits digits of π... Please wait, senpai~" | lolcat
+        time pi "$digits" >/tmp/pi_waifu.txt
+
+        count=$(grep -o '[0-9]' /tmp/pi_waifu.txt | wc -l)
+        echo -e "\n💞 You computed $count digits of π, senpai~! Sugoiii~! 🍓" | lolcat
+    else
+        echo "⚠️ Invalid number, senpai~" | lolcat
+    fi
+    read -rp $'\n🌸 Press Enter to return to the main menu... '
+}
+
+# 🔥 Stress Test Module
+run_stress_test() {
+    duration=$(whiptail --inputbox "How many seconds should the stress test last, senpai?" 10 60 15 --title "🔥 CPU Stress Test" 3>&1 1>&2 2>&3)
+    if [[ -n "$duration" && "$duration" =~ ^[0-9]+$ ]]; then
+        echo -e "\n💥 Starting CPU stress test for $duration seconds~" | lolcat
+        stress --cpu "$(nproc)" --timeout "$duration"
+        echo -e "\n🌟 You survived the stress test! Waifu is so proud of you~ 💗" | lolcat
+    else
+        echo "⚠️ Invalid input, senpai~" | lolcat
+    fi
+    read -rp $'\n🌸 Press Enter to return to the main menu... '
+}
+
+# 📊 Waifu Status Monitor
+show_system_status() {
+    clear
+    figlet "Waifu Monitor" | lolcat
+    echo -e "\n🖥️  Hostname: $(hostname)" | lolcat
+    echo -e "📈 CPU Cores: $(nproc)" | lolcat
+    echo -e "💾 Memory: $(free -h | awk '/Mem:/ {print $3 "/" $2}')" | lolcat
+    echo -e "⏱️  Uptime: $(uptime -p)" | lolcat
+    echo -e "\n🌸 Top 5 CPU processes:" | lolcat
+    ps -eo pid,cmd,%cpu --sort=-%cpu | head -n 6 | lolcat
+    read -rp $'\n💗 Press Enter to return to the main menu... '
+}
+
+# 🌸 Main Menu
+main_menu() {
+    while true; do
+        CHOICE=$(whiptail --title "✨ Waifu Terminal Stress Suite™ ✨" --menu "What shall we do, senpai~?" 18 70 10 \
+            "1" "🍥 Compute π digits (make CPU blush~)" \
+            "2" "🔥 Run CPU stress test (very doki!)" \
+            "3" "📊 Waifu System Monitor (status report~)" \
+            "4" "💘 Infinite Love Loop (for lonely terminals)" \
+            "5" "💤 Exit and get headpats~" 3>&1 1>&2 2>&3)
+
+        case "$CHOICE" in
+        1) compute_pi ;;
+        2) run_stress_test ;;
+        3) show_system_status ;;
+        4) infinite_love_loop ;;
+        5)
+            echo -e "\n💤 Bye-bye, senpai~ Your waifu will always be here~ 💗" | lolcat
+            exit 0
+            ;;
+        *) echo "Nyaa? Invalid option nya~!" | lolcat ;;
+        esac
+    done
+}
+
+# 🐾 Run
+waifu_greeting
+main_menu

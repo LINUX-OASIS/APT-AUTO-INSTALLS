@@ -1,0 +1,676 @@
+#!/bin/bash
+#
+# An interactive script to generate, preview, and save random color palettes
+# for whiptail dialog boxes.
+#
+
+# --- Terminal Detection ---
+# Ubuntu 24.04 uses gnome-terminal; Ubuntu 26.04 uses ptyxis.
+TERMINAL_PROGRAM=""
+if command -v ptyxis &>/dev/null; then
+	TERMINAL_PROGRAM="ptyxis"
+elif command -v gnome-terminal &>/dev/null; then
+	TERMINAL_PROGRAM="gnome-terminal"
+fi
+
+# --- Configuration & Setup ---
+
+# These settings ensure that the script will exit immediately if a command fails,
+# if it tries to use an unset variable, or if a command in a pipeline fails.
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Directory for storing custom color palettes.
+# Note: This is an unconventional and insecure location. A better practice would be
+# to store user-specific files in their home directory (e.g., ~/.config/).
+readonly PALETTE_DIR="/bin/CUSTOM-PALLETTE-NEWT-COLORS-DIR"
+
+# A temporary directory for this script's session.
+# This variable is initialized here and will be assigned a value by `mktemp`
+# in the `FUN_SETUP_ENVIRONMENT` function.
+WORK_DIR=""
+
+# The full path to the file that holds the currently generated or selected palette.
+# This will be defined within the WORK_DIR.
+PALETTE_FILE=""
+
+# --- Core Functions ---
+
+# Ensures all required command-line tools are available before starting.
+FUN_CHECK_DEPENDENCIES() {
+	local missing_deps=0
+	# Ensure a terminal emulator was actually found.
+	if [[ -z "${TERMINAL_PROGRAM}" ]]; then
+		echo "Error: No compatible terminal emulator (ptyxis or gnome-terminal) found." >&2
+		missing_deps=1
+	fi
+
+	# Loop through a list of required commands.
+	for cmd in "whiptail" "shuf" "mktemp"; do
+		# `command -v` is a reliable way to check if a command exists in the PATH.
+		if ! command -v "$cmd" &>/dev/null; then
+			echo "Error: Required command '$cmd' is not installed." >&2
+			missing_deps=1
+		fi
+	done
+	# If any dependencies were missing, exit the script with an error status.
+	if [[ $missing_deps -eq 1 ]]; then
+		exit 1
+	fi
+}
+
+# Cleans up temporary files and directories on script exit.
+FUN_CLEANUP() {
+	# Unsetting NEWT_COLORS restores the terminal's default colors.
+	unset NEWT_COLORS
+	# If the WORK_DIR variable was set and the directory exists, remove it.
+	if [[ -n "${WORK_DIR:-}" && -d "${WORK_DIR}" ]]; then
+		rm -rf "${WORK_DIR}"
+	fi
+}
+
+# Sets up the environment, creating necessary directories.
+FUN_SETUP_ENVIRONMENT() {
+	# Create the palette storage directory if it doesn't exist.
+	if [[ ! -d "${PALETTE_DIR}" ]]; then
+		# This requires sudo and sets world-writable permissions, which is insecure.
+		sudo mkdir -p "${PALETTE_DIR}"
+		sudo chmod -R 777 "${PALETTE_DIR}"
+	fi
+
+	# Create a unique, temporary working directory for this session using `mktemp`.
+	# This is the standard, secure way to handle temporary files.
+	WORK_DIR=$(mktemp -d -t newt-color-randomizer-XXXXXX)
+	# Define the full path for our temporary palette file.
+	PALETTE_FILE="${WORK_DIR}/current_palette.txt"
+}
+
+# --- Palette Generation ---
+
+# Generates a randomized NEWT_COLORS palette, saves it to a temp file, and applies it.
+FUN_GENERATE_RANDOM_PALETTE() {
+	# Ensure we start with a clean slate by unsetting any previous colors.
+	unset NEWT_COLORS
+	# Define the full list of available colors for NEWT.
+	local colors=(
+		"black" "red" "green" "brown" "blue" "magenta" "cyan" "lightgray"
+		"gray" "brightred" "brightgreen" "yellow" "brightblue"
+		"brightmagenta" "brightcyan" "white"
+	)
+
+	# This is an inner function; it's only available within `FUN_GENERATE_RANDOM_PALETTE`.
+	# It picks two distinct random colors from the list above.
+	FUN_PICK_DISTINCT_COLORS() {
+		local color1 color2
+		# `shuf -i 0-15 -n 1` randomly selects one number from 0 to 15.
+		color1=${colors[$(shuf -i 0-15 -n 1)]}
+		color2=${colors[$(shuf -i 0-15 -n 1)]}
+		# Ensure the foreground and background colors are never the same.
+		while [[ "$color1" == "$color2" ]]; do
+			color2=${colors[$(shuf -i 0-15 -n 1)]}
+		done
+		# Return the two colors as a comma-separated string (e.g., "white,blue").
+		echo "${color1},${color2}"
+	}
+
+	# A "here document" (`cat <<EOF ... EOF`) is used to write a multi-line
+	# string into the temporary palette file. Commands inside $(...) are executed.
+	cat >"$PALETTE_FILE" <<EOF
+NEWT_COLORS=' 
+root=$(FUN_PICK_DISTINCT_COLORS)
+window=$(FUN_PICK_DISTINCT_COLORS)
+dialog=$(FUN_PICK_DISTINCT_COLORS)
+frame=$(FUN_PICK_DISTINCT_COLORS)
+border=$(FUN_PICK_DISTINCT_COLORS)
+shadow=$(FUN_PICK_DISTINCT_COLORS)
+title=$(FUN_PICK_DISTINCT_COLORS)
+button=$(FUN_PICK_DISTINCT_COLORS)
+actbutton=$(FUN_PICK_DISTINCT_COLORS)
+focus=$(FUN_PICK_DISTINCT_COLORS)
+highlight=$(FUN_PICK_DISTINCT_COLORS)
+checkbox=$(FUN_PICK_DISTINCT_COLORS)
+actcheckbox=$(FUN_PICK_DISTINCT_COLORS)
+compactbutton=$(FUN_PICK_DISTINCT_COLORS)
+radiobutton=$(FUN_PICK_DISTINCT_COLORS)
+textbox=$(FUN_PICK_DISTINCT_COLORS)
+acttextbox=$(FUN_PICK_DISTINCT_COLORS)
+text=$(FUN_PICK_DISTINCT_COLORS)
+infobox=$(FUN_PICK_DISTINCT_COLORS)
+label=$(FUN_PICK_DISTINCT_COLORS)
+roottext=$(FUN_PICK_DISTINCT_COLORS)
+helpline=$(FUN_PICK_DISTINCT_COLORS)
+menu=$(FUN_PICK_DISTINCT_COLORS)
+menuitem=$(FUN_PICK_DISTINCT_COLORS)
+listbox=$(FUN_PICK_DISTINCT_COLORS)
+actlistbox=$(FUN_PICK_DISTINCT_COLORS)
+item=$(FUN_PICK_DISTINCT_COLORS)
+actsellistbox=$(FUN_PICK_DISTINCT_COLORS)
+sellistbox=$(FUN_PICK_DISTINCT_COLORS)
+scrollbar=$(FUN_PICK_DISTINCT_COLORS)
+statusbar=$(FUN_PICK_DISTINCT_COLORS)
+cursor=$(FUN_PICK_DISTINCT_COLORS)
+entry=$(FUN_PICK_DISTINCT_COLORS)
+disentry=$(FUN_PICK_DISTINCT_COLORS)
+emptyscale=$(FUN_PICK_DISTINCT_COLORS)
+fullscale=$(FUN_PICK_DISTINCT_COLORS)
+' 
+EOF
+
+	# `source` executes the content of the file in the *current* shell.
+	# This is how the NEWT_COLORS variable gets defined and exported.
+	# The shellcheck directive disables a warning about sourcing a dynamic file.
+	# shellcheck source=/dev/null
+	source "${PALETTE_FILE}"
+	export NEWT_COLORS
+}
+
+# --- UI & Workflow ---
+
+# Spawns multiple terminals to showcase a given theme.
+FUN_SHOW_FULL_PREVIEW() {
+	# This function receives the full NEWT_COLORS string (the content of a palette
+	# file) as its first and only argument ($1).
+	local palette_content="$1"
+	local backtitle="Full Theme Preview"
+	local term_opts=()
+
+	# Ptyxis often needs --new-window to ensure it doesn't just trigger a notification.
+	if [[ "$TERMINAL_PROGRAM" == "ptyxis" ]]; then
+		term_opts+=("--new-window")
+	fi
+
+	# The following commands launch new terminals to preview different whiptail boxes.
+	# The logic is consolidated directly into the `bash -c` command string for each terminal.
+	# The arguments after the string are passed as positional parameters ($0, $1, $2...)
+	# to the new bash process.
+
+	# --- Example 1: msgbox ---
+	# Conventional syntax: whiptail --msgbox <text> <height> <width>
+	$TERMINAL_PROGRAM "${term_opts[@]}" --title="Whiptail Example: msgbox" -- \
+		bash -c '
+			# $1 (palette_content) is used to set the theme.
+			export NEWT_COLORS="$1"
+			# $2 (backtitle) and $3 (title) are used for the window decorations.
+			# $4 is the message text.
+			whiptail --backtitle "$2" --title "$3" --msgbox "$4" 0 0
+			# This pause allows the user to see the result before the window closes.
+			echo -e "\n\n"
+			read -n 1 -s -r -p "Press any key to close..."
+		' \
+		bash_arg0 \
+		"$palette_content" \
+		"$backtitle" \
+		"msgbox" \
+		"This is a sample message box.\n\nIt shows how standard informational text appears." &
+
+	# --- Example 2: inputbox ---
+	# Conventional syntax: whiptail --inputbox <text> <height> <width> [init_string]
+	$TERMINAL_PROGRAM "${term_opts[@]}" --title="Whiptail Example: inputbox" -- \
+		bash -c '
+			# As before, $1 is the palette, $2 is the backtitle, $3 is the title.
+			export NEWT_COLORS="$1"
+			# $4 is the input box text. The initial string is hardcoded.
+			whiptail --backtitle "$2" --title "$3" --inputbox "$4" 0 0 "Default input text"
+			echo -e "\n\n"
+			read -n 1 -s -r -p "Press any key to close..."
+		' \
+		bash_arg0 "$palette_content" "$backtitle" "inputbox" "This is an input box." &
+
+	# --- Example 3: menu ---
+	# Conventional syntax: whiptail --menu <text> <height> <width> <list-height> [tag item]...
+	$TERMINAL_PROGRAM "${term_opts[@]}" --title="Whiptail Example: menu" -- \
+		bash -c '
+			export NEWT_COLORS="$1"
+			# $4 is the menu text. The list of tags/items is hardcoded.
+			whiptail --backtitle "$2" --title "$3" --menu "$4" 0 0 4 "1" "Option 1" "2" "Option 2" "3" "Option 3" "4" "Option 4"
+			echo -e "\n\n"
+			read -n 1 -s -r -p "Press any key to close..."
+		' \
+		bash_arg0 "$palette_content" "$backtitle" "menu" "This is a menu." &
+
+	# --- Example 4: checklist ---
+	# Conventional syntax: whiptail --checklist <text> <height> <width> <list-height> [tag item status]...
+	$TERMINAL_PROGRAM "${term_opts[@]}" --title="Whiptail Example: checklist" -- \
+		bash -c '
+			export NEWT_COLORS="$1"
+			# $4 is the checklist text. The list of tags/items/statuses is hardcoded.
+			whiptail --backtitle "$2" --title "$3" --checklist "$4" 0 0 5 "1" "Choice 1" "on" "2" "Choice 2" "off" "3" "Choice 3" "on" "4" "Choice 4" "off" "5" "Choice 5" "off"
+			echo -e "\n\n"
+			read -n 1 -s -r -p "Press any key to close..."
+		' \
+		bash_arg0 "$palette_content" "$backtitle" "checklist" "This is a checklist." &
+}
+
+# Asks the user for a name and saves the current palette to the PALETTE_DIR.
+FUN_SAVE_CURRENT_PALETTE() {
+	# Check if the temp file exists and has content. ` -s` checks for non-zero size.
+	if [[ ! -s "$PALETTE_FILE" ]]; then
+		whiptail --title "Error" --msgbox "No theme has been generated or selected to save." 0 0
+		return
+	fi
+
+	# Use default whiptail colors for the save dialog to ensure it's readable.
+	unset NEWT_COLORS
+	set +e
+	local palette_name
+	# This is the standard way to capture output from whiptail.
+	# `3>&1 1>&2 2>&3` swaps stdout and stderr. Whiptail draws its UI to stderr
+	# and prints the result (the user's input) to stdout. We swap them so the
+	# UI still appears on screen, but the result goes to the real stdout, which
+	# the command substitution `$(...)` can capture.
+	palette_name=$(whiptail --backtitle "Save Palette" \
+		--title "Save Current Color Palette" \
+		--inputbox "\nEnter a name for this palette. Spaces will be removed." \
+		0 0 3>&1 1>&2 2>&3)
+
+	# if user cancels or presses ESC, return to main menu
+	if [[ $? -ne 0 ]]; then
+		return
+	fi
+
+	# If user didn't provide a name (or canceled the input),the function returns to main menu.
+	if [[ -z "$palette_name" ]]; then
+		return
+	fi
+
+	# If user provided a name (and didn't cancel, which returns an empty string)
+	if [[ -n "$palette_name" ]]; then
+		local sanitized_name
+		# `tr -d '[:space:]'` removes all whitespace characters from the name.
+		sanitized_name=$(echo "$palette_name" | tr -d '[:space:]')
+		if [[ -n "$sanitized_name" ]]; then
+			local dest_file="${PALETTE_DIR}/${sanitized_name}_newt.palette"
+			# Copy the temporary palette file to the permanent storage directory.
+			cp "${PALETTE_FILE}" "${dest_file}"
+			whiptail --title "Success" --scrolltext --msgbox "Palette saved successfully to:\n\n${dest_file}" 0 0
+		else
+			whiptail --title "Error" --msgbox "Invalid name. The palette was not saved." 0 0
+		fi
+	fi
+	set -e
+
+}
+
+# Main workflow for generating and managing random palettes.
+FUN_GENERATION_WORKFLOW() {
+	# Loop indefinitely until the user chooses to exit.
+	while true; do
+
+		# Unsets the exit if a command fails (defined at begining of script : set +o errexit, same as set +e)
+		set +o errexit
+
+		local choice
+		# Capture the user's menu choice, again using the 3>&1 1>&2 2>&3 trick.
+		choice=$(whiptail --title "Random Palette Generator" \
+			--menu "Random [NEWT_COLORS] palette MENU. What's next?" 0 0 4 \
+			"1" "Generate A Random Theme" \
+			"2" "Show Full Preview in New Terminals" \
+			"3" "Save This Active Theme" \
+			"4" "Return to Main Menu" 3>&1 1>&2 2>&3)
+
+		# re-enable exiting on error (set -e / set -o errexit)
+		set -o errexit
+
+		# `${choice:-4}` means "use the value of $choice, but if it's empty (from
+		# the user pressing Esc), use '4' as the default".
+		case "${choice:-4}" in
+		1) # Generate Another
+			# Generate and apply a new theme for the main window immediately.
+			FUN_GENERATE_RANDOM_PALETTE
+			# `continue` skips the rest of the loop and starts again from the top.
+			continue
+			;;
+		2) # Show full preview
+			# The argument to `FUN_SHOW_FULL_PREVIEW` is the content of the temp file.
+			FUN_SHOW_FULL_PREVIEW "$(cat "$PALETTE_FILE")"
+			# After preview, we loop again, re-showing the menu.
+			;;
+		3) # Save
+			FUN_SAVE_CURRENT_PALETTE
+			# `break` exits the `while` loop and returns to the main menu.
+			break
+			;;
+		4 | *) # Exit or any other case
+			break
+			;;
+		esac
+	done
+}
+
+# Workflow for importing and previewing an existing palette.
+FUN_IMPORT_WORKFLOW() {
+	while true; do
+		local menu_items=()
+		local palette_files=()
+
+		# This block populates the menu arrays by finding all `.palette` files.
+		# `done < <(find ...)` is called "process substitution". It allows us to read
+		# the output of the `find` command line-by-line without creating a subshell,
+		# so the `menu_items` and `palette_files` arrays can be modified.
+		while IFS= read -r file; do
+			palette_files+=("$file")
+			# `${#palette_files[@]}` gives the current count of items, creating a numbered list.
+			# `basename` shows just the filename, not the full path.
+			menu_items+=("${#palette_files[@]}" "$(basename "$file")")
+		done < <(find "${PALETTE_DIR}" -maxdepth 1 -name "*.palette")
+
+		if [[ ${#palette_files[@]} -eq 0 ]]; then
+			whiptail --title "No Palettes Found" --msgbox "No saved palettes found in:\n\n${PALETTE_DIR}" 0 0
+			return
+		fi
+
+		# Unsets the exit if a command fails (defined at begining of script : set +o errexit, same as set +e)
+		set +o errexit
+
+		local chosen_index
+		chosen_index=$(whiptail --title "Import Palette" --menu "Select a palette to load and preview:" 0 0 12 \
+			"${menu_items[@]}" 3>&1 1>&2 2>&3)
+
+		if [[ -z "$chosen_index" ]]; then
+			# User pressed cancel or Esc, so exit the import workflow.
+			return
+		fi
+
+		# re-enable exiting on error (set -e / set -o errexit)
+		set -o errexit
+
+		# The menu gives a 1-based index, but our array is 0-based.
+		local file_path="${palette_files[$((chosen_index - 1))]}"
+		local selected_palette_content
+		selected_palette_content=$(cat "$file_path")
+
+		# Show the non-destructive preview, passing the file content as an argument ($1).
+		FUN_SHOW_FULL_PREVIEW "$selected_palette_content"
+
+		# Unsets the exit if a command fails (defined at begining of script : set +o errexit, same as set +e)
+		set +o errexit
+
+		local next_action
+		next_action=$(whiptail --title "Preview Complete" --menu "You have previewed '$(basename "$file_path")'.\n\nWhat would you like to do?" 0 0 4 \
+			"1" "Apply theme to this session" \
+			"2" "Save a copy of this theme" \
+			"3" "Preview another theme" \
+			"4" "Return to main menu" 3>&1 1>&2 2>&3)
+
+		# re-enable exiting on error (set -e / set -o errexit)
+		set -o errexit
+
+		case "${next_action:-4}" in
+		1) # Apply theme
+			# Source the chosen file to apply the theme to the current session.
+			# shellcheck source=/dev/null
+			source "$file_path"
+			export NEWT_COLORS
+			whiptail --title "Theme Applied" --msgbox "The selected theme has been applied to the current session." 0 0
+			break # Exit import loop
+			;;
+		2) # Save a copy
+			# Write the content of the previewed palette to the temp file so
+			# `FUN_SAVE_CURRENT_PALETTE` can find it.
+			echo "$selected_palette_content" >"$PALETTE_FILE"
+			FUN_SAVE_CURRENT_PALETTE
+			break # Exit import loop
+			;;
+		3)        # Preview another
+			continue # Restart import loop
+			;;
+		4 | *) # Return to main menu
+			break # Exit import loop
+			;;
+		esac
+	done
+}
+
+# Workflow for deleting one or more saved palettes.
+FUN_DELETE_WORKFLOW() {
+	local checklist_items=()
+	local palette_files=()
+
+	# Find all .palette files and populate the files array.
+	while IFS= read -r file; do
+		palette_files+=("$file")
+		# For the checklist, the "tag" is the full file path, the "item" is the
+		# display name, and the status is "off" by default.
+		checklist_items+=("$file" "$(basename "$file")" "off")
+	done < <(find "${PALETTE_DIR}" -maxdepth 1 -name "*.palette")
+
+	if [[ ${#palette_files[@]} -eq 0 ]]; then
+		whiptail --title "No Palettes Found" --msgbox "No saved palettes found to delete." 0 0
+		return
+	fi
+
+	# Unsets the exit if a command fails (defined at begining of script : set +o errexit, same as set +e)
+	set +o errexit
+
+	local chosen_files
+	chosen_files=$(whiptail --title "Delete Palettes" --checklist "\nUse SPACE to select palettes to delete." 0 0 12 \
+		"${checklist_items[@]}" 3>&1 1>&2 2>&3)
+
+	# re-enable exiting on error (set -e / set -o errexit)
+	set -o errexit
+
+	# Exit if the user cancelled or selected nothing.
+	if [[ -z "$chosen_files" ]]; then
+		whiptail --title "Cancelled" --msgbox "Delete operation cancelled." 0 0
+		return
+	fi
+
+	# Prepare a confirmation message listing the files to be deleted.
+	local confirm_msg="Are you sure you want to permanently delete the following files?\n"
+	for file_path in $chosen_files; do
+		# The quotes around the path are removed by the for loop, so we add them back
+		# to get the clean basename.
+		confirm_msg+="\n- $(basename "$file_path")"
+	done
+
+	if whiptail --title "Confirm Deletion" --yesno "$confirm_msg" 0 0; then
+		local deleted_files_msg="Deleted files:\n"
+		for file_path in $chosen_files; do
+			# The file path from whiptail is quoted, so we use `eval` to remove them
+			# for the `rm` command, or handle them if they contain spaces.
+			eval rm "$file_path"
+			deleted_files_msg+="\n- $(basename "$file_path")"
+		done
+		whiptail --title "Success" --msgbox "$deleted_files_msg" 0 0
+	else
+		whiptail --title "Cancelled" --msgbox "Delete operation cancelled." 0 0
+	fi
+}
+
+# Allows editing a specific parameter's colors in a saved palette.
+FUN_EDIT_PALETTE_PARAMETER() {
+	# Superior Pattern: Use an associative array to map menu index to file path.
+	local menu_items=()
+	declare -A palette_map=()
+	local i=1
+
+	# Use process substitution to read files and populate the arrays in one pass.
+	while IFS= read -r file; do
+		# The menu item is the index number and the file's base name.
+		menu_items+=("$i" "$(basename "$file")")
+		# The associative array maps the index to the full, unambiguous file path.
+		palette_map[$i]="$file"
+		((i++))
+	done < <(find "${PALETTE_DIR}" -maxdepth 1 -name "*.palette")
+
+	# Check if any palettes were found.
+	if [[ ${#palette_map[@]} -eq 0 ]]; then
+		whiptail --title "No Palettes Found" --msgbox "No saved palettes found in:\n\n${PALETTE_DIR}" 0 0
+		return
+	fi
+
+	# Unsets the exit if a command fails (defined at begining of script : set +o errexit, same as set +e)
+	set +o errexit
+
+	local chosen_index
+	# Display the menu. The menu height is the number of items in the map.
+	chosen_index=$(whiptail --title "Edit Palette" --menu "Select a palette to edit:" 0 0 "${#palette_map[@]}" \
+		"${menu_items[@]}" 3>&1 1>&2 2>&3)
+
+	# re-enable exiting on error (set -e / set -o errexit)
+	set -o errexit
+
+	# Exit if the user cancelled.
+	if [[ -z "$chosen_index" ]]; then return; fi
+
+	# Reliably retrieve the file path from the associative array.
+	local file_path="${palette_map[$chosen_index]}"
+
+	# Extract parameters from the palette file
+	local params=()
+	while IFS='=' read -r key val; do
+		key=$(echo "$key" | xargs)
+		# Ensure the key is a valid parameter name before adding it.
+		[[ "$key" =~ ^[a-zA-Z0-9]+$ ]] && params+=("$key")
+	done < <(grep '=' "$file_path")
+
+	# Check if any parameters were found in the file.
+	if [[ ${#params[@]} -eq 0 ]]; then
+		whiptail --title "Error" --msgbox "Could not find any valid parameters in the selected file." 0 0
+		return
+	fi
+
+	# Use the superior pattern for a clean, numbered menu of parameters.
+	local param_menu_items=()
+	declare -A param_map=()
+	local j=1
+	for p in "${params[@]}"; do
+		param_menu_items+=("$j" "$p")
+		param_map[$j]="$p"
+		((j++))
+	done
+
+	local param_choice_num
+	param_choice_num=$(whiptail --scrolltext --title "Edit Parameter" --menu "Select a parameter to edit:" 0 0 "${#param_map[@]}" \
+		"${param_menu_items[@]}" 3>&1 1>&2 2>&3)
+
+	if [[ -z "$param_choice_num" ]]; then return; fi
+	local param_choice="${param_map[$param_choice_num]}"
+
+	# Get the current colors for the selected parameter to pre-select them in the list.
+	local current_line
+	current_line=$(grep "^${param_choice}=" "$file_path")
+	local current_colors=${current_line#*=}
+	local current_fg
+	current_fg=$(echo "$current_colors" | cut -d',' -f1)
+	local current_bg
+	current_bg=$(echo "$current_colors" | cut -d',' -f2)
+
+	local colors=("black" "red" "green" "brown" "blue" "magenta" "cyan" "lightgray" "gray" "brightred" "brightgreen" "yellow" "brightblue" "brightmagenta" "brightcyan" "white")
+	local fg_choice bg_choice
+
+	# --- Foreground Color Selection ---
+	local fg_radio_items=()
+	for c in "${colors[@]}"; do
+		if [[ "$c" == "$current_fg" ]]; then
+			fg_radio_items+=("$c" "" "ON")
+		else
+			fg_radio_items+=("$c" "" "OFF")
+		fi
+	done
+	# The exit status of whiptail is checked by the subsequent validation logic.
+	fg_choice=$(whiptail --scrolltext --title "Foreground Color: $param_choice" --radiolist "Pick foreground color. Current is '${current_fg}'.\nUse SPACE to select." 0 0 16 \
+		"${fg_radio_items[@]}" 3>&1 1>&2 2>&3)
+
+	# --- Background Color Selection ---
+	local bg_radio_items=()
+	for c in "${colors[@]}"; do
+		if [[ "$c" == "$current_bg" ]]; then
+			bg_radio_items+=("$c" "" "ON")
+		else
+			bg_radio_items+=("$c" "" "OFF")
+		fi
+	done
+	# The exit status of whiptail is checked by the subsequent validation logic.
+	bg_choice=$(whiptail --scrolltext --title "Background Color: $param_choice" --radiolist "Pick background color. Current is '${current_bg}'.\nUse SPACE to select." 0 0 16 \
+		"${bg_radio_items[@]}" 3>&1 1>&2 2>&3)
+
+	# Validate color choices.
+	if [[ -z "$fg_choice" || -z "$bg_choice" ]]; then
+		whiptail --title "Cancelled" --msgbox "Color selection cancelled. No changes made." 0 0
+		return
+	fi
+	if [[ "$fg_choice" == "$bg_choice" ]]; then
+		whiptail --title "Error" --msgbox "Foreground and background colors cannot be the same. No changes made." 0 0
+		return
+	fi
+
+	# Use sed to perform the in-place replacement.
+	sed -i "s/^${param_choice}=.*/${param_choice}=${fg_choice},${bg_choice}/" "$file_path"
+	whiptail --title "Success" --msgbox "Parameter '${param_choice}' updated to '${fg_choice},${bg_choice}' in $(basename "$file_path")." 0 0
+}
+
+# Displays help and information about the script.
+FUN_SHOW_HELP() {
+	whiptail --scrolltext --title "About This Script" --msgbox \
+		"**Whiptail/Newt Color Randomizer**
+
+This script is an interactive tool for generating, previewing, and managing color palettes for 'whiptail' dialogs.
+
+**What is NEWT_COLORS?**
+It's an environment variable that defines the foreground and background colors for 35 different elements of a whiptail/newt user interface. This script helps you customize it.
+
+**Main Menu Options:**
+- **Auto-generate:** Creates and applies a completely random color palette. You can then preview and save it.
+- **Import and preview:** Loads a previously saved palette and shows a full preview in separate terminal windows.
+- **Delete:** Permanently removes one or more saved palettes.
+- **Edit a parameter:** Allows you to change the colors for a single element (e.g., 'button', 'title') within a saved palette.
+
+**Note:**
+The preview function launches multiple 'gnome-terminal' or 'ptyxis' windows.
+Palettes are saved in: ${PALETTE_DIR}
+" 0 0
+}
+
+# --- Main Execution ---
+
+FUN_MAIN() {
+	# `trap` registers a command to be run when the script receives a signal.
+	# This ensures that `FUN_CLEANUP` is always called, even if the user presses Ctrl+C
+	# (SIGINT) or the script is terminated for other reasons.
+	trap FUN_CLEANUP EXIT SIGHUP SIGINT SIGTERM
+
+	FUN_CHECK_DEPENDENCIES
+	FUN_SETUP_ENVIRONMENT
+
+	# The main application loop.
+	while true; do
+		# Reset to default colors for the main menu to ensure it's always readable.
+		unset NEWT_COLORS
+
+		# unsets the exit if a command fails (defined at begining of script : set +o errexit, same as set +e)
+		set +e
+		local main_choice
+		main_choice=$(whiptail --title "Whiptail Color Randomizer" --menu "Select an option:" 0 0 6 \
+			"1" "Auto-generate a new color palette" \
+			"2" "Import and preview a saved palette" \
+			"3" "Delete a saved palette" \
+			"4" "Edit a parameter in a saved palette" \
+			"5" "Help / About" \
+			"6" "Exit" 3>&1 1>&2 2>&3)
+
+		if [[ -z "$main_choice" ]]; then
+			echo "Exiting."
+			break
+		fi
+
+		# re-enable exiting on error (set -e / set -o errexit)
+		set -e
+
+		case "$main_choice" in
+		1) FUN_GENERATION_WORKFLOW ;;
+		2) FUN_IMPORT_WORKFLOW ;;
+		3) FUN_DELETE_WORKFLOW ;;
+		4) FUN_EDIT_PALETTE_PARAMETER ;;
+		5) FUN_SHOW_HELP ;;
+		6 | *)
+			echo "Exiting."
+			break
+			;;
+		esac
+	done
+}
+
+# Run the main function, starting the script.
+FUN_MAIN

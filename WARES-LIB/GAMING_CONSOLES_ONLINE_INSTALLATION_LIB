@@ -1,0 +1,1135 @@
+#!/bin/bash
+
+_FUN_INSTALL_PPSSPP_ONLINE() {
+	# Install PPSSPP.
+	FUN_VERBOSE_INSTALLING "ppsspp psp emulator  [installed via FLATPAK]"
+	# Ensuring Flatpak is installed
+	sudo apt-get update
+	sudo apt install -y flatpak
+	sudo apt install -y gnome-software-plugin-flatpak
+	# Adding Flathub remote if not present
+	sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+	FUN_VERBOSE_INSTALLING "ppsspp psp emulator  [installed via FLATPAK]"
+	sudo apt install -y flatpak
+	if flatpak install -y https://dl.flathub.org/repo/appstream/org.ppsspp.PPSSPP.flatpakref; then
+		FUN_TRACK_CUSTOM_INSTALL "PPSSPP (Flatpak)" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "PPSSPP (Flatpak)" "fail"
+	fi
+}
+
+_FUN_INSTALL_XEMU_ONLINE() {
+	# Install XEMU [XBOX EMULATOR]
+	# needs 7z dependency
+	if ! apt list --installed 7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+		echo "dependency 7zip is NOT installed .. installing"
+		sudo apt update
+		sudo apt install -y 7zip
+		if ! apt list --installed p7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+			echo "Possibly didn't install dependency 7zip .. exiting"
+			exit
+		fi
+	fi
+	FUN_VERBOSE_INSTALLING "xemu  xbox emulator"
+	sudo add-apt-repository ppa:mborgerson/xemu -y
+	sudo apt update
+	if sudo apt install -y xemu; then
+		FUN_TRACK_CUSTOM_INSTALL "Xemu (PPA)" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "Xemu (PPA)" "fail"
+	fi
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	7z x ./AUTO-INSTALLS-FILES/GAMING/XEMU_XBOX_FILES.zip -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+	# Create destination directories
+	sudo mkdir -p /etc/skel/.local/share/xemu/xemu/
+	mkdir -p "$HOME/.local/share/xemu/xemu/"
+	# Allow everyone access to /etc/skel's xemu dir
+	sudo chmod -R 777 /etc/skel/.local/share/xemu/xemu/
+	sudo chmod -R 777 "$HOME/.local/share/xemu/xemu/"
+	# Copy files to /etc/skel's xemu dir
+	sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/BIOS/Complex_4627v1.03.bin /etc/skel/.local/share/xemu/xemu/
+	sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/Boot_ROM_image/mcpx_1.0.bin /etc/skel/.local/share/xemu/xemu/
+	sudo cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/Pre_built_Xbox_HDD_image/xbox_hdd.qcow2 /etc/skel/.local/share/xemu/xemu/
+	# Copy files to your home xemu dir
+	cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/BIOS/Complex_4627v1.03.bin "$HOME/.local/share/xemu/xemu/"
+	cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/Boot_ROM_image/mcpx_1.0.bin "$HOME/.local/share/xemu/xemu/"
+	cp ./AUTO-INSTALLS-FILES/WORKER-TEMP/Pre_built_Xbox_HDD_image/xbox_hdd.qcow2 "$HOME/.local/share/xemu/xemu/"
+
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+}
+
+# NINTENDO SWITCH EMULATOR [ryubing - ryujinx] precise but much slower performace
+_FUN_INSTALL_RYUJINX_ONLINE() {
+	# Install Ryujinx.
+	FUN_VERBOSE_INSTALLING "Ryujinx Nintendo Switch Emulator"
+	sudo apt install flatpak -y
+	sudo apt install gnome-software-plugin-flatpak -y
+	sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "flatpak"
+	FUN_VERBOSE_INSTALLING "Ryujinx Nintendo Switch Emulator"
+	if flatpak install flathub io.github.ryubing.Ryujinx -y; then
+		FUN_TRACK_CUSTOM_INSTALL "Ryujinx (Flatpak)" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "Ryujinx (Flatpak)" "fail"
+	fi
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	sudo mkdir -p /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+	sudo mkdir -p $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+	sudo chmod -R 777 /etc/skel/.var/app/io.github.ryubing.Ryujinx
+	sudo chmod -R 777 $HOME/.var
+	7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-PRODKEYS-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+	7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-FIRMWARE-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-* /etc/skel/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-* $HOME/.var/app/io.github.ryubing.Ryujinx/config/Ryujinx/system
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+}
+
+# R.I.P. CITRON :c Discontinued NINTENDO SWITCH EMULATOR [CITRON] - FAST! SWITCH EMULATOR (we are using a local appimage copy) - R.I.P. CITRON :c Discontinued
+_FUN_INSTALL_CITRON_ONLINE() {
+	FUN_VERBOSE_INSTALLING "Citron local appimage - FAST! Nintendo Switch Emulator"
+
+	# ==============================================================================
+	# CITRON EMULATOR (NINTENDO SWITCH) - HIGH-PERFORMANCE AUTOMATED INSTALLER
+	# ==============================================================================
+	# PURPOSE:
+	#   Autonomously sets up the Citron Switch Emulator with specific optimizations
+	#   for low-latency gaming (stutter reduction) and system-wide integration.
+	#
+	# CORE WORKFLOW:
+	#   1. Local Binary Deployment:
+	#      Uses a pre-bundled AppImage from the project assets, ensuring a stable
+	#      and tested version of the emulator is deployed.
+	#
+	#   2. Local Resource Deployment (Firmware & Keys):
+	#      Extracts proprietary Nintendo Switch Prodkeys and Firmware from local
+	#      7z archives and installs them into Citron's NAND and system folders.
+	#      This is done for both the current user and /etc/skel (multi-user ready).
+	#
+	#   3. On-Demand RAM Disk Optimization (Performance):
+	#      To eliminate micro-stuttering caused by SSD/HDD latency, the script:
+	#      - Creates a 'Load' script to move shaders to /dev/shm (RAM) before launch.
+	#      - Creates a 'Save' script to sync shaders back to the SSD on exit.
+	#      - /dev/shm is used as a rootless tmpfs to avoid sudo prompts during play.
+	#
+	#   4. The "Conducting" Wrapper:
+	#      Generates a master wrapper (~/.local/bin/citron-wrapper) that manages
+	#      the lifecycle: [LOAD TO RAM] -> [EXECUTE EMULATOR] -> [SYNC TO DISK].
+	#
+	#   5. Full System Integration:
+	#      - Desktop Entry: Points 'Exec=' to the wrapper so GUI launches are optimized.
+	#      - System Command: Creates a symlink in /bin/citron pointing to the
+	#        wrapper, allowing the 'citron' command to run optimized in any terminal.
+	#      - Icon Extraction: Self-extracts the internal .DirIcon and stores it
+	#        permanently in the install directory for persistence.
+	#
+	#   6. Permissions:
+	#      Applies permissive 'chmod 777' settings throughout to ensure absolute
+	#      compatibility and ease of modification in this environment.
+	# ==============================================================================
+
+	set -e # Exit immediately if a command exits with a non-zero status.
+
+	# ----------------------------
+	# Configuration
+	# ----------------------------
+	APP_NAME="Citron"
+	TARGET_FILE_CITRON_APPIMAGE="$(realpath ./AUTO-INSTALLS-FILES/GAMING/CITRON-EMULATOR-APPIMAGE/Citron.AppImage)"
+	BASENAME_CITRON_APPIMAGE=$(basename "$TARGET_FILE_CITRON_APPIMAGE")
+	INSTALL_DIR="$HOME/.Applications/$APP_NAME"
+	DESKTOP_FILE="$HOME/.local/share/applications/citron.desktop"
+
+	# ----------------------------
+	# Functions
+	# ----------------------------
+
+	# ----------------------------
+	# Main Execution
+	# ----------------------------
+
+	# 0. Dependency Check & Auto-Install
+	#    Ensures essential tools (7zip) are present before starting.
+	check_and_install_deps() {
+		local deps=("7zip")
+		local missing_deps=()
+
+		for dep in "${deps[@]}"; do
+			if ! command -v "$dep" &>/dev/null; then
+				missing_deps+=("$dep")
+			fi
+		done
+
+		if [ ${#missing_deps[@]} -eq 0 ]; then
+			return 0
+		fi
+
+		echo "⚠️  Missing dependencies: ${missing_deps[*]}"
+		echo "Attempting to install them automatically..."
+
+		if command -v apt-get &>/dev/null; then
+			sudo apt-get update && sudo apt-get install -y "${missing_deps[@]}"
+		elif command -v dnf &>/dev/null; then
+			sudo dnf install -y "${missing_deps[@]}"
+		elif command -v pacman &>/dev/null; then
+			sudo pacman -Sy --noconfirm "${missing_deps[@]}"
+		elif command -v zypper &>/dev/null; then
+			sudo zypper install -y "${missing_deps[@]}"
+		elif command -v apk &>/dev/null; then
+			sudo apk add "${missing_deps[@]}"
+		else
+			echo "❌ Error: Could not detect a supported package manager."
+			echo "   Please manually install: ${missing_deps[*]}"
+			exit 1
+		fi
+	}
+
+	check_and_install_deps
+
+	echo "🚀 Setting up $APP_NAME..."
+
+	# 1. Prepare Directory
+	echo "Preparing installation directory: $INSTALL_DIR"
+
+	#    We remove any existing directory with the same name to ensure a clean install.
+	sudo rm -rf "$INSTALL_DIR"
+	#    We create a dedicated directory to keep the AppImage and its icon self-contained.
+	sudo mkdir -p "$INSTALL_DIR"
+	sudo chmod -R 777 "$INSTALL_DIR"
+
+	# 2. copy appimage
+	echo "Copying AppImage..."
+	cp -f "$TARGET_FILE_CITRON_APPIMAGE" "$INSTALL_DIR"
+
+	#    Make the Citron directory executable.
+	sudo chmod -R 777 "$INSTALL_DIR"
+
+	# 4. Extract Icon
+	echo "🎨 Extracting icon..."
+	# Define a permanent path for the icon inside the installation directory
+	ICON_PATH="$INSTALL_DIR/citron.png"
+
+	# AppImages are self-mounting filesystems. We can extract specific files without mounting.
+	# We attempt to extract '.DirIcon' which is the standard icon path within an AppImage.
+	cd "$CD_DIRNAME/AUTO-INSTALLS-FILES/WORKER-TEMP" || exit
+	"$TARGET_FILE_CITRON_APPIMAGE" --appimage-extract .DirIcon >/dev/null 2>&1 || true
+
+	if [ -f "squashfs-root/.DirIcon" ]; then
+		# Move the extracted icon to our permanent install dir and rename it to .png
+		# (Note: .DirIcon is usually a PNG or SVG, but .png extension usually works fine for desktop files)
+		mv "squashfs-root/.DirIcon" "$ICON_PATH"
+		echo "   Icon extracted successfully to $ICON_PATH"
+	else
+		echo "⚠️  Warning: Could not extract icon. The menu entry might lack an icon."
+	fi
+
+	# Clean up the temporary extraction directory.
+	cd "$CD_DIRNAME" || exit
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# 5. Setup Shader RAM Disk & Wrapper Script
+	#    We create three scripts:
+	#    1. load-shaders: Moves cache to /dev/shm (RAM)
+	#    2. save-shaders: Moves cache back to disk
+	#    3. citron-wrapper: Orchestrates the process (Load -> Run -> Save)
+
+	echo "⚡ Setting up Citron Shader RAM Disk (On-Demand)..."
+
+	# Define paths for our custom wrapper scripts
+	BIN_DIR="$HOME/.local/bin"
+	mkdir -p "$BIN_DIR"
+	LOAD_SCRIPT="$BIN_DIR/citron-load-shaders.sh"
+	SAVE_SCRIPT="$BIN_DIR/citron-save-shaders.sh"
+	WRAPPER_SCRIPT="$BIN_DIR/citron-wrapper"
+
+	# Use /dev/shm for rootless RAM disk access (Simulates 2GB limit conceptually by being in RAM)
+	# /dev/shm is a native tmpfs available to users without sudo mount privileges
+	RAM_MOUNT="/dev/shm/citron_shaders_$USER"
+	APP_IMAGE_PATH="$INSTALL_DIR/$BASENAME_CITRON_APPIMAGE"
+
+	# --- Generate Load Script ---
+	# Uses Split-Heredoc: Unquoted first block injects variables, Quoted second block writes logic safely.
+	cat >"$LOAD_SCRIPT" <<EOF
+#!/bin/bash
+# Description: Automates moving Citron shaders to RAM (via /dev/shm)
+RAM_MOUNT="$RAM_MOUNT"
+EOF
+
+	cat >>"$LOAD_SCRIPT" <<'EOF'
+SHADER_DIR="$HOME/.local/share/citron/shader"
+BACKUP_DIR="$HOME/.local/share/citron/shader_backup"
+
+# Ensure RAM dir exists
+mkdir -p "$RAM_MOUNT"
+
+# Logic to move shaders to RAM
+if [ -d "$SHADER_DIR" ] && [ ! -L "$SHADER_DIR" ]; then
+    echo "Existing folder found. Moving to RAM..."
+    mkdir -p "$BACKUP_DIR"
+    cp -r "$SHADER_DIR"/* "$BACKUP_DIR/" 2>/dev/null
+    cp -r "$SHADER_DIR"/* "$RAM_MOUNT/" 2>/dev/null
+    rm -rf "$SHADER_DIR"
+    ln -s "$RAM_MOUNT" "$SHADER_DIR"
+elif [ -L "$SHADER_DIR" ]; then
+    echo "Symlink exists. Refreshing RAM from backup..."
+    if [ "$(readlink -f "$SHADER_DIR")" != "$RAM_MOUNT" ]; then
+        rm "$SHADER_DIR"
+        ln -s "$RAM_MOUNT" "$SHADER_DIR"
+    fi
+    if [ -d "$BACKUP_DIR" ]; then
+        cp -r "$BACKUP_DIR"/* "$RAM_MOUNT/" 2>/dev/null
+    fi
+else
+    echo "Creating fresh RAM linkage..."
+    mkdir -p "$(dirname "$SHADER_DIR")"
+    ln -s "$RAM_MOUNT" "$SHADER_DIR"
+    mkdir -p "$RAM_MOUNT"
+fi
+EOF
+
+	# --- Generate Save Script ---
+	# This runs after the emulator closes to ensure persistence.
+	cat >"$SAVE_SCRIPT" <<EOF
+#!/bin/bash
+# Description: Saves Citron shaders from RAM back to disk
+RAM_MOUNT="$RAM_MOUNT"
+EOF
+
+	cat >>"$SAVE_SCRIPT" <<'EOF'
+BACKUP_DIR="$HOME/.local/share/citron/shader_backup"
+
+if [ -d "$RAM_MOUNT" ]; then
+    echo "Saving shaders to disk..."
+    mkdir -p "$BACKUP_DIR"
+    cp -r "$RAM_MOUNT"/* "$BACKUP_DIR/" 2>/dev/null
+fi
+EOF
+
+	# --- Generate Wrapper Script ---
+	# This script is what the desktop icon actually launches.
+	cat >"$WRAPPER_SCRIPT" <<EOF
+#!/bin/bash
+# Wrapper to handle RAM disk shader optimization for Citron
+APP_PATH="$APP_IMAGE_PATH"
+LOAD_SCRIPT="$LOAD_SCRIPT"
+SAVE_SCRIPT="$SAVE_SCRIPT"
+EOF
+
+	cat >>"$WRAPPER_SCRIPT" <<'EOF'
+# 1. Load Shaders to RAM
+if [ -f "$LOAD_SCRIPT" ]; then
+    bash "$LOAD_SCRIPT"
+fi
+
+# 2. Run App (Passing arguments)
+#    We wait for it to finish before proceeding.
+"$APP_PATH" "$@"
+
+# 3. Save Shaders to Disk (Runs after Citron closes)
+if [ -f "$SAVE_SCRIPT" ]; then
+    bash "$SAVE_SCRIPT"
+fi
+EOF
+
+	# Apply permissive permissions (777) as requested
+	sudo chmod 777 "$LOAD_SCRIPT"
+	sudo chmod 777 "$SAVE_SCRIPT"
+	sudo chmod 777 "$WRAPPER_SCRIPT"
+
+	# 6. Create Desktop Launcher (Updated to use Wrapper)
+	echo "📝 Creating desktop entry..."
+	mkdir -p "$(dirname "$DESKTOP_FILE")"
+
+	cat >"$DESKTOP_FILE" <<EOL
+[Desktop Entry]
+Name=Citron
+Comment=Nintendo Switch Emulator
+Exec=$WRAPPER_SCRIPT
+Icon=$ICON_PATH
+Terminal=false
+Type=Application
+Categories=Game;
+	StartupNotify=true
+EOL
+
+	# 7. Extract Keys & Firmware / Create System Command
+	# Clean temporary worker directory (safely)
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	sudo mkdir -p /etc/skel/.local/share/citron/keys
+	sudo mkdir -p "$HOME"/.local/share/citron/keys
+	sudo chmod -R 777 /etc/skel/.local/share/citron/keys
+	sudo chmod -R 777 "$HOME"/.local/share/citron/keys
+
+	sudo mkdir -p /etc/skel/.local/share/citron/nand/system/Contents/registered/
+	sudo mkdir -p "$HOME"/.local/share/citron/nand/system/Contents/registered/
+	sudo chmod -R 777 /etc/skel/.local/share/citron/nand/system/Contents/registered/
+	sudo chmod -R 777 "$HOME"/.local/share/citron
+
+	7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-PRODKEYS-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+	7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-FIRMWARE-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP
+
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* /etc/skel/.local/share/citron/keys
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* "$HOME"/.local/share/citron/keys
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-*/* /etc/skel/.local/share/citron/nand/system/Contents/registered/
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-*/* "$HOME"/.local/share/citron/nand/system/Contents/registered/
+	sudo cp -rf "$HOME/.Applications" /etc/skel/
+
+	sudo chmod -R 777 /etc/skel/.local/share/citron/
+	sudo chmod -R 777 "$HOME"/.local/share/citron/
+	sudo chmod -R 777 "$HOME/.Applications/"
+	sudo chmod -R 777 /etc/skel/.Applications
+
+	# Create system-wide "citron" command (Symlink to our wrapper)
+	# This ensures running 'citron' from terminal also uses the RAM disk logic.
+	sudo ln -sf "$WRAPPER_SCRIPT" /bin/citron
+	sudo chmod 777 /bin/citron
+
+	# Clean temporary worker directory (safely)
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# 8. Finalize
+	echo "🎉 Installation complete!"
+	echo "   You can launch Citron from your Applications menu (Games section)."
+	FUN_TRACK_CUSTOM_INSTALL "Citron (AppImage)" "success"
+
+	set +e
+}
+
+# [ EDEN ] - NINTENDO SWITCH EMULATOR - High Performance AppImage
+_FUN_INSTALL_EDEN_ONLINE() {
+	# needs 7z dependency
+	if ! apt list --installed 7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+		echo "dependency 7zip is NOT installed .. installing"
+		sudo apt update
+		sudo apt install -y 7zip
+		if ! apt list --installed p7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+			echo "Possibly didn't install dependency 7zip .. exiting"
+			exit
+		fi
+	fi
+
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "EDEN - NINTENDO SWITCH EMULATOR (AppImage + RAM Disk)"
+
+	# 1. Fetch Latest Version & Download URL
+	# We target the 'amd64-clang-pgo' build for maximum pre-compiled performance.
+	REPO_URL="https://git.eden-emu.dev/eden-emu/eden"
+	LATEST_TAG=$(curl -sL "${REPO_URL}/releases" | grep -oP 'releases/tag/\K(v[0-9.]+)' | head -n 1)
+
+	if [ -z "$LATEST_TAG" ]; then
+		echo "Failed to fetch latest Eden version. Falling back to v0.2.1"
+		LATEST_TAG="v0.2.1"
+	fi
+
+	FILENAME="Eden-Linux-${LATEST_TAG}-amd64-clang-pgo.AppImage"
+	DOWNLOAD_URL="${REPO_URL}/releases/download/${LATEST_TAG}/${FILENAME}"
+
+	INSTALL_DIR="$HOME/.Applications/Eden"
+	mkdir -p "$INSTALL_DIR"
+
+	echo "Downloading Eden ${LATEST_TAG}..."
+	wget -q --show-progress -O "$INSTALL_DIR/Eden.AppImage" "$DOWNLOAD_URL"
+	if [ -f "$INSTALL_DIR/Eden.AppImage" ]; then
+		chmod +x "$INSTALL_DIR/Eden.AppImage"
+		FUN_TRACK_CUSTOM_INSTALL "Eden (AppImage)" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "Eden (AppImage)" "fail"
+	fi
+
+	# 2. Extract Icon (Citron Style Integration)
+	echo "🎨 Extracting icon from AppImage..."
+	ICON_PATH="$INSTALL_DIR/eden.png"
+
+	cd ./AUTO-INSTALLS-FILES/WORKER-TEMP || exit
+	"$INSTALL_DIR/Eden.AppImage" --appimage-extract .DirIcon >/dev/null 2>&1 || true
+	if [ -f "squashfs-root/.DirIcon" ]; then
+		mv "squashfs-root/.DirIcon" "$ICON_PATH"
+		echo "   Icon extracted successfully."
+	else
+		# Fallback to download if extraction fails
+		wget -q -O "$ICON_PATH" "https://git.eden-emu.dev/eden-emu/eden/raw/branch/master/dist/eden.png" || true
+	fi
+	cd "$CD_DIRNAME" || exit
+
+	# 3. Define Paths (Standard Linux paths, not Snap)
+	EDEN_DATA_DIR="$HOME/.local/share/eden"
+	EDEN_HOME_KEYS="$EDEN_DATA_DIR/keys"
+	EDEN_HOME_FW="$EDEN_DATA_DIR/nand/system/Contents/registered"
+	EDEN_SKEL_KEYS="/etc/skel/.local/share/eden/keys"
+	EDEN_SKEL_FW="/etc/skel/.local/share/eden/nand/system/Contents/registered"
+
+	# Create Directories
+	echo "Creating Eden directories..."
+	sudo mkdir -p "$EDEN_HOME_KEYS" "$EDEN_HOME_FW" "$EDEN_SKEL_KEYS" "$EDEN_SKEL_FW"
+	sudo chmod -R 777 "$EDEN_DATA_DIR" 2>/dev/null || true
+	sudo chmod -R 777 "/etc/skel/.local/share/eden/" 2>/dev/null || true
+
+	# 4. Extract & Install Assets (Keys/Firmware)
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-PRODKEYS-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP >/dev/null
+	7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-FIRMWARE-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP >/dev/null
+
+	echo "Installing Keys and Firmware..."
+	# Copy to Home
+	cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* "$EDEN_HOME_KEYS"
+	cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-*/* "$EDEN_HOME_FW"
+	# Copy to Skel
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* "$EDEN_SKEL_KEYS"
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-*/* "$EDEN_SKEL_FW"
+
+	# 5. Setup Shader RAM Disk Optimization
+	echo "⚡ Setting up Eden Shader RAM Disk (On-Demand)..."
+	BIN_DIR="$HOME/.local/bin"
+	mkdir -p "$BIN_DIR"
+
+	LOAD_SCRIPT="$BIN_DIR/eden-load-shaders.sh"
+	SAVE_SCRIPT="$BIN_DIR/eden-save-shaders.sh"
+	WRAPPER_SCRIPT="$BIN_DIR/eden-wrapper"
+	RAM_MOUNT="/dev/shm/eden_shaders_$USER"
+
+	# --- Load Script ---
+	cat <<EOF | sudo tee "$LOAD_SCRIPT" >/dev/null
+	#!/bin/bash
+	RAM_MOUNT="$RAM_MOUNT"
+	SHADER_DIR="$EDEN_DATA_DIR/shader"
+	BACKUP_DIR="$EDEN_DATA_DIR/shader_backup"
+
+	mkdir -p "\$RAM_MOUNT"
+	if [ -d "\$SHADER_DIR" ] && [ ! -L "\$SHADER_DIR" ]; then
+	mkdir -p "\$BACKUP_DIR"
+	cp -r "\$SHADER_DIR"/* "\$BACKUP_DIR/" 2>/dev/null
+	cp -r "\$SHADER_DIR"/* "\$RAM_MOUNT/" 2>/dev/null
+	rm -rf "\$SHADER_DIR"
+	ln -s "\$RAM_MOUNT" "\$SHADER_DIR"
+	elif [ -L "\$SHADER_DIR" ]; then
+	[ "\$(readlink -f "\$SHADER_DIR")" != "\$RAM_MOUNT" ] && rm "\$SHADER_DIR" && ln -s "\$RAM_MOUNT" "\$SHADER_DIR"
+	[ -d "\$BACKUP_DIR" ] && cp -r "\$BACKUP_DIR"/* "\$RAM_MOUNT/" 2>/dev/null
+	else
+	mkdir -p "\$(dirname "\$SHADER_DIR")"
+	ln -s "\$RAM_MOUNT" "\$SHADER_DIR"
+	fi
+EOF
+
+	# --- Save Script ---
+	cat <<EOF | sudo tee "$SAVE_SCRIPT" >/dev/null
+	#!/bin/bash
+	RAM_MOUNT="$RAM_MOUNT"
+	BACKUP_DIR="$EDEN_DATA_DIR/shader_backup"
+	if [ -d "\$RAM_MOUNT" ]; then
+	mkdir -p "\$BACKUP_DIR"
+	cp -r "\$RAM_MOUNT"/* "\$BACKUP_DIR/" 2>/dev/null
+	fi
+EOF
+
+	# --- Wrapper Script ---
+	cat <<EOF | sudo tee "$WRAPPER_SCRIPT" >/dev/null
+	#!/bin/bash
+	# Eden High Performance Wrapper
+	bash "$LOAD_SCRIPT"
+	"$INSTALL_DIR/Eden.AppImage" "\$@"
+	bash "$SAVE_SCRIPT"
+EOF
+
+	sudo chmod +x "$LOAD_SCRIPT" "$SAVE_SCRIPT" "$WRAPPER_SCRIPT"
+
+	# 6. Desktop Integration
+	DESKTOP_FILE="$HOME/.local/share/applications/eden.desktop"
+	cat <<EOF >"$DESKTOP_FILE"
+	[Desktop Entry]
+	Name=Eden (Optimized)
+	Comment=Nintendo Switch Emulator (AppImage + RAM Shaders)
+	Exec=$WRAPPER_SCRIPT
+	Icon=$ICON_PATH
+	Terminal=false
+	Type=Application
+	Categories=Game;
+	StartupNotify=true
+EOF
+
+	# Cleanup
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	echo "Eden installation complete! (AppImage ${LATEST_TAG})"
+}
+
+# [ EDEN ] - NINTENDO SWITCH EMULATOR - High Performance AppImage nightly build
+_FUN_INSTALL_EDEN_ONLINE_NIGHTLY() {
+	# needs 7z dependency
+	if ! apt list --installed 7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+		echo "dependency 7zip is NOT installed .. installing"
+		sudo apt update
+		sudo apt install -y 7zip
+		if ! apt list --installed p7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+			echo "Possibly didn't install dependency 7zip .. exiting"
+			exit
+		fi
+	fi
+
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "EDEN - NINTENDO SWITCH EMULATOR (Nightly AppImage + RAM Disk)"
+
+	# 1. Fetch Latest Nightly Download URL
+	# We target the 'amd64-clang-pgo' build for maximum pre-compiled performance.
+	REPO_URL="https://git.eden-emu.dev/eden-ci/nightly/releases"
+	DOWNLOAD_URL=$(curl -sL "${REPO_URL}" | grep -oP 'https://[^\"]*amd64-clang-pgo\.AppImage' | head -n 1)
+
+	if [ -z "$DOWNLOAD_URL" ]; then
+		echo "Failed to fetch latest Eden Nightly download URL. Falling back to default release..."
+		LATEST_TAG="v0.2.1"
+		DOWNLOAD_URL="https://git.eden-emu.dev/eden-emu/eden/releases/download/${LATEST_TAG}/Eden-Linux-${LATEST_TAG}-amd64-clang-pgo.AppImage"
+	fi
+
+	INSTALL_DIR="$HOME/.Applications/Eden-Nightly"
+	mkdir -p "$INSTALL_DIR"
+
+	echo "Downloading Eden Nightly..."
+	wget -q --show-progress -O "$INSTALL_DIR/Eden-Nightly.AppImage" "$DOWNLOAD_URL"
+	if [ -f "$INSTALL_DIR/Eden-Nightly.AppImage" ]; then
+		chmod +x "$INSTALL_DIR/Eden-Nightly.AppImage"
+		FUN_TRACK_CUSTOM_INSTALL "Eden Nightly (AppImage)" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "Eden Nightly (AppImage)" "fail"
+	fi
+
+	# 2. Extract Icon (Citron Style Integration)
+	echo "🎨 Extracting icon from AppImage..."
+	ICON_PATH="$INSTALL_DIR/eden.png"
+
+	cd ./AUTO-INSTALLS-FILES/WORKER-TEMP || exit
+	"$INSTALL_DIR/Eden-Nightly.AppImage" --appimage-extract .DirIcon >/dev/null 2>&1 || true
+	if [ -f "squashfs-root/.DirIcon" ]; then
+		mv "squashfs-root/.DirIcon" "$ICON_PATH"
+		echo "   Icon extracted successfully."
+	else
+		# Fallback to download if extraction fails
+		wget -q -O "$ICON_PATH" "https://git.eden-emu.dev/eden-emu/eden/raw/branch/master/dist/eden.png" || true
+	fi
+	cd "$CD_DIRNAME" || exit
+
+	# 3. Define Paths (Standard Linux paths, not Snap)
+	EDEN_DATA_DIR="$HOME/.local/share/eden"
+	EDEN_HOME_KEYS="$EDEN_DATA_DIR/keys"
+	EDEN_HOME_FW="$EDEN_DATA_DIR/nand/system/Contents/registered"
+	EDEN_SKEL_KEYS="/etc/skel/.local/share/eden/keys"
+	EDEN_SKEL_FW="/etc/skel/.local/share/eden/nand/system/Contents/registered"
+
+	# Create Directories
+	echo "Creating Eden directories..."
+	sudo mkdir -p "$EDEN_HOME_KEYS" "$EDEN_HOME_FW" "$EDEN_SKEL_KEYS" "$EDEN_SKEL_FW"
+	sudo chmod -R 777 "$EDEN_DATA_DIR" 2>/dev/null || true
+	sudo chmod -R 777 "/etc/skel/.local/share/eden/" 2>/dev/null || true
+
+	# 4. Extract & Install Assets (Keys/Firmware)
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-PRODKEYS-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP >/dev/null
+	7z x ./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-FIRMWARE-*.7z -o./AUTO-INSTALLS-FILES/WORKER-TEMP >/dev/null
+
+	echo "Installing Keys and Firmware..."
+	# Copy to Home
+	cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* "$EDEN_HOME_KEYS"
+	cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-*/* "$EDEN_HOME_FW"
+	# Copy to Skel
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-*/* "$EDEN_SKEL_KEYS"
+	sudo cp -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-*/* "$EDEN_SKEL_FW"
+
+	# 5. Setup Shader RAM Disk Optimization
+	echo "⚡ Setting up Eden Shader RAM Disk (On-Demand)..."
+	BIN_DIR="$HOME/.local/bin"
+	mkdir -p "$BIN_DIR"
+
+	LOAD_SCRIPT="$BIN_DIR/eden-load-shaders.sh"
+	SAVE_SCRIPT="$BIN_DIR/eden-save-shaders.sh"
+	WRAPPER_SCRIPT="$BIN_DIR/eden-nightly-wrapper"
+	RAM_MOUNT="/dev/shm/eden_shaders_$USER"
+
+	# --- Load Script ---
+	cat <<EOF | sudo tee "$LOAD_SCRIPT" >/dev/null
+	#!/bin/bash
+	RAM_MOUNT="$RAM_MOUNT"
+	SHADER_DIR="$EDEN_DATA_DIR/shader"
+	BACKUP_DIR="$EDEN_DATA_DIR/shader_backup"
+
+	mkdir -p "\$RAM_MOUNT"
+	if [ -d "\$SHADER_DIR" ] && [ ! -L "\$SHADER_DIR" ]; then
+	mkdir -p "\$BACKUP_DIR"
+	cp -r "\$SHADER_DIR"/* "\$BACKUP_DIR/" 2>/dev/null
+	cp -r "\$SHADER_DIR"/* "\$RAM_MOUNT/" 2>/dev/null
+	rm -rf "\$SHADER_DIR"
+	ln -s "\$RAM_MOUNT" "\$SHADER_DIR"
+	elif [ -L "\$SHADER_DIR" ]; then
+	[ "\$(readlink -f "\$SHADER_DIR")" != "\$RAM_MOUNT" ] && rm "\$SHADER_DIR" && ln -s "\$RAM_MOUNT" "\$SHADER_DIR"
+	[ -d "\$BACKUP_DIR" ] && cp -r "\$BACKUP_DIR"/* "\$RAM_MOUNT/" 2>/dev/null
+	else
+	mkdir -p "\$(dirname "\$SHADER_DIR")"
+	ln -s "\$RAM_MOUNT" "\$SHADER_DIR"
+	fi
+EOF
+
+	# --- Save Script ---
+	cat <<EOF | sudo tee "$SAVE_SCRIPT" >/dev/null
+	#!/bin/bash
+	RAM_MOUNT="$RAM_MOUNT"
+	BACKUP_DIR="$EDEN_DATA_DIR/shader_backup"
+	if [ -d "\$RAM_MOUNT" ]; then
+	mkdir -p "\$BACKUP_DIR"
+	cp -r "\$RAM_MOUNT"/* "\$BACKUP_DIR/" 2>/dev/null
+	fi
+EOF
+
+	# --- Wrapper Script ---
+	cat <<EOF | sudo tee "$WRAPPER_SCRIPT" >/dev/null
+	#!/bin/bash
+	# Eden Nightly High Performance Wrapper
+	bash "$LOAD_SCRIPT"
+	"$INSTALL_DIR/Eden-Nightly.AppImage" "\$@"
+	bash "$SAVE_SCRIPT"
+EOF
+
+	sudo chmod +x "$LOAD_SCRIPT" "$SAVE_SCRIPT" "$WRAPPER_SCRIPT"
+
+	# 6. Desktop Integration
+	DESKTOP_FILE="$HOME/.local/share/applications/eden-nightly.desktop"
+	cat <<EOF >"$DESKTOP_FILE"
+	[Desktop Entry]
+	Name=Eden Nightly (Optimized)
+	Comment=Nintendo Switch Emulator (Nightly AppImage + RAM Shaders)
+	Exec=$WRAPPER_SCRIPT
+	Icon=$ICON_PATH
+	Terminal=false
+	Type=Application
+	Categories=Game;
+	StartupNotify=true
+EOF
+
+	# Cleanup
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	echo "Eden Nightly installation complete! (Nightly AppImage)"
+}
+
+# [ EDEN ] - NINTENDO SWITCH EMULATOR - Build from Source (MAX PERFORMANCE)
+_FUN_INSTALL_EDEN_FROM_SOURCE() {
+	# needs 7z dependency
+	if ! apt list --installed 7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+		echo "dependency 7zip is NOT installed .. installing"
+		sudo apt update
+		sudo apt install -y 7zip
+		if ! apt list --installed p7zip 2>/dev/null | grep -w 7zip >/dev/null; then
+			echo "Possibly didn't install dependency 7zip .. exiting"
+			exit
+		fi
+	fi
+
+	FUN_VERBOSE_INSTALLING_NO_APT_UPDATE "EDEN - NINTENDO SWITCH EMULATOR (Building from Source - Native Optimization)"
+
+	echo "=========================================================================="
+	echo "🚀 Starting Native Optimized Build Setup for Eden Nintendo Switch Emulator"
+	echo "=========================================================================="
+
+	# we must use a directory under the OS root because the build fails due to well-documented Linux kernel or mounting constraint on external media drives with specific nodev/nosuid flags managed by udisks2 ( default externa. drive mount flags i think)
+	# so we will use a temp dir under /var/tmp/XXXX to avoid size limits or quotas on the /tmp tmpfs RAM disk
+	# clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	# sudo rm -rf /var/tmp/NINTENDO_SWITCH_EMULATOR_BUILD_DIRECTORY 2>/dev/null
+
+	# 1. Install Build Dependencies
+	# IMPORTANT!!: we must purge / remove apt package "libxbyak-dev" since its using the one provided by eden source code which is newer and has important fixes for linux builds. If we don't remove it, the build will fail always
+
+	echo "Installing build dependencies..."
+
+	sudo apt update
+	sudo apt install -y \
+		autoconf cmake g++ gcc git glslang-tools libglu1-mesa-dev libhidapi-dev \
+		libpulse-dev libtool libudev-dev libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+		libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxext-dev libxkbcommon-x11-0 \
+		mesa-common-dev nasm ninja-build qt6-base-dev qt6-base-private-dev qt6-webengine-dev catch2 libfmt-dev \
+		liblz4-dev nlohmann-json3-dev libzstd-dev libssl-dev libavfilter-dev \
+		libavcodec-dev libswscale-dev pkg-config zlib1g-dev libva-dev libvdpau-dev \
+		qt6-tools-dev qt6-charts-dev libqt6charts6-dev qt6-multimedia-dev libqt6svg6-dev \
+		libvulkan-dev spirv-tools spirv-headers \
+		libusb-1.0-0-dev libboost-dev libboost-fiber-dev \
+		libboost-context-dev libsdl2-dev libopus-dev libasound2-dev vulkan-utility-libraries-dev
+
+	# we do a remove and purge of libxbyak-dev to ensure it doesn't conflict with the bundled version in eden source code which is newer and has important fixes for linux builds. If we don't remove it, the build will fail always
+	# just in case! otherwise build will fail (the flag -DXBYAK_FORCE_BUNDLED=ON tells cmake to use the bundled version, but if the system version is present it can cause conflicts and build failures - which i was experiencing)
+	sudo apt purge -y libxbyak-dev || true
+	sudo apt autoremove -y || true
+	sudo apt autoclean -y || true
+
+	# 2. Clone Repository
+	echo -e "\n🌐 Step 2: Fetching EDEN NINTENDO SWITCH EMULATOR source code repositories recursively..."
+	# WORK_DIR="/var/tmp/NINTENDO_SWITCH_EMULATOR_BUILD_DIRECTORY"
+	WORK_DIR="./AUTO-INSTALLS-FILES/WORKER-TEMP/eden-source"
+	sudo mkdir -p "$WORK_DIR"
+	sudo chmod -R 777 "$WORK_DIR"
+
+	git clone --depth 1 --recursive --shallow-submodules https://github.com/eden-emulator/mirror.git "$WORK_DIR"
+	# git clone --depth 1 --recursive --shallow-submodules https://git.eden-emu.dev/eden-emu/eden.git "$WORK_DIR" # ALTERNATIVE REPO (IN CASE GITHUB REPO GETS NUKED BY NINTENDO DMCA)
+
+	cd "$WORK_DIR" || exit
+
+	# 3. Configure & Build with Native Optimizations
+	echo -e "\n⚙️ Step 3: Generating native compilation targets using CMake & Ninja..."
+	echo "Configuring with -DYUZU_BUILD_PRESET=native..."
+	mkdir build && cd build
+
+	cmake .. -GNinja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DENABLE_QT=ON \
+		-DENABLE_QT6=ON \
+		-DYUZU_USE_QT_WEB_ENGINE=ON \
+		-DYUZU_BUILD_PRESET=native \
+		-DYUZU_USE_CPM=ON \
+		-DVulkanHeaders_FORCE_BUNDLED=ON \
+		-DVulkanUtilityLibraries_FORCE_BUNDLED=ON \
+		-DXBYAK_FORCE_BUNDLED=ON || exit
+
+	#.*.\/.*.\/.*.\/.*.*.\/.*.\/.*.\/.*.*.\/.*.\/.*.\/.*.*.\/.*.\/.*.\/.*.*.\/.*.\/.*.\/.*
+	#  Pro-Tip for CPU architecture Verification:
+	#  If you are ever on a machine and want to know exactly what architecture GCC thinks it is running on natively,
+	#  query it with this quick one-liner in the terminal:
+	#
+	#  gcc -march=native -Q --help=target | grep -E '^  -march='
+	#
+	#.*.\/.*.\/.*.\/.*.*.\/.*.\/.*.\/.*.*.\/.*.\/.*.\/.*.*.\/.*.\/.*.\/.*.*.\/.*.\/.*.\/.*
+	# ==============================================================================
+	# INTEL CPU MICROARCHITECTURE QUICK REFERENCE (-march=FLAGS)
+	# ==============================================================================
+	# Gen 5  (5xxx)  | Broadwell     -> -march=broadwell
+	# Gen 6  (6xxx)  | Skylake       -> -march=skylake
+	# Gen 7  (7xxx)  | Kaby Lake     -> -march=kabylake
+	# Gen 8  (8xxx)  | Coffee Lake   -> -march=coffeelake
+	# Gen 9  (9xxx)  | Coffee Lake R -> -march=coffeelake
+	# Gen 10 (10xxx) | Ice Lake      -> -march=icelake
+	# Gen 10 (10xxx) | Comet Lake    -> -march=skylake   (Note: Comet Lake is a Skylake refresh)
+	# Gen 11 (11xxx) | Tiger Lake    -> -march=tigerlake (e.g., i5-1145G7)
+	# Gen 11 (11xxx) | Rocket Lake   -> -march=rocketlake
+	# Gen 12 (12xxx) | Alder Lake    -> -march=alderlake
+	# Gen 13 (13xxx) | Raptor Lake   -> -march=raptorlake
+	# Gen 14 (14xxx) | Raptor Lake R -> -march=raptorlake
+	# Core Ultra 1   | Meteor Lake   -> -march=meteorlake
+	# Core Ultra 2   | Arrow Lake    -> -march=arrowlake
+	#
+	# ==============================================================================
+	# AMD CPU MICROARCHITECTURE QUICK REFERENCE (-march=FLAGS)
+	# ==============================================================================
+	# Ryzen 1000     | Zen 1         -> -march=znver1
+	# Ryzen 2000     | Zen+          -> -march=znver1    (Note: znver1 covers Zen+ optimizations)
+	# Ryzen 3000     | Zen 2         -> -march=znver2
+	# Ryzen 4000     | Zen 2 (APU)   -> -march=znver2
+	# Ryzen 5000     | Zen 3         -> -march=znver3
+	# Ryzen 7000     | Zen 4         -> -march=znver4
+	# Ryzen 8000     | Zen 4         -> -march=znver4
+	# Ryzen 9000     | Zen 5         -> -march=znver5
+	# ==============================================================================
+
+	# cmake .. -GNinja \
+	# 	-DCMAKE_BUILD_TYPE=Release \
+	# 	-DENABLE_QT=ON \
+	# 	-DENABLE_QT6=ON \
+	# 	-DYUZU_USE_QT_WEB_ENGINE=ON \
+	# 	-DYUZU_BUILD_PRESET=generic \
+	# 	-DCMAKE_CXX_FLAGS="-march=tigerlake -O3" \
+	# 	-DCMAKE_C_FLAGS="-march=tigerlake -O3" \
+	# 	-DYUZU_USE_CPM=ON \
+	# 	-DVulkanHeaders_FORCE_BUNDLED=ON \
+	# 	-DVulkanUtilityLibraries_FORCE_BUNDLED=ON \
+	# 	-DXBYAK_FORCE_BUNDLED=ON || exit
+
+	echo -e "\n🔨 Starting EDEN EMULATOR build / native (-DYUZU_BUILD_PRESET=native) compilation... [super performance] "
+
+	# ninja does the actual binary compilation. [ We use ionice and nice to reduce the priority of the build process, ensuring it doesn't interfere with other tasks.]
+	ionice -c2 -n7 nice -n10 ninja || exit
+
+	# 4. Install Binary
+	echo -e "\n💾 Step 4: Staging built binaries into standard local application hierarchy..."
+	INSTALL_DIR="$HOME/.Applications/Eden-Source"
+	mkdir -p "$INSTALL_DIR"
+	if cp bin/eden "$INSTALL_DIR/eden"; then
+		FUN_TRACK_CUSTOM_INSTALL "Eden (Source Build)" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "Eden (Source Build)" "fail"
+	fi
+
+	cd "$CD_DIRNAME" || exit
+
+	# 5. Define Paths (Standard Linux paths)
+	echo -e "\n📂 Step 5: Structuring local virtual environments and directory pathways..."
+	EDEN_DATA_DIR="$HOME/.local/share/eden"
+	EDEN_HOME_KEYS="$EDEN_DATA_DIR/keys"
+	EDEN_HOME_FW="$EDEN_DATA_DIR/nand/system/Contents/registered"
+
+	# Create Directories
+	sudo mkdir -p "$EDEN_HOME_KEYS" "$EDEN_HOME_FW"
+	sudo chmod -R 777 "$EDEN_DATA_DIR" 2>/dev/null || true
+
+	# 6. Extract & Install Assets (Keys/Firmware)
+	echo -e "\n🔑 Step 6: Installing Keys and Firmware ..."
+	7z x "./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-PRODKEYS-*.7z" -o"./AUTO-INSTALLS-FILES/WORKER-TEMP"
+	7z x "./AUTO-INSTALLS-FILES/GAMING/NINTENDO-SWITCH-FIRMWARE-*.7z" -o"./AUTO-INSTALLS-FILES/WORKER-TEMP"
+	sudo cp -rf "./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-PRODKEYS-"*/* "$EDEN_HOME_KEYS"
+	sudo cp -rf "./AUTO-INSTALLS-FILES/WORKER-TEMP/NINTENDO-SWITCH-FIRMWARE-"*/* "$EDEN_HOME_FW"
+
+	sync
+	sudo chmod -R 777 "$EDEN_DATA_DIR" 2>/dev/null || true
+
+	# 7. Setup Shader RAM Disk Optimization
+	echo -e "\n⚡ Step 7: Configuring high-performance virtual RAM disk shader mounts..."
+	echo "⚡ Setting up Eden Shader RAM Disk (On-Demand)..."
+	BIN_DIR="$HOME/.local/bin"
+	LOAD_SCRIPT="$BIN_DIR/eden-load-shaders.sh"
+	SAVE_SCRIPT="$BIN_DIR/eden-save-shaders.sh"
+	WRAPPER_SCRIPT="$BIN_DIR/eden-source-wrapper"
+	RAM_MOUNT="/dev/shm/eden_shaders_$USER"
+
+	# Wrapper to handle RAM disk shader optimization for Eden Source build
+	cat <<EOF | sudo tee "$WRAPPER_SCRIPT" >/dev/null
+#!/bin/bash
+bash "$LOAD_SCRIPT"
+"$INSTALL_DIR/eden" "\$@"
+bash "$SAVE_SCRIPT"
+EOF
+	sudo chmod +x "$WRAPPER_SCRIPT"
+
+	# 8. Desktop Integration
+	echo -e "\n🖥️ Step 8: Creating native Desktop launcher shortcuts and downloading branding assets..."
+	DESKTOP_FILE="$HOME/.local/share/applications/eden-source.desktop"
+	cat <<EOF >"$DESKTOP_FILE"
+[Desktop Entry]
+Name=Eden (Source-Native)
+Comment=Nintendo Switch Emulator (Built from source)
+Exec=$WRAPPER_SCRIPT
+Icon=eden
+Terminal=false
+Type=Application
+Categories=Game;
+StartupNotify=true
+EOF
+
+	# Download Icon
+	wget --tries=2 --timeout=10 -O "$INSTALL_DIR/eden.svg" "https://git.eden-emu.dev/eden-emu/eden/raw/branch/master/dist/eden.icon/Assets/dev.eden_emu.eden.svg" || true
+	sed -i "s|Icon=eden|Icon=$INSTALL_DIR/eden.svg|g" "$DESKTOP_FILE"
+
+	cd "$CD_DIRNAME" || exit
+
+	sync
+	# clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+	# sudo rm -rf /var/tmp/NINTENDO_SWITCH_EMULATOR_BUILD_DIRECTORY 2>/dev/null
+
+	echo "=========================================================================="
+	echo "🎉 [SUCCESS] Eden Source build complete! Check your applications menu!"
+	echo "=========================================================================="
+}
+
+_FUN_INSTALL_RETROARCH_ONLINE() {
+
+	# Install RetroArch.
+	FUN_VERBOSE_INSTALLING "flatpak"
+	sudo apt install flatpak -y
+	sudo apt install gnome-software-plugin-flatpak -y
+	sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+	FUN_PACKAGE_INSTALLATION_STATUS_CHECKER "flatpak"
+	# ----------------------------------------
+	# Install RetroArch via Flatpak and configure cores
+	# ----------------------------------------
+	FUN_VERBOSE_INSTALLING "Retroarch Via Flatpak"
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# Install RetroArch and runtime dependencies
+	if flatpak install -y flathub org.libretro.RetroArch; then
+		FUN_TRACK_CUSTOM_INSTALL "RetroArch (Flatpak)" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "RetroArch (Flatpak)" "fail"
+	fi
+	flatpak install -y flathub runtime/org.freedesktop.Platform.openh264/x86_64/2.0
+	# Create RetroArch cores config directories
+	sudo mkdir -p /etc/skel/.var/app/org.libretro.RetroArch/config/retroarch/cores
+	mkdir -p "$HOME/.var/app/org.libretro.RetroArch/config/retroarch/cores"
+	# Set permissions
+	sudo chmod -R 777 /etc/skel/.var
+	chmod -R 777 "$HOME/.var"
+	TEMP_RETROARCH_CORES_DIR="./AUTO-INSTALLS-FILES/WORKER-TEMP"
+	RETROARCH_CORES_DIR="$HOME/.var/app/org.libretro.RetroArch/config/retroarch/cores"
+	declare -A CORES=(
+		["bsnes2014_balanced_libretro.so"]="https://buildbot.libretro.com/nightly/linux/x86_64/latest/bsnes2014_balanced_libretro.so.zip"
+		["fbalpha2012_libretro.so"]="https://buildbot.libretro.com/nightly/linux/x86_64/latest/fbalpha2012_libretro.so.zip"
+		["fbneo_libretro.so"]="https://buildbot.libretro.com/nightly/linux/x86_64/latest/fbneo_libretro.so.zip"
+		["mgba_libretro.so"]="https://buildbot.libretro.com/nightly/linux/x86_64/latest/mgba_libretro.so.zip"
+		["mupen64plus_next_libretro.so"]="https://buildbot.libretro.com/nightly/linux/x86_64/latest/mupen64plus_next_libretro.so.zip"
+		["nestopia_libretro.so"]="https://buildbot.libretro.com/nightly/linux/x86_64/latest/nestopia_libretro.so.zip"
+	)
+	mkdir -p "$TEMP_RETROARCH_CORES_DIR"
+	for core_name in "${!CORES[@]}"; do
+		zip_url="${CORES[$core_name]}"
+		zip_file="$TEMP_RETROARCH_CORES_DIR/$(basename "$zip_url")"
+		temp_extract_dir="$TEMP_RETROARCH_CORES_DIR/temp_extract_$(date +%s%N)" # Unique temp dir
+		echo "Downloading $core_name..."
+		wget -q --show-progress -O "$zip_file" "$zip_url"
+		echo "Extracting $core_name..."
+		mkdir -p "$temp_extract_dir"
+		unzip -o "$zip_file" -d "$temp_extract_dir" >/dev/null
+		extracted_so_file=$(find "$temp_extract_dir" -type f -name "*.so" -print -quit)
+		# here we copy the downloaded cores to its DIR(s) in home and /etc/skel
+		if [[ -n "$extracted_so_file" ]]; then
+			echo "Installing $core_name to RetroArch cores directory... [ $RETROARCH_CORES_DIR ]"
+			sudo mv "$extracted_so_file" "$RETROARCH_CORES_DIR/$core_name"
+			sudo cp -f "$RETROARCH_CORES_DIR/$core_name" /etc/skel/.var/app/org.libretro.RetroArch/config/retroarch/cores/"$core_name"
+		else
+			echo "Warning: Could not find .so file for $core_name in $zip_file"
+		fi
+		rm -f "$zip_file"
+		rm -rf "$temp_extract_dir"
+	done
+	echo "RetroArch cores installed to $RETROARCH_CORES_DIR"
+	# Copy any pre-existing cores from local gaming repo (Commented out - we preffer the newly downloaded core - leaving for documentation purposes)
+	# sudo cp -rf ./AUTO-INSTALLS-FILES/GAMING/RETROARCH-CORES/* "$RETROARCH_CORES_DIR"
+
+}
+
+_FUN_INSTALL_DOLPHIN_ONLINE() {
+
+	# Install Dolphin [NINTENDO GAMECUBE EMULATOR]
+	FUN_VERBOSE_INSTALLING "dolphin emulator"
+	cd "$CD_DIRNAME" || exit
+
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+	# 1. Ask for the sudo password upfront and keep the session alive.
+	# This starts a background process that periodically runs `sudo -v`
+	# to refresh the sudo timestamp, preventing it from expiring during the build.
+	sudo -v
+	while true; do
+		sudo -n true
+		sleep 60
+		kill -0 "$$" || exit
+	done 2>/dev/null &
+	SUDO_KEEPALIVE_PID=$!
+
+	# 2. Install dependencies.
+	sudo apt install -y --no-install-recommends \
+		ca-certificates qt6-base-dev qt6-base-private-dev libqt6svg6-dev git cmake make gcc g++ pkg-config \
+		libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libxi-dev libxrandr-dev libudev-dev libevdev-dev \
+		libsfml-dev libminiupnpc-dev libmbedtls-dev libcurl4-openssl-dev libhidapi-dev libsystemd-dev libbluetooth-dev \
+		libasound2-dev libpulse-dev libpugixml-dev libbz2-dev libzstd-dev liblzo2-dev libpng-dev libusb-1.0-0-dev gettext
+
+	# 3. Clone the repository.
+	git clone https://github.com/dolphin-emu/dolphin.git ./AUTO-INSTALLS-FILES/WORKER-TEMP/dolphin-emu
+	cd ./AUTO-INSTALLS-FILES/WORKER-TEMP/dolphin-emu || exit
+	git submodule update --init --recursive
+
+	# 4. Build and install.
+	mkdir Build && cd Build
+	cmake ..
+	# Use ionice and nice to reduce system impact.
+	ionice -c2 -n7 nice -n10 make -j"$(nproc)"
+	if sudo make install; then
+		FUN_TRACK_CUSTOM_INSTALL "Dolphin (Source Build)" "success"
+	else
+		FUN_TRACK_CUSTOM_INSTALL "Dolphin (Source Build)" "fail"
+	fi
+	cd "$CD_DIRNAME" || exit
+
+	# Stop the sudo keep-alive process
+	echo "Stopping sudo keep-alive process..."
+	kill "$SUDO_KEEPALIVE_PID"
+
+	# Clean temporary worker directory (safely)-  avoid attempting to delete . or .. while cleaning all other contents including hidden ones.
+	sudo rm -rf ./AUTO-INSTALLS-FILES/WORKER-TEMP/* ./AUTO-INSTALLS-FILES/WORKER-TEMP/.[!.]* ./AUTO-INSTALLS-FILES/WORKER-TEMP/..?*
+
+}
+
+_FUN_INSTALL_ALL_GAMING_CONSOLES_ONLINE() {
+
+	# Ask for the sudo password upfront and keep the session alive.
+	# This starts a background process that periodically runs `sudo -v`
+	# to refresh the sudo timestamp, preventing it from expiring during the build.
+	sudo -v
+	while true; do
+		sudo -n true
+		sleep 60
+		kill -0 "$$" || exit
+	done 2>/dev/null &
+	SUDO_KEEPALIVE_PID=$!
+
+	echo "--- Starting Full Online Installation of All Emulators ---"
+	_FUN_INSTALL_PPSSPP_ONLINE
+	_FUN_INSTALL_XEMU_ONLINE
+	# _FUN_INSTALL_RYUJINX_ONLINE # commented out
+	# _FUN_INSTALL_CITRON_ONLINE # commented out
+	_FUN_INSTALL_EDEN_ONLINE
+	_FUN_INSTALL_EDEN_ONLINE_NIGHTLY
+	_FUN_INSTALL_EDEN_FROM_SOURCE
+	_FUN_INSTALL_RETROARCH_ONLINE
+	_FUN_INSTALL_DOLPHIN_ONLINE
+	echo "--- Full Gaming Installation Complete ---"
+
+	# Stop the sudo keep-alive process
+	echo "Stopping sudo keep-alive process..."
+	kill "$SUDO_KEEPALIVE_PID"
+
+}
+
+_FUN_INSTALL_GAMING_ONLINE_INTERACTIVE_MENU() {
+
+	# Display a checklist of available emulators.
+	GAMING_CONSOLES_CHOICE=$(whiptail --title "CHOOSE UBUNTU VERSION" --checklist "CHOOSE GAMING CONSOLES TO INSTALL" 0 0 9 \
+		"PPSSPP" "[PSP EMULATOR VIA FLATPAk] ppsspp" off \
+		"XEMU" "[XBOX EMULATOR] XEMU" off \
+		"RYUJINX" "[NINTENDO SWITCH] Ryujinx Nintendo Switch Emulator" off \
+		"CITRON" "[CITRON EMULATOR] Citron Nintendo Switch Emulator" off \
+		"EDEN" "[EDEN EMULATOR] Nintendo Switch Emulator (Stable AppImage)" off \
+		"EDEN-NIGHTLY" "[EDEN EMULATOR NIGHTLY] Nintendo Switch Emulator (Nightly AppImage)" off \
+		"EDEN-BUILD" "[EDEN EMULATOR BUILD FROM SOURCE] Nintendo Switch Emulator" off \
+		"DOLPHIN" "[DOLPHIN EMULATOR] Nintendo Gamecube" off \
+		"RETROARCH" "[RETROARCH]" off 3>&1 1>&2 2>&3)
+
+	echo "chosen $GAMING_CONSOLES_CHOICE"
+
+	GAMING_CONSOLES_CHOICE_SANITIZED=$(echo $GAMING_CONSOLES_CHOICE | sed 's/"//g')
+
+	# Process the user's selections.
+	for CHOOSER in ${GAMING_CONSOLES_CHOICE_SANITIZED}; do
+		case $CHOOSER in
+		PPSSPP)
+			_FUN_INSTALL_PPSSPP_ONLINE
+			;;
+		XEMU)
+			_FUN_INSTALL_XEMU_ONLINE
+			;;
+		RYUJINX)
+			_FUN_INSTALL_RYUJINX_ONLINE
+			;;
+		CITRON)
+			_FUN_INSTALL_CITRON_ONLINE
+			;;
+		EDEN)
+			_FUN_INSTALL_EDEN_ONLINE
+			;;
+		EDEN-NIGHTLY)
+			_FUN_INSTALL_EDEN_ONLINE_NIGHTLY
+			;;
+		EDEN-BUILD)
+			_FUN_INSTALL_EDEN_FROM_SOURCE
+			;;
+		RETROARCH)
+			_FUN_INSTALL_RETROARCH_ONLINE
+			;;
+		DOLPHIN)
+			_FUN_INSTALL_DOLPHIN_ONLINE
+			;;
+		*)
+			echo "unknown"
+			;;
+		esac
+	done
+
+}

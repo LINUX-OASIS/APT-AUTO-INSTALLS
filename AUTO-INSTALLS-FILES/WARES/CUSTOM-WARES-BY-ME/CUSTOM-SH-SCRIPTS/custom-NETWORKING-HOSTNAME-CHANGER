@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# check root
+# Ensure script is run as root.
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[1;48;5;202m" "Please run as root or with sudo" "\e[0m"
+	sudo $0
+	exit 1
+fi
+
+FUN_CHANGE_HOSTNAME() {
+	# Get the new hostname from the user
+	NEW_HOSTNAME=$(whiptail --scrolltext --inputbox "Enter the new hostname\n-max 15 characters\n-no spaces\n-will truncate to 15th char\n-will delete any spaces" 0 0 --title "Change Hostname" 3>&1 1>&2 2>&3)
+
+	# Exit if the user cancels
+	if [ $? -ne 0 ]; then
+		exit 0
+	fi
+
+	# sanitize inputted hostname - remove white spaces
+	NEW_HOSTNAME=$(echo "$NEW_HOSTNAME" | tr -d '[:space:]')
+
+	if [ -z $NEW_HOSTNAME ]; then
+		echo -e "\e[1;48;5;160m" "HOSTNAME CANT BE EMPTY OR JUST SPACES .... EXITING" "\e[0m"
+		echo ""
+		read -r -s -p "press enter to EXIT"
+		exit
+	fi
+
+	# Truncate the hostname to 15 characters
+	TRUNCATED_HOSTNAME=${NEW_HOSTNAME:0:15}
+
+	if whiptail --title "Confirm?" --defaultno --yesno "Change HOSTNAME ?\nHOSTNAME will be set to:\n$TRUNCATED_HOSTNAME" 0 0; then
+		# Change the hostname
+		echo -n "$TRUNCATED_HOSTNAME" | sudo tee /etc/hostname
+
+		# Clear Chrome profile locks for the user who ran the script
+		if [ -n "$SUDO_USER" ]; then
+			USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+			CHROME_DIR="$USER_HOME/.config/google-chrome"
+			if [ -d "$CHROME_DIR" ]; then
+				rm -f "$CHROME_DIR/SingletonLock" "$CHROME_DIR/SingletonCookie" "$CHROME_DIR/SingletonSocket"
+			fi
+		fi
+
+		# Inform the user that a reboot is required
+		whiptail --msgbox "Hostname has been changed to '$TRUNCATED_HOSTNAME'.\n\nChrome locks have been cleared.\nA reboot is required for the changes to take effect." 0 0
+
+	else
+		echo "user aborted ... exiting"
+		exit
+	fi
+}
+
+_MASTER_CHOICE=$(
+	whiptail --title "HOSTNAME changer" --menu "Select option" 0 0 3 \
+		"CHANGE_HOSTNAME" "  CHANGE HOSTNAME/NETBIOS NAME" \
+		"HELP/ABOUT" "  INFO" \
+		"EXIT" "  EXIT" 3>&1 1>&2 2>&3
+)
+case $_MASTER_CHOICE in
+CHANGE_HOSTNAME)
+	FUN_CHANGE_HOSTNAME
+	;;
+HELP/ABOUT)
+	whiptail --scrolltext --title "About" --msgbox "This script allows you to change the hostname of your system using a simple text-based user interface.\n\nUsage: ./change_hostname.sh\n\nIt will guide you through the process of entering a new hostname, and will then update the /etc/hostname file. A reboot is required for the changes to take effect.\n\nDependencies: whiptail, sudo" 0 0
+	;;
+EXIT)
+	exit
+	;;
+*)
+	exit
+	;;
+esac

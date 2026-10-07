@@ -1,0 +1,1330 @@
+#!/bin/bash
+
+# ==============================================================================
+#
+#               NBD (NETWORK BLOCK DEVICE) MANAGER
+#
+#  An interactive TUI for sharing and mounting remote block devices over LAN.
+#  Architecture follows the 'Superior Pattern' (Numeric Mapping + Associative Arrays).
+#
+#  Author: LINUX-OASIS
+#  Version: 3.2 (Command Center + Batch Orchestration)
+#
+# ==============================================================================
+
+# --- 1. Root Enforcement ---
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[1;48;5;202m" "This script requires root privileges to manage block devices and system services." "\e[0m"
+	echo "Relaunching with sudo..."
+	sudo env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" "$0" "$@"
+	exit $?
+fi
+
+# --- 2. Dependency Check & Resolution ---
+# Use a mapping of required commands to their parent packages
+declare -A DEPS=(
+	["nbd-server"]="nbd-server"
+	["nbd-client"]="nbd-client"
+	["whiptail"]="whiptail"
+	["lsblk"]="util-linux"
+	["awk"]="mawk"
+	["sed"]="sed"
+	["grep"]="grep"
+	["ip"]="iproute2"
+	["ss"]="iproute2"
+	["fuser"]="psmisc"
+)
+
+for CMD in "${!DEPS[@]}"; do
+	if ! command -v "$CMD" &>/dev/null; then
+		PKG="${DEPS[$CMD]}"
+		echo "Required command '$CMD' is missing. Attempting to install package '$PKG'..."
+		sudo apt update && sudo apt install -y "$PKG"
+		if ! command -v "$CMD" &>/dev/null; then
+			echo "ERROR: Failed to install '$PKG' (providing '$CMD'). Please install it manually."
+			exit 1
+		fi
+	fi
+done
+
+# --- 2.5 Kernel Module Tuning ---
+if ! lsmod | grep -q "^nbd "; then
+	echo "Loading nbd kernel module with partition support (max_part=64)..."
+	sudo modprobe nbd max_part=64 || echo "Warning: Failed to load nbd module."
+fi
+
+# --- 3. Aesthetics & Branding ---
+export NEWT_COLORS='
+root=white,black
+window=white,blue
+dialog=white,black
+frame=brightyellow,black
+border=white,black
+shadow=black,brightblack
+title=brightyellow,blue
+button=white,green
+actbutton=black,brightyellow
+focus=white,magenta
+highlight=black,brightcyan
+checkbox=white,black
+actcheckbox=black,brightyellow
+compactbutton=white,brightblue
+radiobutton=white,black
+textbox=white,black
+acttextbox=black,brightcyan
+text=white,black
+infobox=white,brightblack
+label=brightyellow,black
+roottext=white,black
+helpline=brightyellow,black
+menu=white,blue
+menuitem=brightyellow,black
+listbox=white,black
+actlistbox=black,brightyellow
+item=brightyellow,black
+actsellistbox=black,brightcyan
+sellistbox=white,black
+scrollbar=brightcyan,black
+statusbar=white,blue
+cursor=brightyellow,black
+entry=white,black
+disentry=black,brightblack
+emptyscale=black,brightblack
+fullscale=brightyellow,black
+'
+
+# --- 4. Configuration & State ---
+# Keep these in /etc so the systemd service stays functional
+NBD_CONFIG="/etc/nbd-server/config"
+NBD_ALLOW="/etc/nbd-server/allow"
+
+# Move these to your project's custom directory under /bin
+CUSTOM_DATA_DIR="/bin/CUSTOM-NBD-MANAGER"
+CLIENT_PROFILES_FILE="${CUSTOM_DATA_DIR}/client_profiles.txt"
+REMOTE_SERVERS_FILE="${CUSTOM_DATA_DIR}/remote_servers.txt"
+REMOTE_ADHOC_STATE_FILE="${CUSTOM_DATA_DIR}/remote_adhoc_active.txt"
+ADHOC_STATE_FILE="${CUSTOM_DATA_DIR}/active_adhoc.txt"
+ADHOC_CONF="${CUSTOM_DATA_DIR}/adhoc.conf"
+ADHOC_ALLOW="${CUSTOM_DATA_DIR}/adhoc_allow"
+
+# System-level paths usually stay in /run and /var/log
+ADHOC_PID_FILE="/run/nbd-manager-adhoc.pid"
+ADHOC_LOG="/var/log/nbd-manager-adhoc.log"
+ADHOC_PORT=10810
+
+# Create a session-specific temporary directory
+SESSION_WORK_DIR=$(mktemp -d -t nbd-manager-XXXXXX)
+
+# Initialize configuration directory and profile storage
+sudo mkdir -p "$CUSTOM_DATA_DIR"
+sudo touch "$CLIENT_PROFILES_FILE" "$REMOTE_SERVERS_FILE" "$REMOTE_ADHOC_STATE_FILE" "$ADHOC_STATE_FILE" "$ADHOC_LOG"
+# Use permissive permissions for interoperability (per user preference)
+sudo chmod 777 "$CUSTOM_DATA_DIR"
+sudo chmod 666 "$CLIENT_PROFILES_FILE" "$REMOTE_SERVERS_FILE" "$REMOTE_ADHOC_STATE_FILE" "$ADHOC_STATE_FILE" "$ADHOC_LOG"
+
+# Ensure security and permission settings in [generic] section
+if [ -f "$NBD_CONFIG" ]; then
+	for SETTING in "authfile = /etc/nbd-server/allow" "allowlist = true" "virtstyle = v" "user = root" "group = root"; do
+		KEY=$(echo "$SETTING" | cut -d' ' -f1)
+		if ! grep -q "^[[:space:]]*$KEY =" "$NBD_CONFIG"; then
+			sudo sed -i "/^\[generic\]/a \    $SETTING" "$NBD_CONFIG"
+		else
+			# Update existing setting
+			sudo sed -i "s|^[[:space:]]*$KEY =.*|    $SETTING|" "$NBD_CONFIG"
+		fi
+	done
+fi
+sudo touch "$NBD_ALLOW"
+
+# Global Trap for Ad-Hoc Cleanup
+function FUN_GLOBAL_CLEANUP {
+	# Disable trap to avoid recursion if exit is called again
+	trap - EXIT SIGINT SIGTERM
+
+	# Local Ad-Hoc Cleanup
+	if [ -f "$ADHOC_PID_FILE" ]; then
+		local pid=$(cat "$ADHOC_PID_FILE" 2>/dev/null)
+		if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+			sudo kill "$pid" 2>/dev/null
+			sleep 0.5
+			kill -9 "$pid" 2>/dev/null
+		fi
+		sudo rm -f "$ADHOC_PID_FILE"
+	fi
+
+	# Remote Ad-Hoc Cleanup
+	if [ -s "$REMOTE_ADHOC_STATE_FILE" ]; then
+		while IFS='#' read -r s_name s_user s_ip s_pid s_conf s_allow; do
+			# s_pid stores the path to the pid file on the remote host
+			if [[ "$s_allow" == "BATCH" ]]; then
+				# Use a wildcard to clean up all batch-related files on the remote
+				FUN_SSH_RUN -o ConnectTimeout=2 "${s_user}@${s_ip}" "[[ -s $s_pid ]] && sudo kill \$(cat $s_pid) 2>/dev/null; sudo rm -f $s_pid $s_conf /tmp/nbd-adhoc-*.allow" &>/dev/null
+			else
+				FUN_SSH_RUN -o ConnectTimeout=2 "${s_user}@${s_ip}" "[[ -s $s_pid ]] && sudo kill \$(cat $s_pid) 2>/dev/null; sudo rm -f $s_pid $s_conf $s_allow" &>/dev/null
+			fi
+		done <"$REMOTE_ADHOC_STATE_FILE"
+		sudo truncate -s 0 "$REMOTE_ADHOC_STATE_FILE"
+	fi
+
+	sudo rm -f "$ADHOC_CONF" "$ADHOC_ALLOW"
+	sudo truncate -s 0 "$ADHOC_STATE_FILE"
+	[[ -d "${SESSION_WORK_DIR}" ]] && rm -rf "${SESSION_WORK_DIR}"
+	exit 0
+}
+trap FUN_GLOBAL_CLEANUP SIGINT SIGTERM EXIT
+
+# ==============================================================================
+#                           CORE HELPERS
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_SSH_RUN
+# DESCRIPTION: Executes SSH as the original user ($SUDO_USER) to preserve identity.
+# ------------------------------------------------------------------------------
+function FUN_SSH_RUN {
+	if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+		sudo -u "$SUDO_USER" env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" ssh "$@"
+	else
+		ssh "$@"
+	fi
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_WHIPTAIL_CAPTURE
+# DESCRIPTION: Captures TUI output using FD swapping (Superior Standard).
+# ------------------------------------------------------------------------------
+function FUN_WHIPTAIL_CAPTURE {
+	whiptail "$@" 3>&1 1>&2 2>&3
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_SANITIZE_INPUT
+# DESCRIPTION: Strips dangerous characters to protect data and shell execution.
+# ------------------------------------------------------------------------------
+function FUN_SANITIZE_INPUT {
+	# Strip # (delimiter), ; & | (shell injection), and quotes
+	echo "$1" | tr -d '#;&|"'"'"
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_VALIDATE_IP
+# DESCRIPTION: Basic regex validation for IP or Subnet.
+# ------------------------------------------------------------------------------
+function FUN_VALIDATE_IP {
+	local target="$1"
+	# Matches 1.2.3.4 or 1.2.3.0/24
+	if [[ "$target" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$ ]]; then
+		return 0
+	fi
+	return 1
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_CHECK_FREE_PORT
+# DESCRIPTION: Finds available TCP port.
+# ------------------------------------------------------------------------------
+function FUN_CHECK_FREE_PORT {
+	local port=$1
+	while ss -tln | grep -q ":$port "; do
+		((port++))
+	done
+	echo "$port"
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: _FUN_IP_REF_ADD
+# DESCRIPTION: Adds IP to allowlist.
+# ------------------------------------------------------------------------------
+function _FUN_IP_REF_ADD {
+	local ip="$1"
+	grep -Fxq "$ip" "$NBD_ALLOW" || echo "$ip" | sudo tee -a "$NBD_ALLOW" >/dev/null
+}
+
+# ==============================================================================
+#                           REMOTE MANAGEMENT
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_REMOTE_ADD_SERVER
+# DESCRIPTION: Adds a new remote server profile for command center operations.
+# ------------------------------------------------------------------------------
+function FUN_REMOTE_ADD_SERVER {
+	local name user ip
+	name=$(FUN_WHIPTAIL_CAPTURE --title "Server Name" --inputbox "Friendly Name (e.g. Backup-Pi):" 0 0) || return
+	name=$(FUN_SANITIZE_INPUT "$name")
+
+	user=$(FUN_WHIPTAIL_CAPTURE --title "SSH User" --inputbox "User with sudo privileges:" 0 0 "root") || return
+	user=$(FUN_SANITIZE_INPUT "$user")
+
+	while true; do
+		ip=$(FUN_WHIPTAIL_CAPTURE --title "Server IP" --inputbox "Remote IP Address:" 0 0) || return
+		ip=$(FUN_SANITIZE_INPUT "$ip")
+		FUN_VALIDATE_IP "$ip" && break
+		whiptail --msgbox "Invalid IP Address." 0 0 >&2
+	done
+
+	echo "${name}#${user}#${ip}" >>"$REMOTE_SERVERS_FILE"
+	whiptail --msgbox "Remote server profile saved." 0 0 >&2
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_REMOTE_DELETE_SERVER
+# DESCRIPTION: Removes remote server profiles from the local command center.
+# ------------------------------------------------------------------------------
+function FUN_REMOTE_DELETE_SERVER {
+	[[ ! -s "$REMOTE_SERVERS_FILE" ]] && {
+		whiptail --msgbox "No remote servers configured." 0 0 >&2
+		return
+	}
+
+	local options=() i=1
+	local r_keys=()
+	local r_values=()
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		local n=$(echo "$line" | cut -d'#' -f1)
+		local ip=$(echo "$line" | cut -d'#' -f3)
+		options+=("$i" "$n ($ip)" "OFF")
+		r_keys+=("$i")
+		r_values+=("$line")
+		((i++))
+	done <"$REMOTE_SERVERS_FILE"
+
+	local selected_indices
+	selected_indices=$(FUN_WHIPTAIL_CAPTURE --title "Delete Remote Profiles" --checklist "Select remote servers to remove from this Command Center:" 0 0 10 "${options[@]}") || return
+
+	if whiptail --yesno "Remove selected remote server profiles?\n(This does not affect the remote servers themselves, only your ability to manage them from here.)" 0 0 >&2; then
+		for idx_quoted in $selected_indices; do
+			local idx=$(echo "$idx_quoted" | tr -d '"')
+			local to_del=""
+			for r_idx in "${!r_keys[@]}"; do
+				if [[ "${r_keys[$r_idx]}" == "$idx" ]]; then
+					to_del="${r_values[$r_idx]}"
+					break
+				fi
+			done
+
+			[[ -n "$to_del" ]] || continue
+			local esc_del=$(echo "$to_del" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+			sudo sed -i "\|^${esc_del}$|d" "$REMOTE_SERVERS_FILE"
+		done
+		whiptail --msgbox "Selected remote profiles removed." 0 0 >&2
+	fi
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_REMOTE_SELECT_SERVER
+# DESCRIPTION: Selection menu for remote servers.
+# ------------------------------------------------------------------------------
+function FUN_REMOTE_SELECT_SERVER {
+	[[ ! -s "$REMOTE_SERVERS_FILE" ]] && {
+		whiptail --msgbox "No remote servers configured. Please add one first." 0 0 >&2
+		return 1
+	}
+
+	local options=() i=1
+	local remote_map_keys=()
+	local remote_map_values=()
+
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		local n=$(echo "$line" | cut -d'#' -f1)
+		local u=$(echo "$line" | cut -d'#' -f2)
+		local ip=$(echo "$line" | cut -d'#' -f3)
+		options+=("$i" "$n ($u@$ip)")
+		remote_map_keys+=("$i")
+		remote_map_values+=("$line")
+		((i++))
+	done <"$REMOTE_SERVERS_FILE"
+
+	local choice=$(FUN_WHIPTAIL_CAPTURE --title "Select Remote Server" --menu "Choose target:" 0 0 10 "${options[@]}") || return 1
+
+	for idx in "${!remote_map_keys[@]}"; do
+		if [[ "${remote_map_keys[$idx]}" == "$choice" ]]; then
+			echo "${remote_map_values[$idx]}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_SSH_EXEC_SUDO
+# DESCRIPTION: Executes a command as sudo on a remote host via SSH.
+# ------------------------------------------------------------------------------
+function FUN_SSH_EXEC_SUDO {
+	local user=$1 ip=$2 cmd=$3
+	# Clear screen to ensure clean TTY for sudo password prompt
+	clear
+	echo "--- EXECUTING REMOTE COMMAND ---"
+	echo "Target: $user@$ip"
+	echo "Command: sudo $cmd"
+	echo "--------------------------------"
+	# Using -t twice for better TTY allocation for interactive sudo
+	FUN_SSH_RUN -tt "${user}@${ip}" "sudo $cmd"
+	local status=$?
+	echo "--------------------------------"
+	echo "Press any key to return to NBD Manager..."
+	read -n 1
+	return $status
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_REMOTE_EXPORT_WIZARD
+# DESCRIPTION: Orchestrates exporting a device on a remote server.
+# ------------------------------------------------------------------------------
+function FUN_REMOTE_EXPORT_WIZARD {
+	local server_data
+	server_data=$(FUN_REMOTE_SELECT_SERVER) || return
+	local s_name=$(echo "$server_data" | cut -d'#' -f1)
+	local s_user=$(echo "$server_data" | cut -d'#' -f2)
+	local s_ip=$(echo "$server_data" | cut -d'#' -f3)
+
+	local mode
+	mode=$(FUN_WHIPTAIL_CAPTURE --title "Remote Export Mode" --menu "Choose how to share this device on $s_name:" 0 0 2 \
+		"1" "Persistent (Remains active after reboot)" \
+		"2" "Ad-Hoc (Active only for this session)") || return
+
+	whiptail --infobox "Connecting to $s_name ($s_ip) to list block devices..." 0 0 >&2
+
+	# Fetch remote block devices
+	local remote_lsblk
+	local ssh_err_file="${SESSION_WORK_DIR}/ssh_error.txt"
+	remote_lsblk=$(FUN_SSH_RUN -o ConnectTimeout=5 "${s_user}@${s_ip}" 'lsblk -P -o NAME,FSTYPE,LABEL,SIZE,MOUNTPOINT | grep -v "MOUNTPOINT=\"/\""' 2>"$ssh_err_file")
+	local ssh_status=$?
+
+	if [[ $ssh_status -ne 0 || -z "$remote_lsblk" ]]; then
+		local extra_msg=""
+		[ -s "$ssh_err_file" ] && extra_msg="\n\nError details:\n$(cat "$ssh_err_file")"
+		whiptail --title "Error" --msgbox "Failed to connect to $s_name or no suitable devices found.\nEnsure SSH keys are configured or be ready for password prompts.$extra_msg" 0 0 >&2
+		return
+	fi
+
+	local options=()
+	declare -A part_map
+	local i=1
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		local name=$(echo "$line" | grep -oP 'NAME="\K[^"]+')
+		local fstype=$(echo "$line" | grep -oP 'FSTYPE="\K[^"]+')
+		local label=$(echo "$line" | grep -oP 'LABEL="\K[^"]+')
+		local size=$(echo "$line" | grep -oP 'SIZE="\K[^"]+')
+
+		local dev_node="/dev/$name"
+		local desc=$(printf "%-8s %-15s %-10s" "$fstype" "$label" "$size")
+		options+=("$i" "$dev_node [$desc]" "OFF")
+		part_map[$i]="$dev_node"
+		((i++))
+	done <<<"$remote_lsblk"
+
+	local selected_indices
+	selected_indices=$(FUN_WHIPTAIL_CAPTURE --title "Select Devices on $s_name" --checklist "Choose partitions to share FROM the remote server:" 0 0 10 "${options[@]}") || return
+
+	# Determine target client (usually this machine)
+	local my_ip=$(hostname -I | awk '{print $1}')
+	local target_client
+	target_client=$(FUN_WHIPTAIL_CAPTURE --title "Allowed Client" --inputbox "Enter IP of the machine that will MOUNT this device (usually THIS machine):\nUse 192.168.1.0/24 to allow any" 0 0 "$my_ip") || return
+
+	# Ensure single IPs are treated as CIDR /32 for nbd-server reliability
+	[[ "$target_client" != */* ]] && target_client="${target_client}/32"
+
+	local readonly_opt="false"
+	whiptail --title "Safety First" --yes-button "Read-Only" --no-button "Read-Write" --yesno "Export as Read-Only on remote?" 0 0 >&2 && readonly_opt="true"
+
+	if [[ "$mode" == "1" ]]; then
+		# Persistent Mode
+		for idx in $selected_indices; do
+			local choice=$(echo "$idx" | tr -d '"')
+			local selected_dev="${part_map[$choice]}"
+			local dev_base=$(basename "$selected_dev")
+
+			# Resolve Persistent Path on remote
+			local resolve_cmd="ls -l /dev/disk/by-id/ 2>/dev/null | grep -w \"$dev_base\" | awk '{print \"/dev/disk/by-id/\" \$9}' | head -n1"
+			local persistent_path=$(FUN_SSH_RUN "${s_user}@${s_ip}" "$resolve_cmd")
+			if [[ -z "$persistent_path" ]]; then
+				local uuid_cmd="lsblk -no UUID \"$selected_dev\" | tr -d '[:space:]'"
+				local uuid=$(FUN_SSH_RUN "${s_user}@${s_ip}" "$uuid_cmd")
+				[[ -n "$uuid" ]] && persistent_path="/dev/disk/by-uuid/$uuid"
+			fi
+			[[ -n "$persistent_path" ]] && selected_dev="$persistent_path"
+
+			local export_name="remote-$dev_base-$(date +%s | tail -c 4)"
+			export_name=$(FUN_WHIPTAIL_CAPTURE --title "Export Name" --inputbox "Enter network export name for $selected_dev on $s_name:" 0 0 "$export_name") || continue
+
+			local remote_cmd="bash -c 'mkdir -p /etc/nbd-server && touch /etc/nbd-server/allow && \
+				echo \"\" >> /etc/nbd-server/config && \
+				echo \"[$export_name]\" >> /etc/nbd-server/config && \
+				echo \"    exportname = $selected_dev\" >> /etc/nbd-server/config && \
+				[[ \"$readonly_opt\" == \"true\" ]] && echo \"    readonly = true\" >> /etc/nbd-server/config; \
+				for s in \"authfile = /etc/nbd-server/allow\" \"allowlist = true\" \"virtstyle = v\" \"user = root\" \"group = root\"; do \
+					k=\$(echo \$s | cut -d\" \" -f1); \
+					if grep -q \"^[[:space:]]*\$k =\" /etc/nbd-server/config; then \
+						sed -i \"s|^[[:space:]]*\$k =.*|    \$s|\" /etc/nbd-server/config; \
+					else \
+						sed -i \"/^[[:space:]]*\\[generic\\]/a \    \$s\" /etc/nbd-server/config; \
+					fi; \
+				done; \
+				grep -Fxq \"$target_client\" /etc/nbd-server/allow || echo \"$target_client\" >> /etc/nbd-server/allow; \
+				systemctl restart nbd-server'"
+
+			FUN_SSH_EXEC_SUDO "$s_user" "$s_ip" "$remote_cmd"
+		done
+	else
+		# Ad-Hoc Mode (Port 10810) - Batch Orchestration
+		# Mirroring successful local pattern: virtstyle=v and isolated allow files
+		local batch_id=$(date +%s)
+		local r_conf="/tmp/nbd-adhoc-batch-${batch_id}.conf"
+		local r_pid="/tmp/nbd-adhoc-batch-${batch_id}.pid"
+
+		# Initialize config with generic settings from successful local pattern
+		local config_cmd="printf \"[generic]\\n    allowlist = true\\n    port = 10810\\n    user = root\\n    group = root\\n    virtstyle = v\\n\" > $r_conf"
+
+		for idx in $selected_indices; do
+			local choice=$(echo "$idx" | tr -d '"')
+			local selected_dev="${part_map[$choice]}"
+			local dev_base=$(basename "$selected_dev")
+			local export_name="adhoc-$dev_base"
+			local r_allow="/tmp/nbd-adhoc-${export_name}.allow"
+
+			# Create isolated allow file and add export block
+			config_cmd+=" && echo \"$target_client\" > $r_allow"
+			config_cmd+=" && printf \"\\n[$export_name]\\n    exportname = $selected_dev\\n    authfile = $r_allow\\n\" >> $r_conf"
+			[[ "$readonly_opt" == "true" ]] && config_cmd+=" && echo \"    readonly = true\" >> $r_conf"
+		done
+
+		local remote_cmd="bash -c 'fuser -k 10810/tcp 2>/dev/null; $config_cmd && nbd-server -C $r_conf -p $r_pid'"
+
+		if FUN_SSH_EXEC_SUDO "$s_user" "$s_ip" "$remote_cmd"; then
+			# Note: We track r_conf and r_pid; isolated allow files follow adhoc name pattern for cleanup
+			echo "${s_name}#${s_user}#${s_ip}#${r_pid}#${r_conf}#BATCH" >>"$REMOTE_ADHOC_STATE_FILE"
+		fi
+	fi
+
+	whiptail --title "Remote Update Complete" --msgbox "Operation finished on $s_name.\nYou can now connect to them from this machine using '[CLIENT] Connect'." 0 0 >&2
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_REMOTE_MANAGE_ADHOC
+# DESCRIPTION: Lists and allows stopping active remote ad-hoc sessions.
+# ------------------------------------------------------------------------------
+function FUN_REMOTE_MANAGE_ADHOC {
+	if [ ! -s "$REMOTE_ADHOC_STATE_FILE" ]; then
+		whiptail --title "Remote Ad-Hoc" --msgbox "No active remote ad-hoc sessions tracked." 0 0 >&2
+		return
+	fi
+
+	local options=() i=1
+	local r_keys=()
+	local r_values=()
+
+	while IFS='#' read -r s_name s_user s_ip s_pid s_conf s_allow; do
+		options+=("$i" "Host:$s_name | IP:$s_ip | PID:$s_pid")
+		r_keys+=("$i")
+		r_values+=("${s_name}#${s_user}#${s_ip}#${s_pid}#${s_conf}#${s_allow}")
+		((i++))
+	done <"$REMOTE_ADHOC_STATE_FILE"
+
+	local choice
+	choice=$(FUN_WHIPTAIL_CAPTURE --title "Manage Remote Ad-Hoc" --menu "Select session to STOP:" 0 0 10 "${options[@]}") || return
+
+	local data=""
+	for idx in "${!r_keys[@]}"; do
+		if [[ "${r_keys[$idx]}" == "$choice" ]]; then
+			data="${r_values[$idx]}"
+			break
+		fi
+	done
+
+	IFS='#' read -r r_n r_u r_ip r_p r_c r_a <<<"$data"
+
+	if whiptail --title "Stop Session" --yesno "Stop ad-hoc session on $r_n ($r_ip)?" 0 0 >&2; then
+		whiptail --infobox "Stopping remote session..." 0 0 >&2
+		if [[ "$r_a" == "BATCH" ]]; then
+			FUN_SSH_RUN -o ConnectTimeout=5 "${r_u}@${r_ip}" "[[ -f $r_p ]] && sudo kill \$(cat $r_p) 2>/dev/null; sudo rm -f $r_p $r_c /tmp/nbd-adhoc-*.allow" &>/dev/null
+		else
+			FUN_SSH_RUN -o ConnectTimeout=5 "${r_u}@${r_ip}" "[[ -f $r_p ]] && sudo kill \$(cat $r_p) 2>/dev/null; sudo rm -f $r_p $r_c $r_a" &>/dev/null
+		fi
+		# Remove from state file
+		local esc_data=$(echo "$data" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+		sudo sed -i "\|^${esc_data}$|d" "$REMOTE_ADHOC_STATE_FILE"
+		whiptail --msgbox "Session stopped." 0 0 >&2
+	fi
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_REMOTE_REMOVE_WIZARD
+# DESCRIPTION: Orchestrates removing an export from a remote server.
+# ------------------------------------------------------------------------------
+function FUN_REMOTE_REMOVE_WIZARD {
+	local server_data
+	server_data=$(FUN_REMOTE_SELECT_SERVER) || return
+	local s_name=$(echo "$server_data" | cut -d'#' -f1)
+	local s_user=$(echo "$server_data" | cut -d'#' -f2)
+	local s_ip=$(echo "$server_data" | cut -d'#' -f3)
+
+	whiptail --infobox "Fetching exports from $s_name..." 0 0 >&2
+
+	local remote_exports
+	local ssh_err_file="${SESSION_WORK_DIR}/ssh_error_rem.txt"
+	remote_exports=$(FUN_SSH_RUN -o ConnectTimeout=5 "${s_user}@${s_ip}" "grep '^\[.*\]' /etc/nbd-server/config | grep -v '\[generic\]' | tr -d '[]'" 2>"$ssh_err_file")
+
+	if [[ -z "$remote_exports" ]]; then
+		local extra_msg=""
+		[ -s "$ssh_err_file" ] && extra_msg="\n\nError details:\n$(cat "$ssh_err_file")"
+		whiptail --msgbox "No exports found on $s_name or connection failed.$extra_msg" 0 0 >&2
+		return
+	fi
+
+	local options=()
+	while read -r e; do
+		[[ -n "$e" ]] && options+=("$e" "" "OFF")
+	done <<<"$remote_exports"
+
+	local selected_tags
+	selected_tags=$(FUN_WHIPTAIL_CAPTURE --title "Remove Remote" --checklist "Select exports to remove from $s_name:" 0 0 10 "${options[@]}") || return
+
+	if whiptail --title "Confirm" --yesno "Confirm deletion of selected exports on $s_name?\n\n(Note: This list is fetched LIVE from the remote server. If an item remains after removal, the remote edit failed.)" 0 0 >&2; then
+		for tag in $selected_tags; do
+			local clean_tag=$(echo "$tag" | tr -d '"')
+			# Safe block removal using awk on the remote side
+			local remote_cmd="awk -v tag=\"\\\\[$clean_tag\\\\]\" '
+				\$0 ~ tag { skip=1; next }
+				skip && /^\\\[/ { skip=0 }
+				!skip { print }
+			' /etc/nbd-server/config > /etc/nbd-server/config.tmp && mv /etc/nbd-server/config.tmp /etc/nbd-server/config && (systemctl is-active nbd-server --quiet && systemctl restart nbd-server || true)"
+
+			FUN_SSH_EXEC_SUDO "$s_user" "$s_ip" "$remote_cmd"
+		done
+		whiptail --msgbox "Remote removal complete." 0 0 >&2
+	fi
+}
+
+# ==============================================================================
+#                           SERVER OPERATIONS
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_SERVER_RELOAD_ADHOC
+# DESCRIPTION: Reconstructs and restarts the consolidated ad-hoc nbd-server.
+# ------------------------------------------------------------------------------
+function FUN_SERVER_RELOAD_ADHOC {
+	# Stop existing and clear port to prevent collisions
+	if [ -f "$ADHOC_PID_FILE" ]; then
+		local old_pid=$(cat "$ADHOC_PID_FILE" 2>/dev/null)
+		if [ -n "$old_pid" ]; then
+			sudo kill "$old_pid" 2>/dev/null
+			sleep 0.2
+			kill -9 "$old_pid" 2>/dev/null
+		fi
+		sudo rm -f "$ADHOC_PID_FILE"
+	fi
+	sudo fuser -k "$ADHOC_PORT/tcp" 2>/dev/null
+
+	if [ ! -s "$ADHOC_STATE_FILE" ]; then
+		sudo rm -f "$ADHOC_CONF" "$ADHOC_ALLOW"
+		return 0
+	fi
+
+	# Generate new config using printf for stability
+	sudo touch "$ADHOC_ALLOW"
+	sudo truncate -s 0 "$ADHOC_ALLOW"
+	printf "[generic]\n    allowlist = true\n    port = $ADHOC_PORT\n    user = root\n    group = root\n" | sudo tee "$ADHOC_CONF" >/dev/null
+
+	while IFS='#' read -r name dev ip ro time; do
+		# Create a per-export allow file for maximum security isolation
+		local export_allow="${CUSTOM_DATA_DIR}/allow_${name}"
+		echo "$ip" | sudo tee "$export_allow" >/dev/null
+
+		# Add export to config
+		printf "\n[%s]\n    exportname = %s\n    authfile = %s\n" "$name" "$dev" "$export_allow" | sudo tee -a "$ADHOC_CONF" >/dev/null
+		[[ "$ro" == "true" ]] && echo "    readonly = true" | sudo tee -a "$ADHOC_CONF" >/dev/null
+	done <"$ADHOC_STATE_FILE"
+
+	# Start server as daemon
+	echo "--- Ad-Hoc Server Startup: $(date) ---" | sudo tee -a "$ADHOC_LOG" >/dev/null
+	sudo nbd-server -C "$ADHOC_CONF" -p "$ADHOC_PID_FILE" >>"$ADHOC_LOG" 2>&1
+
+	# Dynamic Wait for Startup
+	local count=0
+	while [ ! -s "$ADHOC_PID_FILE" ] && [ $count -lt 5 ]; do
+		sleep 0.5
+		((count++))
+	done
+
+	if ! [ -s "$ADHOC_PID_FILE" ]; then
+		# Check if port is already in use
+		if ss -tln | grep -q ":$ADHOC_PORT "; then
+			whiptail --title "ERROR" --msgbox "Port $ADHOC_PORT is already in use by another process.\nPlease stop any existing NBD servers on this port." 0 0 >&2
+		else
+			whiptail --title "ERROR" --msgbox "Failed to start ad-hoc server.\nCheck $ADHOC_LOG for details." 0 0 >&2
+		fi
+		return 1
+	fi
+	return 0
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_SERVER_EXPORT
+# DESCRIPTION: Exports local block device over NBD.
+# ------------------------------------------------------------------------------
+function FUN_SERVER_EXPORT {
+	local mode
+	mode=$(FUN_WHIPTAIL_CAPTURE --title "Server Export Mode" --menu "Choose how to share this device:" 0 0 2 \
+		"1" "Persistent (Remains active after reboot)" \
+		"2" "Ad-Hoc (Active only for this session)") || return
+
+	local options=()
+	declare -A part_map
+	local i=1
+
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		local name=$(echo "$line" | grep -oP 'NAME="\K[^"]+')
+		local fstype=$(echo "$line" | grep -oP 'FSTYPE="\K[^"]+')
+		local label=$(echo "$line" | grep -oP 'LABEL="\K[^"]+')
+		local size=$(echo "$line" | grep -oP 'SIZE="\K[^"]+')
+
+		local dev_node="/dev/$name"
+		local desc=$(printf "%-8s %-15s %-10s" "$fstype" "$label" "$size")
+		options+=("$i" "$dev_node [$desc]" "OFF")
+		part_map[$i]="$dev_node"
+		((i++))
+	done < <(lsblk -P -o NAME,FSTYPE,LABEL,SIZE,MOUNTPOINT | grep -v 'MOUNTPOINT="/"')
+
+	if [ ${#part_map[@]} -eq 0 ]; then
+		whiptail --title "ERROR" --msgbox "No suitable partitions found to export." 0 0 >&2
+		return
+	fi
+
+	local selected_indices
+	selected_indices=$(FUN_WHIPTAIL_CAPTURE --title "Select Devices" --checklist "Choose partitions to share:" 0 0 10 "${options[@]}") || return
+
+	local local_subnet=$(ip -o -4 route show to default | awk '{print $3}' | cut -d. -f1-3).0/24
+	local client_ip
+	while true; do
+		client_ip=$(FUN_WHIPTAIL_CAPTURE --title "Allowed Client" --inputbox "Enter Client IP or Subnet (e.g. 192.168.1.5 or 192.168.1.0/24):" 0 0 "$local_subnet") || return
+		client_ip=$(FUN_SANITIZE_INPUT "$client_ip")
+		if FUN_VALIDATE_IP "$client_ip"; then break; else
+			whiptail --title "Invalid IP" --msgbox "Please enter a valid IP address or CIDR subnet." 0 0 >&2
+		fi
+	done
+
+	# Ensure single IPs are treated as CIDR /32 for nbd-server reliability
+	[[ "$client_ip" != */* ]] && client_ip="${client_ip}/32"
+
+	local readonly_opt="false"
+	whiptail --title "Safety First" --yes-button "Read-Only" --no-button "Read-Write" --yesno "Export as Read-Only?" 0 0 >&2 && readonly_opt="true"
+
+	if [[ "$mode" == "1" ]]; then
+		for idx in $selected_indices; do
+			local choice=$(echo "$idx" | tr -d '"')
+			local selected_dev="${part_map[$choice]}"
+
+			# Resolve Persistent Path
+			local dev_base=$(basename "$selected_dev")
+			local persistent_path=$(ls -l /dev/disk/by-id/ 2>/dev/null | grep -w "$dev_base" | awk '{print "/dev/disk/by-id/" $9}' | head -n1)
+			if [[ -z "$persistent_path" ]]; then
+				local uuid=$(lsblk -no UUID "$selected_dev" | tr -d '[:space:]')
+				[[ -n "$uuid" ]] && persistent_path="/dev/disk/by-uuid/$uuid"
+			fi
+			[[ -n "$persistent_path" ]] && selected_dev="$persistent_path"
+
+			local export_name="nbd-$dev_base-$(date +%s | tail -c 4)"
+			export_name=$(FUN_WHIPTAIL_CAPTURE --title "Export Name for $selected_dev" --inputbox "Enter a unique name for this network export:" 0 0 "$export_name") || continue
+			export_name=$(FUN_SANITIZE_INPUT "$export_name")
+
+			{
+				echo ""
+				echo "[$export_name]"
+				echo "    exportname = $selected_dev"
+				[[ "$readonly_opt" == "true" ]] && echo "    readonly = true"
+			} | sudo tee -a "$NBD_CONFIG" >/dev/null
+
+			_FUN_IP_REF_ADD "$client_ip"
+		done
+		systemctl enable --now nbd-server
+		systemctl restart nbd-server
+		whiptail --title "Success" --msgbox "Persistent export(s) updated and nbd-server restarted." 0 0 >&2
+	else
+		for idx in $selected_indices; do
+			local choice=$(echo "$idx" | tr -d '"')
+			local selected_dev="${part_map[$choice]}"
+			local dev_base=$(basename "$selected_dev")
+			local export_name="adhoc-$dev_base"
+
+			# Avoid duplicates in state
+			sed -i "\|^$export_name#|d" "$ADHOC_STATE_FILE"
+			echo "${export_name}#${selected_dev}#${client_ip}#${readonly_opt}#$(date +'%H:%M:%S')" >>"$ADHOC_STATE_FILE"
+		done
+
+		if FUN_SERVER_RELOAD_ADHOC; then
+			local server_ip=$(hostname -I | awk '{print $1}')
+			whiptail --title "SUCCESS" --msgbox "Ad-Hoc Session(s) Started! \n[Ad-Hoc sessions will remain active until this script ends]\n\nServer IP: $server_ip\nPort: $ADHOC_PORT\n\nCheck '[STATUS] View Overview' for exact export names." 0 0 >&2
+		fi
+	fi
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_SERVER_MANAGE_ADHOC
+# DESCRIPTION: Lists and allows stopping active ad-hoc sessions.
+# ------------------------------------------------------------------------------
+function FUN_SERVER_MANAGE_ADHOC {
+	if [ ! -s "$ADHOC_STATE_FILE" ]; then
+		whiptail --title "Ad-Hoc Sessions" --msgbox "No active ad-hoc sessions found." 0 0 >&2
+		return
+	fi
+
+	local options=()
+	while IFS='#' read -r name dev ip ro time; do
+		options+=("$name" "Dev:$dev | IP:$ip | RO:$ro | Started:$time" "OFF")
+	done <"$ADHOC_STATE_FILE"
+
+	local selected_to_stop
+	selected_to_stop=$(FUN_WHIPTAIL_CAPTURE --title "Manage Ad-Hoc" --checklist "Select sessions to STOP:" 0 0 10 "${options[@]}") || return
+
+	if whiptail --title "Stop Sessions" --yesno "Stop selected ad-hoc sessions?" 0 0 >&2; then
+		for tag in $selected_to_stop; do
+			local clean_name=$(echo "$tag" | tr -d '"')
+			sed -i "\|^$clean_name#|d" "$ADHOC_STATE_FILE"
+		done
+		FUN_SERVER_RELOAD_ADHOC
+		whiptail --title "Stopped" --msgbox "Selected sessions stopped and server reloaded." 0 0 >&2
+	fi
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_SERVER_REMOVE_EXPORT
+# DESCRIPTION: Surgically removes persistent exports.
+# ------------------------------------------------------------------------------
+function FUN_SERVER_REMOVE_EXPORT {
+	[[ ! -f "$NBD_CONFIG" ]] && {
+		whiptail --msgbox "Config not found." 0 0 >&2
+		return
+	}
+
+	local exports=()
+	readarray -t exports < <(grep '^\[.*\]' "$NBD_CONFIG" | grep -v '\[generic\]' | tr -d '[]')
+	[[ ${#exports[@]} -eq 0 ]] && {
+		whiptail --msgbox "No exports found." 0 0 >&2
+		return
+	}
+
+	local checklist=()
+	for e in "${exports[@]}"; do checklist+=("$e" "" "OFF"); done
+
+	local selected_tags=$(FUN_WHIPTAIL_CAPTURE --title "Remove" --checklist "Select to remove:" 0 0 10 "${checklist[@]}") || return
+
+	if whiptail --yesno "Confirm deletion of selected exports?" 0 0 >&2; then
+		for tag in $selected_tags; do
+			local clean_tag=$(echo "$tag" | tr -d '"')
+			# Safe block removal using awk
+			sudo awk -v tag="\\[$clean_tag\\]" '
+				$0 ~ tag { skip=1; next }
+				skip && /^\[/ { skip=0 }
+				!skip { print }
+			' "$NBD_CONFIG" | sudo tee "$NBD_CONFIG.tmp" >/dev/null
+			sudo mv "$NBD_CONFIG.tmp" "$NBD_CONFIG"
+		done
+		systemctl restart nbd-server
+		whiptail --msgbox "Exports removed." 0 0 >&2
+	fi
+}
+
+# ==============================================================================
+#                           CLIENT OPERATIONS
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# FUNCTION: _FUN_DISCOVER_EXPORTS
+# DESCRIPTION: Discovery helper.
+# ------------------------------------------------------------------------------
+function _FUN_DISCOVER_EXPORTS {
+	local ip=$1 port=${2:-10809}
+	whiptail --infobox "Querying $ip:$port..." 0 0 >&2
+
+	local raw_list
+	raw_list=$(timeout 5 nbd-client -l "$ip" "$port" 2>/dev/null)
+	local exit_code=$?
+
+	if [ $exit_code -ne 0 ] && [ -z "$raw_list" ]; then
+		return 1 # Likely connection refused or timeout
+	fi
+
+	local options=()
+	while read -r line; do
+		# Trim whitespace and get first word (the export name)
+		local export_name=$(echo "$line" | awk '{print $1}')
+
+		# Skip header, protocol noise, and IP address lines
+		[[ -z "$export_name" || "$export_name" =~ ^(Exports|Manifest|Negotiation|Support|Description|Server):?$ ]] && continue
+		[[ "$export_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && continue
+
+		options+=("$export_name" "")
+	done <<<"$raw_list"
+
+	if [[ ${#options[@]} -eq 0 ]]; then
+		whiptail --title "Discovery" --msgbox "Server responded, but no exports were listed.\nCheck 'allowlist = true' in server config." 0 0 >&2
+		return 1
+	fi
+
+	FUN_WHIPTAIL_CAPTURE --title "Discovered" --menu "Select Export:" 0 0 10 "${options[@]}"
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_CLIENT_CREATE_PROFILE
+# DESCRIPTION: Profile creation wizard.
+# ------------------------------------------------------------------------------
+function FUN_CLIENT_CREATE_PROFILE {
+	local name ip nbd_export port mount readonly="false" bs="512" to="30"
+
+	name=$(FUN_WHIPTAIL_CAPTURE --title "Profile Name" --inputbox "Name:" 0 0) || return
+	name=$(FUN_SANITIZE_INPUT "$name")
+
+	while true; do
+		ip=$(FUN_WHIPTAIL_CAPTURE --title "Server IP" --inputbox "IP:" 0 0) || return
+		ip=$(FUN_SANITIZE_INPUT "$ip")
+		FUN_VALIDATE_IP "$ip" && break
+		whiptail --msgbox "Invalid IP." 0 0 >&2
+	done
+
+	port=$(FUN_WHIPTAIL_CAPTURE --title "Port" --inputbox "Port:" 0 0 "10809") || return
+	port=$(FUN_SANITIZE_INPUT "$port")
+
+	nbd_export=$(_FUN_DISCOVER_EXPORTS "$ip" "$port") || nbd_export=$(FUN_WHIPTAIL_CAPTURE --inputbox "Export Name:" 0 0) || return
+	nbd_export=$(FUN_SANITIZE_INPUT "$nbd_export")
+
+	mount=$(FUN_WHIPTAIL_CAPTURE --title "Mount" --inputbox "Local Path:" 0 0 "/mnt/remote-$nbd_export") || return
+	mount=$(FUN_SANITIZE_INPUT "$mount")
+
+	whiptail --yesno "Read-Only mode?" 0 0 >&2 && readonly="true"
+	whiptail --yesno "Optimize for high-speed LAN (4096 BS)?" 0 0 >&2 && bs="4096"
+
+	echo "${name}#${ip}#${nbd_export}#${port}#${mount}#${readonly}#${bs}#${to}" >>"$CLIENT_PROFILES_FILE"
+	whiptail --msgbox "Profile saved." 0 0 >&2
+}
+# ------------------------------------------------------------------------------
+# FUNCTION: _FUN_GET_NBD_SLOT
+# DESCRIPTION: Interactive NBD slot selector.
+# ------------------------------------------------------------------------------
+function _FUN_GET_NBD_SLOT {
+	local slots=()
+	for s in $(ls -d /sys/class/block/nbd* | sort -V); do
+		local dev="/dev/$(basename "$s")"
+		[[ $(cat "$s/size") -eq 0 ]] && slots+=("$dev" "Available") || slots+=("$dev" "[IN USE]")
+	done
+	FUN_WHIPTAIL_CAPTURE --title "Slot" --menu "Select NBD Slot:" 0 0 10 "${slots[@]}"
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: _FUN_CLIENT_EXEC_CONNECT
+# DESCRIPTION: Core connection logic (Client).
+# ------------------------------------------------------------------------------
+function _FUN_CLIENT_EXEC_CONNECT {
+	local ip=$1 port=$2 nbd_export=$3 mount=$4 readonly=$5 bs=$6 to=$7
+	local slot=$(_FUN_GET_NBD_SLOT) || return
+
+	whiptail --infobox "Connecting to $ip:$port..." 0 0 >&2
+	local args=("$ip" "$port" "-N" "$nbd_export" "$slot" "-b" "$bs" "-t" "$to")
+	[[ "$readonly" == "true" ]] && args=("-r" "${args[@]}")
+
+	if sudo nbd-client "${args[@]}"; then
+		sudo mkdir -p "$mount"
+		local m_args=("$slot" "$mount")
+		[[ "$readonly" == "true" ]] && m_args=("-o" "ro" "${m_args[@]}")
+		if sudo mount "${m_args[@]}"; then
+			whiptail --msgbox "Success!\nDevice: $slot\nMount: $mount" 0 0 >&2
+		else
+			whiptail --msgbox "Connect OK, Mount FAILED.\nCheck if partition is mountable." 0 0 >&2
+		fi
+	else
+		whiptail --msgbox "Connection FAILED.\nCheck server IP, Port, and Allowlist." 0 0 >&2
+	fi
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_CLIENT_LOAD_RUN_PROFILE
+# DESCRIPTION: Connects via profile.
+# ------------------------------------------------------------------------------
+function FUN_CLIENT_LOAD_RUN_PROFILE {
+	[[ ! -s "$CLIENT_PROFILES_FILE" ]] && {
+		whiptail --msgbox "No profiles found." 0 0 >&2
+		return
+	}
+
+	local options=() i=1
+	local p_keys=()
+	local p_values=()
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		local n=$(echo "$line" | cut -d'#' -f1)
+		local ip=$(echo "$line" | cut -d'#' -f2)
+		options+=("$i" "$n ($ip)" "OFF")
+		p_keys+=("$i")
+		p_values+=("$line")
+		((i++))
+	done <"$CLIENT_PROFILES_FILE"
+
+	local selected_indices
+	selected_indices=$(FUN_WHIPTAIL_CAPTURE --title "Select Profiles" --checklist "Choose profiles to connect:" 0 0 10 "${options[@]}") || return
+
+	for idx_quoted in $selected_indices; do
+		local idx=$(echo "$idx_quoted" | tr -d '"')
+		local data=""
+		for p_idx in "${!p_keys[@]}"; do
+			if [[ "${p_keys[$p_idx]}" == "$idx" ]]; then
+				data="${p_values[$p_idx]}"
+				break
+			fi
+		done
+
+		[[ -n "$data" ]] || continue
+		IFS='#' read -r name ip nbd_export port mount readonly bs to <<<"$data"
+		_FUN_CLIENT_EXEC_CONNECT "$ip" "$port" "$nbd_export" "$mount" "$readonly" "$bs" "$to"
+	done
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_CLIENT_CONNECT_ADHOC
+# DESCRIPTION: One-off connection without profile.
+# ------------------------------------------------------------------------------
+function FUN_CLIENT_CONNECT_ADHOC {
+	local ip port nbd_export mount readonly="false" bs="512" to="30"
+
+	while true; do
+		ip=$(FUN_WHIPTAIL_CAPTURE --title "Ad-Hoc Connection" --inputbox "Server IP:" 0 0) || return
+		ip=$(FUN_SANITIZE_INPUT "$ip")
+		FUN_VALIDATE_IP "$ip" && break
+		whiptail --msgbox "Invalid IP." 0 0 >&2
+	done
+
+	port=$(FUN_WHIPTAIL_CAPTURE --title "Port" --inputbox "Port (Default 10809, Ad-Hoc usually 10810+):" 0 0 "10810") || return
+	port=$(FUN_SANITIZE_INPUT "$port")
+
+	# Attempt Discovery
+	nbd_export=$(_FUN_DISCOVER_EXPORTS "$ip" "$port")
+
+	# If discovery failed or user cancelled the discovery menu, fallback to manual input
+	if [[ -z "$nbd_export" ]]; then
+		nbd_export=$(FUN_WHIPTAIL_CAPTURE --title "Manual Export Name" --inputbox "Discovery failed or skipped. Enter Export Name manually (e.g. 'adhoc'):" 0 0 "adhoc") || return
+	fi
+	nbd_export=$(FUN_SANITIZE_INPUT "$nbd_export")
+
+	mount=$(FUN_WHIPTAIL_CAPTURE --title "Mount" --inputbox "Mount Point:" 0 55 "/mnt/nbd-$nbd_export") || return
+	mount=$(FUN_SANITIZE_INPUT "$mount")
+
+	whiptail --title "Safety" --yes-button "Read-Only" --no-button "Read-Write" --yesno "Connect as Read-Only?" 0 0 >&2 && readonly="true"
+
+	_FUN_CLIENT_EXEC_CONNECT "$ip" "$port" "$nbd_export" "$mount" "$readonly" "$bs" "$to"
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_CLIENT_EDIT_PROFILE
+# DESCRIPTION: Modifies an existing profile.
+# ------------------------------------------------------------------------------
+function FUN_CLIENT_EDIT_PROFILE {
+	[[ ! -s "$CLIENT_PROFILES_FILE" ]] && return
+	local options=() i=1
+	local p_keys=()
+	local p_values=()
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		options+=("$i" "$(echo "$line" | cut -d'#' -f1)")
+		p_keys+=("$i")
+		p_values+=("$line")
+		((i++))
+	done <"$CLIENT_PROFILES_FILE"
+
+	local choice=$(FUN_WHIPTAIL_CAPTURE --title "Edit" --menu "Choose profile:" 0 0 10 "${options[@]}") || return
+	local old_data=""
+	for idx in "${!p_keys[@]}"; do
+		if [[ "${p_keys[$idx]}" == "$choice" ]]; then
+			old_data="${p_values[$idx]}"
+			break
+		fi
+	done
+
+	IFS='#' read -r o_name o_ip old_export o_port o_mount o_ro o_bs o_to <<<"$old_data"
+
+	local n_name=$(FUN_WHIPTAIL_CAPTURE --title "Name" --inputbox "New Name:" 0 0 "$o_name") || return
+	n_name=$(FUN_SANITIZE_INPUT "$n_name")
+
+	local n_ip
+	while true; do
+		n_ip=$(FUN_WHIPTAIL_CAPTURE --title "IP" --inputbox "New IP:" 0 0 "$o_ip") || return
+		n_ip=$(FUN_SANITIZE_INPUT "$n_ip")
+		FUN_VALIDATE_IP "$n_ip" && break
+		whiptail --msgbox "Invalid IP." 0 0 >&2
+	done
+
+	local n_port=$(FUN_WHIPTAIL_CAPTURE --title "Port" --inputbox "New Port:" 0 0 "$o_port") || return
+	n_port=$(FUN_SANITIZE_INPUT "$n_port")
+
+	local n_export=$(FUN_WHIPTAIL_CAPTURE --title "Export" --inputbox "New Export:" 0 0 "$old_export") || return
+	n_export=$(FUN_SANITIZE_INPUT "$n_export")
+
+	local n_mount=$(FUN_WHIPTAIL_CAPTURE --title "Mount" --inputbox "New Mount:" 0 0 "$o_mount") || return
+	n_mount=$(FUN_SANITIZE_INPUT "$n_mount")
+
+	local n_data="${n_name}#${n_ip}#${n_export}#${n_port}#${n_mount}#${o_ro}#${o_bs}#${o_to}"
+
+	local esc_old=$(echo "$old_data" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+	sudo sed -i "s|^${esc_old}$|${n_data}|" "$CLIENT_PROFILES_FILE"
+	whiptail --msgbox "Updated." 0 0 >&2
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_CLIENT_DELETE_PROFILE
+# DESCRIPTION: Deletes a profile.
+# ------------------------------------------------------------------------------
+function FUN_CLIENT_DELETE_PROFILE {
+	[[ ! -s "$CLIENT_PROFILES_FILE" ]] && {
+		whiptail --msgbox "No profiles found." 0 0 >&2
+		return
+	}
+
+	local options=() i=1
+	local p_keys=()
+	local p_values=()
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		options+=("$i" "$(echo "$line" | cut -d'#' -f1)" "OFF")
+		p_keys+=("$i")
+		p_values+=("$line")
+		((i++))
+	done <"$CLIENT_PROFILES_FILE"
+
+	local selected_indices
+	selected_indices=$(FUN_WHIPTAIL_CAPTURE --title "Delete Profiles" --checklist "Select profiles to delete:" 0 0 10 "${options[@]}") || return
+
+	if whiptail --yesno "Delete selected profiles?" 0 0 >&2; then
+		for idx_quoted in $selected_indices; do
+			local idx=$(echo "$idx_quoted" | tr -d '"')
+			local to_del=""
+			for p_idx in "${!p_keys[@]}"; do
+				if [[ "${p_keys[$p_idx]}" == "$idx" ]]; then
+					to_del="${p_values[$p_idx]}"
+					break
+				fi
+			done
+
+			[[ -n "$to_del" ]] || continue
+			local esc_del=$(echo "$to_del" | sed 's/[^^]/[&]/g; s/\^/\\^/g')
+			sudo sed -i "\|^${esc_del}$|d" "$CLIENT_PROFILES_FILE"
+		done
+		whiptail --msgbox "Selected profiles deleted." 0 0 >&2
+	fi
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_CLIENT_DISCONNECT
+# DESCRIPTION: Cleanup active connections.
+# ------------------------------------------------------------------------------
+function FUN_CLIENT_DISCONNECT {
+	local options=()
+	declare -A nbd_map
+	local i=1
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		local name=$(echo "$line" | grep -oP 'NAME="\K[^"]+')
+		local size=$(echo "$line" | grep -oP 'SIZE="\K[^"]+')
+		local mnt=$(echo "$line" | grep -oP 'MOUNTPOINT="\K[^"]+')
+		[[ "$size" == "0" || -z "$size" ]] && continue
+		options+=("$i" "/dev/$name [${mnt:-Unmounted}] ($size)" "OFF")
+		nbd_map[$i]="/dev/$name"
+		((i++))
+	done < <(lsblk -P -o NAME,SIZE,MOUNTPOINT | grep 'nbd')
+
+	[[ ${#nbd_map[@]} -eq 0 ]] && {
+		whiptail --msgbox "No active NBDs." 0 0 >&2
+		return
+	}
+
+	local selected=$(FUN_WHIPTAIL_CAPTURE --title "Disconnect" --checklist "Choose:" 0 0 10 "${options[@]}") || return
+	for tag in $selected; do
+		local dev="${nbd_map[$(echo "$tag" | tr -d '"')]}"
+		local mnt=$(lsblk -no MOUNTPOINT "$dev" | head -n1)
+		[[ -n "$mnt" ]] && {
+			sudo umount -l "$mnt"
+			sudo rmdir "$mnt" 2>/dev/null
+		}
+		sudo nbd-client -d "$dev" >/dev/null 2>&1
+	done
+	whiptail --msgbox "Disconnected." 0 0 >&2
+}
+
+# ==============================================================================
+#                           STATUS & HELP
+# ==============================================================================
+
+function FUN_SHOW_STATUS {
+	local tmp="${SESSION_WORK_DIR}/status_overview.txt"
+	{
+		echo "--- [ SERVER ] ---"
+		echo -n "Service Status: "
+		systemctl is-active nbd-server
+
+		echo -e "\n--- [ PERSISTENT EXPORTS ] ---"
+		if [ -f "$NBD_CONFIG" ]; then
+			local p_exports=$(grep '^\[.*\]' "$NBD_CONFIG" | grep -v '\[generic\]' | tr -d '[]')
+			if [ -n "$p_exports" ]; then
+				echo "$p_exports"
+			else
+				echo "None"
+			fi
+		else
+			echo "Config not found."
+		fi
+
+		echo -e "\n--- [ ACTIVE AD-HOC SESSIONS ] ---"
+		if [ -s "$ADHOC_STATE_FILE" ]; then
+			printf "%-20s %-15s %-15s %-5s %-10s\n" "NAME" "DEVICE" "CLIENT IP" "RO" "STARTED"
+			while IFS='#' read -r name dev ip ro time; do
+				printf "%-20s %-15s %-15s %-5s %-10s\n" "$name" "$dev" "$ip" "$ro" "$time"
+			done <"$ADHOC_STATE_FILE"
+			echo -e "\nAd-Hoc Server: Port $ADHOC_PORT | PID: $(cat $ADHOC_PID_FILE 2>/dev/null || echo 'Stopped')"
+		else
+			echo "None"
+		fi
+
+		echo -e "\n--- [ REMOTE AD-HOC SESSIONS ] ---"
+		if [ -s "$REMOTE_ADHOC_STATE_FILE" ]; then
+			printf "%-15s %-15s %-15s %-10s\n" "HOST" "IP" "PID" "MODE"
+			while IFS='#' read -r s_name s_user s_ip s_pid s_conf s_allow; do
+				printf "%-15s %-15s %-15s %-10s\n" "$s_name" "$s_ip" "$(basename $s_pid)" "$s_allow"
+			done <"$REMOTE_ADHOC_STATE_FILE"
+		else
+			echo "None"
+		fi
+
+		echo -e "\n--- [ CLIENT ] ---"
+		echo "Connected Network Block Devices:"
+		local client_nbds=$(lsblk -o NAME,SIZE,MOUNTPOINT | grep 'nbd' | grep -v '0B')
+		if [ -n "$client_nbds" ]; then
+			echo "$client_nbds"
+		else
+			echo "None"
+		fi
+	} >"$tmp"
+
+	whiptail --title "System Status Overview" --textbox "$tmp" 0 0 --scrolltext >&2
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_VIEW_LOGS
+# DESCRIPTION: Displays the ad-hoc server log.
+# ------------------------------------------------------------------------------
+function FUN_VIEW_LOGS {
+	if [ ! -f "$ADHOC_LOG" ]; then
+		whiptail --title "Logs" --msgbox "Log file not found at $ADHOC_LOG" 0 0 >&2
+		return
+	fi
+
+	if [ ! -s "$ADHOC_LOG" ]; then
+		whiptail --title "Logs" --msgbox "Log file is currently empty." 0 0 >&2
+		return
+	fi
+
+	whiptail --title "Ad-Hoc Server Logs (Raw)" --textbox "$ADHOC_LOG" 0 0 --scrolltext >&2
+}
+
+# ------------------------------------------------------------------------------
+# FUNCTION: FUN_SHOW_HELP
+# DESCRIPTION: Comprehensive documentation on NBD and script usage.
+# ------------------------------------------------------------------------------
+function FUN_SHOW_HELP {
+	local help_file="${SESSION_WORK_DIR}/nbd_help.txt"
+	cat <<EOF >"$help_file"
+================================================================================
+                    NBD MANAGER (NETWORK BLOCK DEVICE) HELP
+================================================================================
+
+1. OVERVIEW
+   This script manages the Linux NBD (Network Block Device) protocol. NBD allows 
+   you to treat a remote storage device as a local block device (/dev/nbd0, etc.)
+   over a standard TCP/IP network.
+
+2. PERSISTENT VS AD-HOC EXPORTS
+   - PERSISTENT: Written to system config files. Managed by systemd. Remains
+     active after reboots. Port: 10809 (Default).
+   - AD-HOC: Managed by this script session. Automatically cleaned up when you
+     exit the script. Port: 10810 (Default).
+
+3. KEY CONFIGURATION PATHS
+   - Server Config:      /etc/nbd-server/config
+   - Server Allowlist:   /etc/nbd-server/allow
+   - Client Profiles:    /bin/CUSTOM-NBD-MANAGER/client_profiles.txt
+   - Ad-Hoc State:       /bin/CUSTOM-NBD-MANAGER/active_adhoc.txt
+   - Ad-Hoc Logs:        /var/log/nbd-manager-adhoc.log
+
+4. PURE COMMAND LINE USAGE (EXAMPLES)
+
+   A. SERVER SIDE (Manual Export):
+      Edit /etc/nbd-server/config:
+      [my_export]
+          exportname = /dev/sdb1
+      Then restart: sudo systemctl restart nbd-server
+
+   B. CLIENT SIDE (Manual Connect):
+      1. Load module:  sudo modprobe nbd
+      2. Connect:      sudo nbd-client <SERVER_IP> 10809 -N my_export /dev/nbd0
+      3. Mount:        sudo mount /dev/nbd0 /mnt/nbd_storage
+
+   C. DISCONNECTING:
+      1. Unmount:      sudo umount /mnt/nbd_storage
+      2. Disconnect:   sudo nbd-client -d /dev/nbd0
+
+5. TROUBLESHOOTING
+   - Ensure port 10809 (TCP) is open on the server's firewall (ufw/iptables).
+   - Check 'dmesg' for kernel-level NBD errors.
+   - Verify the client IP is in the server's allowlist (/etc/nbd-server/allow).
+================================================================================
+EOF
+	whiptail --title "NBD Manager Documentation" --textbox "$help_file" 0 0 --scrolltext >&2
+}
+
+# ==============================================================================
+#                               MAIN LOOP
+# ==============================================================================
+
+while true; do
+	CHOICE=$(FUN_WHIPTAIL_CAPTURE --title "NBD MANAGER v3.2" --menu "Operations:" 0 0 18 \
+		"1" "[SERVER] Export Device" \
+		"2" "[SERVER] Manage Ad-Hoc Sessions" \
+		"3" "[SERVER] Remove Persistent Export" \
+		"4" "[CLIENT] Connect (Profile)" \
+		"5" "[CLIENT] Connect (Ad-Hoc)" \
+		"6" "[CLIENT] Create Profile" \
+		"7" "[CLIENT] Edit Profile" \
+		"8" "[CLIENT] Delete Profile" \
+		"9" "[CLIENT] Disconnect NBD" \
+		"10" "[REMOTE] Add Server Profile" \
+		"11" "[REMOTE] Delete Server Profile" \
+		"12" "[REMOTE] Share Remote Device" \
+		"13" "[REMOTE] Manage Remote Ad-Hoc" \
+		"14" "[REMOTE] Remove Remote Export" \
+		"15" "[STATUS] View Overview" \
+		"16" "[STATUS] View Ad-Hoc Logs" \
+		"17" "[HELP] About / Help Documentation" \
+		"18" "EXIT") || exit 0
+
+	case "$CHOICE" in
+	1) FUN_SERVER_EXPORT ;;
+	2) FUN_SERVER_MANAGE_ADHOC ;;
+	3) FUN_SERVER_REMOVE_EXPORT ;;
+	4) FUN_CLIENT_LOAD_RUN_PROFILE ;;
+	5) FUN_CLIENT_CONNECT_ADHOC ;;
+	6) FUN_CLIENT_CREATE_PROFILE ;;
+	7) FUN_CLIENT_EDIT_PROFILE ;;
+	8) FUN_CLIENT_DELETE_PROFILE ;;
+	9) FUN_CLIENT_DISCONNECT ;;
+	10) FUN_REMOTE_ADD_SERVER ;;
+	11) FUN_REMOTE_DELETE_SERVER ;;
+	12) FUN_REMOTE_EXPORT_WIZARD ;;
+	13) FUN_REMOTE_MANAGE_ADHOC ;;
+	14) FUN_REMOTE_REMOVE_WIZARD ;;
+	15) FUN_SHOW_STATUS ;;
+	16) FUN_VIEW_LOGS ;;
+	17) FUN_SHOW_HELP ;;
+	18) exit 0 ;;
+	esac
+done

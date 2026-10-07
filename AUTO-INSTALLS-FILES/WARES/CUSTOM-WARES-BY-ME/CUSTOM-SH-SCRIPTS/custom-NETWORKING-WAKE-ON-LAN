@@ -1,0 +1,1177 @@
+#!/bin/bash
+
+#PROGRAM TO WAKE ON LAN DEVICES THAT SUPPPORT IT ATTACHED TO NETWORK INTERFACE(S)
+
+# this script requieres to be run as root or with sudo
+if [ "$EUID" -ne 0 ]; then
+	echo -e "\e[0;45m  this script requieres to be run as root or with sudo  \e[0m"
+	echo -e "\e[0;45m  Please run as root or with sudo.  \e[0m"
+	sudo "$0"
+fi
+# recheck if the script is running as root
+if [ "$EUID" -ne 0 ]; then
+	echo "Failed to run as root. Exiting."
+	exit 1
+fi
+
+# Iterate over a list of required packages for the script.
+for PACKAGE in ethtool etherwake netdiscover wakeonlan tcpdump samba-common; do
+	# Check if the package is installed by querying `apt` and silencing output.
+	if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+		echo "Dependency '$PACKAGE' is not installed. Attempting to install..."
+		# Update package lists and install the missing package automatically.
+		sudo apt update
+		sudo apt install -y $PACKAGE
+
+		# Verify that the installation was successful.
+		if ! apt list --installed $PACKAGE 2>/dev/null | grep -w $PACKAGE >/dev/null; then
+			# If the package is still not found, exit with an error.
+			echo "Failed to install dependency '$PACKAGE'. Please install it manually and try again."
+			exit 1
+		fi
+	fi
+done
+
+# spinner for long operations
+# Kawaii Braille Spinner ---
+# A colorful, multi-character braille spinner.
+FUN_SPINNER_KAWAII_BRAILLE() {
+	local message="${1:-Processing...}"
+	# Define colors and spinner characters inside the function.
+	local spin_chars=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+	local colors=('\e[91m' '\e[92m' '\e[93m' '\e[94m' '\e[95m' '\e[96m') # Red, Green, Yellow, Blue, Magenta, Cyan
+	local reset='\e[0m'
+	local i=0 c=0
+
+	# This local trap ensures the cursor is restored if the script is killed.
+	trap 'tput cnorm; printf "\n"; exit' INT TERM
+
+	tput civis # Hide cursor
+	while :; do
+		i=$(((i + 1) % ${#spin_chars[@]}))
+		c=$(((c + 1) % ${#colors[@]}))
+		printf "\r${colors[$c]}[%s]${reset} %s " "${spin_chars[$i]}" "$message"
+		sleep 0.08
+	done
+}
+
+# --- HOW TO USE A SPINNER IN YOUR SCRIPT ---
+# wrap the command with the spinner logic.
+#   echo "Starting task..."
+#   tput civis # Hide the cursor
+#
+#   # Start the spinner in the background.
+#   fun_spinner_simple "Reticulating splines..." &
+#   SPINNER_PID=$!
+#
+#   # Set a trap to kill spinner and restore cursor if script is interrupted.
+#   trap 'kill $SPINNER_PID; tput cnorm; exit' INT TERM
+#
+#   # Run your actual command.
+#   _task_that_takes_time
+#
+#   # Stop the spinner.
+#   kill $SPINNER_PID
+#   tput cnorm # Restore the cursor
+#   trap - INT TERM # Clear the trap
+#
+#   printf "\rTask complete.
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+# Scans the network for potential Wake-On-LAN targets and saves selected ones to a file.
+function FUN_SCAN_NEW_WOL_TARGETS_UNDER_NETIFACE {
+	# Superior Pattern: Read network interfaces into an array.
+	local -a interfaces
+	# The awk command now only extracts the raw interface name.
+	readarray -t interfaces < <(ip -o link show | awk -F': ' '{print $2}')
+
+	# Exit if no interfaces are found.
+	if [ ${#interfaces[@]} -eq 0 ]; then
+		whiptail --title "ERROR" --msgbox "No network interfaces found." 0 0
+		return 1
+	fi
+
+	# Build whiptail menu options and the id_map for interfaces.
+	local -a iface_menu_options=()
+	local -A iface_id_map=()
+	local i=1
+	for iface in "${interfaces[@]}"; do
+		iface_menu_options+=("$i" "$iface")
+		iface_id_map[$i]="$iface"
+		((i++))
+	done
+
+	# Display the menu for selecting an interface.
+	local iface_choice_num
+	iface_choice_num=$(whiptail --title "SELECT NETWORK INTERFACE" \
+		--menu "Select the network interface where the WOL target device is connected:" \
+		0 0 "${#iface_id_map[@]}" "${iface_menu_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then
+		echo "User aborted. Exiting."
+		return 1
+	fi
+
+	local __SELECTED_NETIFACE_FINAL="${iface_id_map[$iface_choice_num]}"
+
+	# Get the IP address and subnet (e.g., 192.168.1.10/24) for the selected interface.
+	local __NETIFACE_IPADDR_SCAN_RANGE
+	__NETIFACE_IPADDR_SCAN_RANGE=$(ip addr show "$__SELECTED_NETIFACE_FINAL" | awk '/inet / {print $2}' | tr -d '[:space:]')
+
+	# Exit if the interface has no assigned IP address.
+	if [ -z "$__NETIFACE_IPADDR_SCAN_RANGE" ]; then
+		whiptail --title "ERROR" --msgbox "Error: Interface [${__SELECTED_NETIFACE_FINAL}] has no IP address. Exiting." 0 0
+		return 1
+	fi
+
+	# Superior Pattern: Use netdiscover, read the raw output into an array.
+	whiptail --title "Scanning..." --infobox "Scanning for devices on $__SELECTED_NETIFACE_FINAL... Please wait." 0 0
+	local -a discovered_hosts
+
+	# this can take quite a while depending on number of hosts .. normally terminal is black, so we use a spinner
+	echo "Performing IP ADDRESS SCAN ..."
+	tput civis # Hide cursor
+	FUN_SPINNER_KAWAII_BRAILLE "Performing IP ADDRESS SCAN..." &
+	SPINNER_PID=$!
+	# Set a trap to kill spinner and restore cursor if script is interrupted.
+	trap 'kill $SPINNER_PID; tput cnorm; exit' INT TERM
+
+	# The awk command now only extracts the relevant columns (IP, MAC, Hostname), letting bash build the menu.
+	# netdiscover options used:
+	# -r <range> Specify the IP range to scan.
+	# -i <interface> Specify the network interface to use.
+	# -N → no header lines
+	# -P → clean tab-separated output (perfect for grep/awk/cut in scripts) [Parsable output mode (machine-readable, tab-separated, no curses UI, no colors)]
+	#-c 3 Send each ARP request 3 times (default: 1).Handles packet loss or unresponsive hosts; increases detection rate without much noise.
+	# -s 50 Set the delay between ARP requests to 50 milliseconds (default: 1000ms). Speeds up the scan significantly.
+	readarray -t discovered_hosts < <(sudo netdiscover -r "$__NETIFACE_IPADDR_SCAN_RANGE" -i "$__SELECTED_NETIFACE_FINAL" -NP -c 3 -s 50 | awk '/([0-9]{1,3}\.){3}[0-9]{1,3}/ {print $1, $2, $5}')
+
+	# If no devices were found, show a warning and return to the main menu.
+	if [ ${#discovered_hosts[@]} -eq 0 ]; then
+		whiptail --title "WARNING" --msgbox "No devices found under selected interface: $__SELECTED_NETIFACE_FINAL" 0 0
+		kill $SPINNER_PID
+		tput cnorm      # Restore the cursor
+		trap - INT TERM # Unset / Clear the trap
+		return
+	fi
+	echo -e "\nIP ADDRESS SCAN complete. Found ${#discovered_hosts[@]} device(s)."
+	printf "%s\n" "${discovered_hosts[@]}"
+	# ip scan complete
+	# Stop the spinner.
+	kill $SPINNER_PID
+	tput cnorm      # Restore the cursor
+	trap - INT TERM # Unset / Clear the trap
+
+	# Now perform NetBIOS name lookups for each discovered host.
+	# Build whiptail menu options and id_map for discovered hosts, now including NetBIOS lookup.
+	local -a host_menu_options=()
+	local -A host_id_map=()
+	i=1
+
+	# this can take quite a while depending on number of hosts .. normally terminal is black, so we use a spinner
+	echo -e "\n\nPerforming Hostnames / NetBIOS name lookups for discovered hosts... "
+
+	tput civis # Hide cursor
+	FUN_SPINNER_KAWAII_BRAILLE "Performing Hostnames / NetBIOS name lookups..." &
+	SPINNER_PID=$!
+	# Set a trap to kill spinner and restore cursor if script is interrupted.
+	trap 'kill $SPINNER_PID; tput cnorm; exit' INT TERM
+
+	# Run actual processing .. with spinner running in background
+	for host_line in "${discovered_hosts[@]}"; do
+		local ip_addr
+		ip_addr=$(echo "$host_line" | awk '{print $1}')
+
+		# Perform nmblookup to find the NetBIOS name.
+		# The output for a found name is like: "MYPC           <00> -         M <ACTIVE>"
+		# We grep for "<00>" to find the machine name line, exclude group names, take the first one, and awk the first field.
+		local nmb_name
+		nmb_name=$(nmblookup -A "$ip_addr" 2>/dev/null | grep '<00>' | grep -v '<GROUP>' | head -n 1 | awk '{print $1}')
+
+		# If nmblookup fails or returns nothing, use a placeholder.
+		if [ -z "$nmb_name" ]; then
+			nmb_name="<no_netbios_name>"
+		fi
+
+		# Append the NetBIOS name to the line for display.
+		local new_host_line="$host_line $nmb_name"
+
+		host_menu_options+=("$i" "$new_host_line")
+		host_id_map[$i]="$new_host_line" # Use the new line so it's passed to the selection
+		((i++))
+	done
+
+	# Stop the spinner.
+	kill $SPINNER_PID
+	tput cnorm      # Restore the cursor
+	trap - INT TERM # Unset / Clear the trap
+
+	# Display the list of discovered targets and ask the user to select one.
+	local host_choice_num
+	host_choice_num=$(whiptail --title "SELECT WOL TARGET" \
+		--menu "Select a WOL target device under interface: $__SELECTED_NETIFACE_FINAL" \
+		0 0 "${#host_id_map[@]}" "${host_menu_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then
+		echo "User aborted. Exiting."
+		return 1
+	fi
+
+	local selected_line="${host_id_map[$host_choice_num]}"
+	# Extract the MAC and IP from the raw line.
+	local __WOL_TARGET_IP
+	__WOL_TARGET_IP=$(echo "$selected_line" | awk '{print $1}')
+	local __WOL_TARGET_MAC
+	__WOL_TARGET_MAC=$(echo "$selected_line" | awk '{print $2}')
+
+	# If MAC address extraction fails, show an error and return.
+	if [ -z "$__WOL_TARGET_MAC" ]; then
+		whiptail --title "ERROR" --msgbox "Could not extract MAC address from '$selected_line'. Aborting." 0 0
+		return
+	fi
+
+	# Define the path to the targets file.
+	# WARNING: Storing data in /bin is non-standard. Consider /etc/ or a user's home directory.
+	local targets_file="/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+	# Create the directory and file if they don't exist, and set permissive permissions.
+	sudo mkdir -p "$(dirname "$targets_file")"
+	sudo touch "$targets_file"
+	sudo chmod 644 "$targets_file" # Allow read/write for owner, read for others.
+
+	# Improved Check: See if a target with the same MAC address already exists.
+	local existing_line
+	# Use grep -m 1 to ensure we only match the first occurrence.
+	existing_line=$(grep -m 1 -F " $__WOL_TARGET_MAC " "$targets_file")
+
+	if [ -n "$existing_line" ]; then
+		# If it exists, ask the user if they want to update the entry.
+		if whiptail --title "DUPLICATE FOUND" --yesno "A target with MAC address $__WOL_TARGET_MAC already exists:\n\n$existing_line\n\nDo you want to update it with the new info (Interface: $__SELECTED_NETIFACE_FINAL, IP: $__WOL_TARGET_IP)?" 0 0; then
+			# User chose to update.
+			local nickname
+			# Preserve existing nickname if it exists.
+			if [[ "$existing_line" == *"::"* ]]; then
+				nickname=$(echo "$existing_line" | sed 's/.* :: //')
+			else
+				nickname="na"
+			fi
+
+			# Construct the new line.
+			local new_entry="$__SELECTED_NETIFACE_FINAL $__WOL_TARGET_MAC $__WOL_TARGET_IP :: $nickname"
+			local temp_file="/tmp/.wol_targets_update_$$.tmp"
+
+			# Use awk to precisely replace only the one line we found earlier.
+			# The 'updated' flag ensures we only replace the first match of the exact line.
+			awk -v old_line="$existing_line" -v new_line="$new_entry" '
+				!updated && $0 == old_line {
+					print new_line
+					updated=1
+					next
+				}
+				{ print }
+			' "$targets_file" >"$temp_file"
+
+			# Replace the original file with the updated one.
+			if [ $? -eq 0 ]; then
+				sudo mv "$temp_file" "$targets_file"
+				whiptail --title "SUCCESS" --msgbox "WOL target updated successfully:\n$new_entry" 0 0
+			else
+				rm -f "$temp_file"
+				whiptail --title "ERROR" --msgbox "Failed to update the target list." 0 0
+			fi
+		else
+			# User chose not to update.
+			whiptail --title "INFO" --msgbox "No action taken." 0 0
+		fi
+	else
+		# If the target is new, ask the user if they want to add a nickname.
+		local nickname="na" # Default nickname is "na" (not applicable).
+		if whiptail --title "ADD NICKNAME" --yesno "Add a nickname for target $__WOL_TARGET_MAC?" 0 0; then
+			local input
+			input=$(whiptail --title "INPUT NICKNAME" --inputbox "Enter nickname:" 0 0 3>&1 1>&2 2>&3)
+			# Use the provided nickname if it's not empty.
+			if [ -n "$input" ]; then
+				nickname="$input"
+			fi
+		fi
+
+		# Format the new entry: <INTERFACE> <MAC_ADDRESS> <IP_ADDRESS> :: <NICKNAME>
+		local new_entry="$__SELECTED_NETIFACE_FINAL $__WOL_TARGET_MAC $__WOL_TARGET_IP :: $nickname"
+
+		# Append the new entry to the targets file and notify the user.
+		echo "$new_entry" | sudo tee -a "$targets_file" >/dev/null
+		whiptail --title "SUCCESS" --msgbox "Saved new WOL target:\n$new_entry" 0 0
+	fi
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+function FUN_ADD_WOL_TARGET_MANUALLY {
+	local new_iface
+	new_iface=$(whiptail --title "MANUAL ADD" --inputbox "Enter the network interface (e.g., eth0):" 0 0 "" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ]; then
+		echo "User aborted."
+		return 1
+	fi
+	if [ -z "$new_iface" ]; then
+		whiptail --title "ERROR" --msgbox "Interface cannot be empty." 0 0
+		return 1
+	fi
+
+	local new_mac
+	new_mac=$(whiptail --title "MANUAL ADD" --inputbox "Enter the MAC address:" 0 0 "" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ]; then
+		echo "User aborted."
+		return 1
+	fi
+
+	# Validate MAC address format
+	if ! [[ "$new_mac" =~ ^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$ ]]; then
+		whiptail --title "ERROR" --msgbox "Invalid MAC address format. Use XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX." 0 0
+		return 1
+	fi
+
+	local new_ip
+	new_ip=$(whiptail --title "MANUAL ADD" --inputbox "Enter the IP address:" 0 0 "" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ]; then
+		echo "User aborted."
+		return 1
+	fi
+	if [ -z "$new_ip" ]; then
+		whiptail --title "ERROR" --msgbox "IP address cannot be empty." 0 0
+		return 1
+	fi
+
+	local new_nick="na"
+	if whiptail --title "ADD NICKNAME" --yesno "Add a nickname for target $new_mac?" 0 0; then
+		local input
+		input=$(whiptail --title "INPUT NICKNAME" --inputbox "Enter nickname:" 0 0 3>&1 1>&2 2>&3)
+		if [ $? -eq 0 ] && [ -n "$input" ]; then
+			new_nick="$input"
+		fi
+	fi
+
+	local targets_file="/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+	sudo mkdir -p "$(dirname "$targets_file")"
+	sudo touch "$targets_file"
+	sudo chmod 644 "$targets_file"
+
+	local existing_line
+	existing_line=$(grep -m 1 -F " $new_mac " "$targets_file")
+
+	local new_entry="$new_iface $new_mac $new_ip :: $new_nick"
+
+	if [ -n "$existing_line" ]; then
+		if whiptail --title "DUPLICATE FOUND" --yesno "A target with MAC address $new_mac already exists:\n\n$existing_line\n\nOverwrite it with the new info?\n$new_entry" 0 0; then
+			local temp_file="/tmp/.wol_targets_overwrite_$$.tmp"
+			# Use grep -v to filter out the exact line, then append the new one.
+			grep -vF "$existing_line" "$targets_file" >"$temp_file"
+			echo "$new_entry" >>"$temp_file"
+
+			if sudo mv "$temp_file" "$targets_file"; then
+				whiptail --title "SUCCESS" --msgbox "WOL target overwritten successfully." 0 0
+			else
+				rm -f "$temp_file"
+				whiptail --title "ERROR" --msgbox "Failed to overwrite the target list." 0 0
+			fi
+		else
+			whiptail --title "INFO" --msgbox "No action taken." 0 0
+		fi
+	else
+		echo "$new_entry" | sudo tee -a "$targets_file" >/dev/null
+		whiptail --title "SUCCESS" --msgbox "Saved new WOL target:\n$new_entry" 0 0
+	fi
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+FUN_SEND_WOL_MAGIC_PACKET_TO_TARGET() {
+	local targets_file="/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+
+	# First, check if the targets file exists and has content.
+	if [ ! -s "$targets_file" ]; then
+		whiptail --title "ERROR" --msgbox "No saved WOL targets found. The file is empty or does not exist." 0 0
+		return 1
+	fi
+
+	# Clean any empty lines from the file to ensure accurate processing.
+	sed -i '/^$/d' "$targets_file"
+
+	# Use readarray (mapfile) to safely read all targets into a bash array.
+	local -a lines
+	readarray -t lines <"$targets_file"
+
+	# If the file is empty after cleaning, there's nothing to do.
+	if [ ${#lines[@]} -eq 0 ]; then
+		whiptail --title "INFO" --msgbox "No saved WOL targets to display." 0 0
+		return 1
+	fi
+
+	# Build the whiptail checklist options and an associative map for tag->value lookup.
+	local -a checklist_options=()
+	local -A id_map=()
+	local i=1
+	for line in "${lines[@]}"; do
+		if [[ -z "$line" ]]; then continue; fi
+		checklist_options+=("$i" "$line" "off")
+		id_map[$i]="$line"
+		((i++))
+	done
+
+	local checklist_height=${#id_map[@]}
+	local SELECTED_TAGS_STR
+
+	# Display the checklist to the user.
+	SELECTED_TAGS_STR=$(whiptail --title "[ SEND WOL MAGIC PACKET ]" --checklist \
+		"Select one or more targets to wake up (SPACE to toggle):" 0 0 "$checklist_height" \
+		"${checklist_options[@]}" 3>&1 1>&2 2>&3)
+
+	# Exit if the user pressed Cancel.
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED. No action taken."
+		return 1
+	fi
+
+	# Exit if the user pressed OK but selected nothing.
+	if [ -z "$SELECTED_TAGS_STR" ]; then
+		whiptail --title "INFO" --msgbox "No targets were selected. Nothing to do." 0 0
+		return 0
+	fi
+
+	# Read the whiptail output string into a bash array.
+	local -a selected_tags
+	read -ra selected_tags <<<"$SELECTED_TAGS_STR"
+
+	# Clear the screen to show the output of the wake-up commands.
+	clear
+
+	# Loop through each tag the user selected.
+	for tag in "${selected_tags[@]}"; do
+		# FIX: Robustly remove both single and double quotes from whiptail output.
+		local cleaned_tag
+		cleaned_tag=$(echo "$tag" | tr -d "'\"")
+
+		# Use our associative array to safely retrieve the full line for the selected target.
+		local target_line="${id_map[$cleaned_tag]}"
+		if [[ -z "$target_line" ]]; then
+			echo "Error: Could not find target for tag #$cleaned_tag. Skipping."
+			continue
+		fi
+
+		# FIX: Use read for robust parsing of the line.
+		local net_iface mac_addr ip_addr
+		read -r net_iface mac_addr ip_addr <<<"$(echo "$target_line" | sed 's/ :: .*//')"
+
+		echo "<> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <>"
+		echo "RUNNING :::::::::  sudo etherwake -i $net_iface $mac_addr"
+		sudo etherwake -i "$net_iface" "$mac_addr"
+
+		echo "RUNNING :::::::::  sudo wakeonlan -i $ip_addr $mac_addr"
+		sudo wakeonlan -i "$ip_addr" "$mac_addr"
+		echo "<> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <>"
+		echo ""
+	done
+
+	echo "======================================================================"
+	echo "Finished sending WOL packets to all selected targets."
+	echo -ne "Press ANY KEY to return to the main menu... "
+	read -n 1 -s -r -p ""
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+FUN_VIEW_SAVED_TARGETS() {
+	local targets_file
+	targets_file="/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+
+	if [ ! -f "$targets_file" ] || [ ! -s "$targets_file" ]; then
+		whiptail --title "ERROR" --msgbox "No saved WOL targets found.\n\nFile: $targets_file" 10 60
+		return 1
+	fi
+
+	# Let whiptail calculate optimal size, but cap it
+	whiptail --title "VIEW SAVED WOL TARGETS" \
+		--scrolltext \
+		--msgbox "$(cat $targets_file)" 0 0 3>&1 1>&2 2>&3
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+FUN_DELETE_SAVED_WOL_TARGET_DEVICES() {
+	local targets_file="/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+
+	# Check if the file exists and has content.
+	if [ ! -s "$targets_file" ]; then
+		whiptail --title "ERROR" --msgbox "No saved WOL targets found to delete." 0 0
+		return 1
+	fi
+
+	# Clean any empty lines from the file to ensure accurate processing.
+	sed -i '/^$/d' "$targets_file"
+
+	# Use readarray to safely read all targets into a bash array.
+	local -a lines
+	readarray -t lines <"$targets_file"
+
+	# If the file is empty after cleaning, there's nothing to do.
+	if [ ${#lines[@]} -eq 0 ]; then
+		whiptail --title "INFO" --msgbox "No saved WOL targets found to delete." 0 0
+		return 1
+	fi
+
+	# Build the whiptail checklist options and an associative map for tag->value lookup.
+	local -a checklist_options=()
+	local -A id_map=()
+	local i=1
+	for line in "${lines[@]}"; do
+		if [[ -z "$line" ]]; then continue; fi
+		local tag="$i"
+		local display="$line"
+		local status="off" # All items are unselected by default.
+		checklist_options+=("$tag" "$display" "$status")
+		id_map[$tag]="$line"
+		((i++))
+	done
+
+	# Display the checklist dialog.
+	local checklist_height=${#id_map[@]}
+	local SELECTED_TAGS_STR
+	SELECTED_TAGS_STR=$(whiptail --title "[ DELETE SAVED WOL TARGETS ]" --checklist \
+		"Select one or more targets to delete (SPACE to toggle):" 0 0 "$checklist_height" \
+		"${checklist_options[@]}" 3>&1 1>&2 2>&3)
+
+	# Exit if the user pressed Cancel.
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED. No changes made."
+		return 1
+	fi
+
+	# Exit if the user pressed OK but selected nothing.
+	if [ -z "$SELECTED_TAGS_STR" ]; then
+		whiptail --title "INFO" --msgbox "No targets were selected. Nothing to delete." 0 0
+		return 0
+	fi
+
+	# Prepare for confirmation: build a list of items to delete and an array of clean tags.
+	local -a selected_tags_clean_arr=()
+	local delete_list_str=""
+	local -a selected_tags_raw
+	read -ra selected_tags_raw <<<"$SELECTED_TAGS_STR"
+	for tag in "${selected_tags_raw[@]}"; do
+		local cleaned_tag
+		cleaned_tag=$(echo "$tag" | tr -d "'\"")
+		selected_tags_clean_arr+=("$cleaned_tag")
+		delete_list_str+=$'\n'"- ${id_map[$cleaned_tag]}"
+	done
+
+	# Show a confirmation dialog with the list of targets to be deleted.
+	if ! whiptail --title "[DELETE] SANITY CHECK !!!!!" --yesno \
+		"You are about to PERMANENTLY delete the following target(s):$delete_list_str\n\nContinue?" 0 0; then
+		echo "USER ABORTED. No changes made."
+		return 1
+	fi
+
+	# Create an associative array of tags to delete for efficient lookup.
+	local -A tags_to_delete=()
+	for tag in "${selected_tags_clean_arr[@]}"; do
+		tags_to_delete[$tag]=1
+	done
+
+	# Rebuild the file content by keeping only the lines that were NOT selected for deletion.
+	local -a lines_to_keep=()
+	local tag_counter=1
+	for line in "${lines[@]}"; do
+		# If the tag for this line is NOT in our delete list, add it to the keep list.
+		if [[ -z "${tags_to_delete[$tag_counter]:-}" ]]; then
+			lines_to_keep+=("$line")
+		fi
+		((tag_counter++))
+	done
+
+	# Safely overwrite the original file with only the lines we are keeping.
+	printf "%s\n" "${lines_to_keep[@]}" | sudo tee "$targets_file" >/dev/null
+
+	# Notify the user of success.
+	whiptail --title "SUCCESS" --msgbox "Successfully deleted the selected target(s)." 0 0
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+FUN_EDIT_SAVED_WOL_TARGET() {
+	local targets_file="/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+
+	# Check if the file exists and is not empty.
+	if [ ! -s "$targets_file" ]; then
+		whiptail --title "ERROR" --msgbox "No saved WOL targets found to edit." 0 0
+		return 1
+	fi
+
+	# Clean empty lines and read all targets into an array.
+	sed -i '/^$/d' "$targets_file"
+	local -a lines
+	readarray -t lines <"$targets_file"
+
+	if [ ${#lines[@]} -eq 0 ]; then
+		whiptail --title "INFO" --msgbox "No saved WOL targets found to edit." 0 0
+		return 1
+	fi
+
+	# Build a menu to select a single target.
+	local -a menu_options=()
+	local -A id_map=()
+	local i=1
+	for line in "${lines[@]}"; do
+		if [[ -z "$line" ]]; then continue; fi
+		menu_options+=("$i" "$line")
+		id_map[$i]="$line"
+		((i++))
+	done
+
+	local menu_height=${#id_map[@]}
+	local CHOICE_NUM
+	CHOICE_NUM=$(whiptail --title "EDIT WOL TARGET" --menu "Select a target to edit:" 0 0 "$menu_height" "${menu_options[@]}" 3>&1 1>&2 2>&3)
+
+	# Exit if user cancels.
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED. No changes made."
+		return 1
+	fi
+
+	local old_line="${id_map[$CHOICE_NUM]}"
+
+	# Parse the existing data from the selected line.
+	local old_iface
+	old_iface=$(echo "$old_line" | awk '{print $1}')
+	local old_mac
+	old_mac=$(echo "$old_line" | awk '{print $2}')
+	local old_ip
+	old_ip=$(echo "$old_line" | awk '{print $3}')
+	local old_nick="na" # Default to 'na'
+	if [[ "$old_line" == *"::"* ]]; then
+		old_nick=$(echo "$old_line" | sed 's/.* :: //')
+	fi
+
+	# Use a series of more robust input boxes instead of a single complex form.
+	local new_iface new_mac new_ip new_nick
+
+	new_iface=$(whiptail --title "EDIT INTERFACE" --inputbox "Enter the network interface:" 0 0 "$old_iface" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED."
+		return 1
+	fi
+
+	new_mac=$(whiptail --title "EDIT MAC ADDRESS" --inputbox "Enter the MAC address:" 0 0 "$old_mac" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED."
+		return 1
+	fi
+
+	new_ip=$(whiptail --title "EDIT IP ADDRESS" --inputbox "Enter the IP address:" 0 0 "$old_ip" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED."
+		return 1
+	fi
+
+	new_nick=$(whiptail --title "EDIT NICKNAME" --inputbox "Enter the nickname:" 0 0 "$old_nick" 3>&1 1>&2 2>&3)
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED."
+		return 1
+	fi
+
+	# Default nickname if left empty.
+	if [ -z "$new_nick" ]; then
+		new_nick="na"
+	fi
+
+	# Construct the new line.
+	local new_line="$new_iface $new_mac $new_ip :: $new_nick"
+
+	# Use the safe awk-and-replace method to update the file.
+	local temp_file="/tmp/.wol_targets_edit_$$.tmp"
+	awk -v old_line="$old_line" -v new_line="$new_line" '
+        !updated && $0 == old_line {
+            print new_line
+            updated=1
+            next
+        }
+        { print }
+    ' "$targets_file" >"$temp_file"
+
+	# Replace the original file with the updated temporary file.
+	if [ $? -eq 0 ]; then
+		sudo mv "$temp_file" "$targets_file"
+		whiptail --title "SUCCESS" --msgbox "WOL target updated successfully." 0 0
+	else
+		rm -f "$temp_file"
+		whiptail --title "ERROR" --msgbox "Failed to update the target list." 0 0
+	fi
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+FUN_SEND_WOL_CONTINUOUSLY() {
+	local targets_file="/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+
+	# Check if the file exists and is not empty.
+	if [ ! -s "$targets_file" ]; then
+		whiptail --title "ERROR" --msgbox "No saved WOL targets found." 0 0
+		return 1
+	fi
+
+	sed -i '/^$/d' "$targets_file"
+	local -a lines
+	readarray -t lines <"$targets_file"
+	if [ ${#lines[@]} -eq 0 ]; then
+		whiptail --title "INFO" --msgbox "No saved WOL targets found." 0 0
+		return 1
+	fi
+
+	# Use a checklist to allow selecting multiple targets.
+	local -a checklist_options=()
+	local -A id_map=()
+	local i=1
+	for line in "${lines[@]}"; do
+		if [[ -z "$line" ]]; then continue; fi
+		checklist_options+=("$i" "$line" "off")
+		id_map[$i]="$line"
+		((i++))
+	done
+
+	local checklist_height=${#id_map[@]}
+	local SELECTED_TAGS_STR
+	SELECTED_TAGS_STR=$(whiptail --title "CONTINUOUS WOL SENDER" --checklist "Select one or more targets to continuously send packets to:" 0 0 "$checklist_height" "${checklist_options[@]}" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED."
+		return 1
+	fi
+
+	if [ -z "$SELECTED_TAGS_STR" ]; then
+		whiptail --title "INFO" --msgbox "No targets were selected. Nothing to do." 0 0
+		return 0
+	fi
+
+	# Ask for the interval.
+	local interval
+	interval=$(whiptail --title "SET INTERVAL" --inputbox "Enter the interval in seconds between each full cycle:" 0 0 "5" 3>&1 1>&2 2>&3)
+
+	if [ $? -ne 0 ]; then
+		echo "USER ABORTED."
+		return 1
+	fi
+
+	# Basic validation for interval.
+	if ! [[ "$interval" =~ ^[0-9]+([.][0-9]+)?$ ]] || (($(echo "$interval <= 0" | bc -l))); then
+		whiptail --title "ERROR" --msgbox "Invalid interval. Please enter a positive number." 0 0
+		return 1
+	fi
+
+	# Efficiently pre-process all selected targets before starting the loop.
+	local -a selected_tags
+	read -ra selected_tags <<<"$SELECTED_TAGS_STR"
+
+	local -a targets_to_wake=() # array to hold full lines for display
+	local -a net_ifaces=()
+	local -a mac_addrs=()
+	local -a ip_addrs=()
+
+	for tag in "${selected_tags[@]}"; do
+		# Robustly remove both single and double quotes from whiptail output.
+		local cleaned_tag
+		cleaned_tag=$(echo "$tag" | tr -d "'\"")
+
+		# This lookup was failing because of incorrect quote removal.
+		local target_line="${id_map[$cleaned_tag]}"
+		if [[ -z "$target_line" ]]; then continue; fi # Safety check.
+
+		targets_to_wake+=("$target_line")
+
+		# Use read for robust parsing of the line, stripping the nickname part first.
+		local temp_iface temp_mac temp_ip
+		read -r temp_iface temp_mac temp_ip <<<"$(echo "$target_line" | sed 's/ :: .*//')"
+
+		net_ifaces+=("$temp_iface")
+		mac_addrs+=("$temp_mac")
+		ip_addrs+=("$temp_ip")
+	done
+
+	clear
+	echo "======================================================================"
+	echo "Will continuously send WOL packets to the following targets:"
+	printf -- "- %s\n" "${targets_to_wake[@]}"
+	echo ""
+	echo "Interval between cycles: $interval seconds"
+	echo ""
+	echo "Press Ctrl+C to stop."
+	echo "======================================================================"
+
+	# Set up a trap to catch Ctrl+C for a graceful exit message.
+	trap 'echo -e "\n\nContinuous sending stopped by user. Returning to main menu."; return' INT
+
+	# Main loop
+	while true; do
+		echo "--- [$(date)] Starting new cycle ---"
+		# Inner loop to ping each selected target
+		for i in "${!targets_to_wake[@]}"; do
+			echo "<> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <>"
+			echo "RUNNING :::::::::  sudo etherwake -i ${net_ifaces[$i]} ${mac_addrs[$i]}"
+			sudo etherwake -i "${net_ifaces[$i]}" "${mac_addrs[$i]}"
+
+			echo "RUNNING :::::::::  sudo wakeonlan -i ${ip_addrs[$i]} ${mac_addrs[$i]}"
+			sudo wakeonlan -i "${ip_addrs[$i]}" "${mac_addrs[$i]}"
+			echo "<> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <> <>"
+		done
+		echo "--- Cycle complete. Waiting $interval seconds... ---"
+		sleep "$interval"
+	done
+
+	# Reset the trap.
+	trap - INT
+}
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+FUN_CHANGE_OR_ADD_NICKNAME_OF_WOL_TARGET() {
+
+	local targets_file="/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt"
+	local temp_file="/tmp/.wol_targets_modified_$$.txt"
+
+	# Clean empty lines to ensure accurate indexing.
+	sudo sed -i '/^$/d' "$targets_file"
+
+	# Abort if file doesn't exist or is empty.
+	if [ ! -s "$targets_file" ]; then
+		whiptail --title "INFO" --msgbox "No saved WOL targets found. The file is empty or does not exist." 0 0
+		return 1
+	fi
+
+	# Use readarray to load all targets into an array.
+	local -a lines
+	readarray -t lines <"$targets_file"
+
+	# Build indexed and associative mappings for whiptail menu.
+	local -a _WOL_TARGET_TO_CHANGE_NICKNAME=()
+	local -A _wol_id_map
+	local i=1
+	for line in "${lines[@]}"; do
+		if [[ -n "$line" ]]; then
+			_WOL_TARGET_TO_CHANGE_NICKNAME+=("$i" "$line")
+			_wol_id_map[$i]="$line"
+			((i++))
+		fi
+	done
+
+	# Sanity check for non-empty menu.
+	if [ "${#_wol_id_map[@]}" -eq 0 ]; then
+		whiptail --title "INFO" --msgbox "No saved WOL targets to change nickname." 0 0
+		return 1
+	fi
+
+	# Menu selection prompt.
+	local _CHOSEN_WOL_TARGET_CHANGE_NICKNAME
+	_CHOSEN_WOL_TARGET_CHANGE_NICKNAME=$(whiptail --title "SELECT WOL TARGET" \
+		--menu "Select the target to change/add a nickname for:" \
+		0 0 "${#_wol_id_map[@]}" "${_WOL_TARGET_TO_CHANGE_NICKNAME[@]}" 3>&1 1>&2 2>&3)
+
+	# User cancelled.
+	if [ -z "$_CHOSEN_WOL_TARGET_CHANGE_NICKNAME" ]; then
+		echo "User aborted. No changes made."
+		return 1
+	fi
+
+	# Get selected line.
+	local selected_line="${_wol_id_map[$_CHOSEN_WOL_TARGET_CHANGE_NICKNAME]}"
+
+	# Parse MAC/IP part and nickname.
+	local target_info old_nickname
+	if [[ "$selected_line" == *"::"* ]]; then
+		target_info=$(echo "$selected_line" | sed 's/ :: .*//')
+		old_nickname=$(echo "$selected_line" | sed 's/.* :: //')
+	else
+		target_info="$selected_line"
+		old_nickname=""
+	fi
+
+	# Prompt user for new nickname, default to old if available.
+	local new_nickname
+	new_nickname=$(whiptail --title "UPDATE NICKNAME" \
+		--inputbox "Enter the new nickname for:\n\n$target_info\n\n(Leave empty to set to 'na')" \
+		0 0 "$old_nickname" 3>&1 1>&2 2>&3)
+
+	# User cancelled.
+	if [ $? -ne 0 ]; then
+		echo "User aborted. No changes made."
+		return 1
+	fi
+
+	# Default nickname if empty.
+	if [ -z "$new_nickname" ]; then
+		new_nickname="na"
+	fi
+
+	# Construct updated line.
+	local new_line="$target_info :: $new_nickname"
+
+	# Apply change using awk and write to temp file.
+	whiptail --title "APPLYING CHANGES" --infobox "Updating target list..." 0 0
+	awk -v line_num="$_CHOSEN_WOL_TARGET_CHANGE_NICKNAME" -v new_content="$new_line" \
+		'NR == line_num { print new_content; next } { print }' "$targets_file" >"$temp_file"
+
+	# If successful, replace original file.
+	if [ $? -eq 0 ]; then
+		sudo mv "$temp_file" "$targets_file"
+		whiptail --title "SUCCESS" --msgbox "Nickname updated successfully for:\n\n$target_info" 0 0
+	else
+		rm -f "$temp_file"
+		whiptail --title "ERROR" --msgbox "Failed to update the target list. Please check permissions and try again." 0 0
+	fi
+}
+
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+########################################################################||||||||||||||||||||||||||||||||||||||||||||||||
+
+FUN_LISTEN_FOR_WOL_PACKETS() {
+	# Superior Pattern: Read network interfaces into an array.
+	local -a interfaces
+	readarray -t interfaces < <(ip -o link show | awk -F': ' '{print $2}')
+
+	# Exit if no interfaces are found.
+	if [ ${#interfaces[@]} -eq 0 ]; then
+		whiptail --title "ERROR" --msgbox "No network interfaces found." 0 0
+		return 1
+	fi
+
+	# Build whiptail menu options and the id_map for interfaces.
+	local -a iface_menu_options=()
+	local -A iface_id_map=()
+	local i=1
+	for iface in "${interfaces[@]}"; do
+		iface_menu_options+=("$i" "$iface")
+		iface_id_map[$i]="$iface"
+		((i++))
+	done
+
+	# Display the menu for selecting an interface.
+	local iface_choice_num
+	iface_choice_num=$(whiptail --title "SELECT NETWORK INTERFACE" \
+		--menu "Select the network interface to listen for WOL packets on:" \
+		0 0 "${#iface_id_map[@]}" "${iface_menu_options[@]}" 3>&1 1>&2 2>&3)
+
+	# Exit if the user cancels the selection dialog.
+	if [ $? -ne 0 ]; then
+		echo "User aborted. Exiting."
+		return 1
+	fi
+
+	# Retrieve the selected interface name from the map.
+	local __SELECTED_NETIFACE_FINAL="${iface_id_map[$iface_choice_num]}"
+
+	# Inform the user what's about to happen.
+	whiptail --title "Starting Listener" --infobox "Preparing to listen on interface: $__SELECTED_NETIFACE_FINAL..." 0 0
+	sleep 2 # Give user time to read the info box
+
+	# Clear the screen before running tcpdump for clean output
+	clear
+
+	# The command to execute
+	local listen_command="sudo tcpdump -i $__SELECTED_NETIFACE_FINAL -vv 'ether proto 0x0842 or (udp and (port 7 or port 9))'"
+
+	echo -e "\e[1;38;5;82m" "======================================================================" "\e[0m"
+	echo -e "Listening for WOL magic packets on interface:" "\e[1;48;5;4m""$__SELECTED_NETIFACE_FINAL""\e[0m"
+	echo -e "Command:" "\e[1;48;5;3m""$listen_command""\e[0m"
+	echo "Will capture packets. Press Ctrl+C to stop."
+	echo -e "\e[1;38;5;82m" "======================================================================" "\e[0m"
+	echo ""
+
+	# Execute the command
+	eval "$listen_command"
+
+	echo ""
+	echo -e "\e[4;38;5;159m" "======================================================================" "\e[0m"
+	echo "Packet capture finished."
+
+	echo -ne "\e[1;48;5;81m" "\e[1;38;5;16m" "Press ANY KEY to return to the main menu... " "\e[0m"
+	read -n 1 -s -r -p ""
+}
+
+########################################################################
+function FUN_SHOW_HELP_ABOUT {
+	local help_text
+	help_text=$(
+		cat <<'EOF'
+Wake-On-LAN (WOL) Management Utility
+Version: 1.1.0
+
+This script provides a user-friendly terminal interface for managing Wake-On-LAN capable devices on your network.
+
+[ FEATURES ]
+- Scan network interfaces to discover potential WOL targets.
+- Manually add, edit, or delete WOL targets.
+- Save targets with nicknames for easy identification.
+- Send WOL "magic packets" to wake up one or more devices.
+- Continuously send packets for diagnostic purposes.
+- Listen for WOL packets on your network.
+
+[ DEPENDENCIES ]
+The script automatically tries to install the following required packages if they are missing:
+- ethtool
+- etherwake
+- netdiscover
+- wakeonlan
+- tcpdump
+- samba-common (for nmblookup)
+
+[ TARGET STORAGE ]
+Saved WOL targets are stored in the following file:
+/bin/CUSTOM-WAKE-ON-LAN-TARGETS/WAKE-ON-LAN-TARGETS.txt
+
+[ USAGE ]
+Use the main menu to navigate through the different functions. The script requires root/sudo privileges to run.
+EOF
+	)
+	whiptail --title "HELP / ABOUT" --msgbox "$help_text" 0 0
+}
+########################################################################
+########################################################################
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################
+########################################################################
+########################################################################
+#  ,,     ,,     ,,
+#   oo    _oo_   ,oo,
+#  /==\   /==\   /==\
+# (/==\) (/==\) (/==\)
+#   \/     \/     \/
+########################################################################
+########################################################################
+########################################################################
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+####\\\\ªªªªªªªªªªººººººººººªªªªªªªªºººººªªªªºººººªªªªªººººªªªªºººººªªªºººººººªªººººººº
+########################################################################
+########################################################################
+########################################################################
+
+# 🐾 nya ~ we encapsulated the menu in a while true statement
+# (to keep coming back to the main menu instead of exiting each time - unless the user chooses to exit explicitly).
+
+while true; do
+	export NEWT_COLORS='
+root=green,green
+border=lightgray,green
+window=magenta,blue
+shadow=blue,brightred
+title=black,yellow
+actbutton=black,brown
+checkbox=white,gray
+actcheckbox=brightred,white
+entry=black,yellow
+label=brightgreen,blue
+listbox=white,black
+actlistbox=black,brightgreen
+textbox=white,gray
+acttextbox=lightgray,brightgreen
+helpline=brightgreen,brightmagenta
+roottext=black,brightred
+emptyscale=lightgray,green
+fullscale=green,black
+disentry=gray,green
+actsellistbox=white,red
+sellistbox=black,brightmagenta
+compactbutton=black,gray
+button=white,yellow'
+
+	__MASTER_ACTION=$(whiptail --backtitle "# ---<< Wake-On-LAN >>---" --title "Select Action :: Wake On LAN" --menu "Select Action :: Wake On LAN" 0 0 11 \
+		1 "SEND WOL Magic Packet (Single)" \
+		2 "SEND WOL CONTINUOUSLY (Diagnostics)" \
+		3 "SCAN/ADD New Target" \
+		4 "ADD New Target Manually" \
+		5 "DELETE Saved Target(s)" \
+		6 "VIEW Saved Targets" \
+		7 "CHANGE Target Nickname" \
+		8 "EDIT Saved Target Info" \
+		9 "LISTEN For WOL Magic Packet(s)" \
+		10 "HELP / ABOUT" \
+		11 "EXIT" \
+		3>&1 1>&2 2>&3)
+
+	case $__MASTER_ACTION in
+	1)
+		FUN_SEND_WOL_MAGIC_PACKET_TO_TARGET
+		;;
+	2)
+		FUN_SEND_WOL_CONTINUOUSLY
+		;;
+	3)
+		FUN_SCAN_NEW_WOL_TARGETS_UNDER_NETIFACE
+		;;
+	4)
+		FUN_ADD_WOL_TARGET_MANUALLY
+		;;
+	5)
+		FUN_DELETE_SAVED_WOL_TARGET_DEVICES
+		;;
+	6)
+		FUN_VIEW_SAVED_TARGETS
+		;;
+	7)
+		FUN_CHANGE_OR_ADD_NICKNAME_OF_WOL_TARGET
+		;;
+	8)
+		FUN_EDIT_SAVED_WOL_TARGET
+		;;
+	9)
+		FUN_LISTEN_FOR_WOL_PACKETS
+		;;
+	10)
+		FUN_SHOW_HELP_ABOUT
+		;;
+	11 | *)
+		# Code to be executed if variable doesn't match any choice
+		echo "USER ABORTED...EXITING"
+		exit
+		;;
+	esac
+done
